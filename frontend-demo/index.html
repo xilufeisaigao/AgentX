@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AgentX Control Console</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="panel sessions-panel">
+    <div class="panel-title-row">
+      <h1>AgentX</h1>
+      <button id="newSessionBtn" class="primary-btn">+ 新会话</button>
+    </div>
+    <div class="session-toolbar">
+      <p class="panel-subtitle">会话历史</p>
+      <button id="toggleSessionBtn" class="ghost-btn small-btn">显示全部</button>
+    </div>
+    <p id="sessionCount" class="session-count muted"></p>
+    <ul id="sessionList" class="session-list"></ul>
+  </aside>
+
+  <main class="panel chat-panel">
+    <div class="chat-topbar">
+      <div>
+        <h2 id="activeSessionTitle">未选择会话</h2>
+        <p id="activeSessionMeta" class="muted">状态: -</p>
+      </div>
+      <div class="chat-actions">
+        <label class="inline-label" for="languageSelect">语言</label>
+        <select id="languageSelect" class="text-input inline-select">
+          <option value="zh-CN">中文（默认）</option>
+          <option value="en-US">English</option>
+          <option value="ja-JP">日本語</option>
+        </select>
+        <button id="refreshBtn" class="ghost-btn">刷新</button>
+        <button id="confirmBtn" class="ghost-btn">确认需求</button>
+        <button id="advanceBtn" class="primary-btn">推进一步</button>
+      </div>
+    </div>
+
+    <div id="chatFeed" class="chat-feed"></div>
+
+    <form id="chatForm" class="composer">
+      <label class="composer-label" for="messageInput">需求与增量开发对话</label>
+      <textarea id="messageInput" rows="4" placeholder="输入需求、变更点或下一步开发指令"></textarea>
+      <div class="composer-actions">
+        <button type="submit" id="sendBtn" class="primary-btn">发送</button>
+      </div>
+    </form>
+  </main>
+
+  <aside class="panel right-panel">
+    <section class="right-card right-collapsible" data-right-panel-id="runtime">
+      <button
+        type="button"
+        class="right-collapse-toggle"
+        data-right-toggle="runtime"
+        aria-expanded="true"
+      >
+        <span class="right-collapse-title">初始化配置</span>
+        <span class="right-collapse-indicator">收起</span>
+      </button>
+      <div class="right-card-title-row">
+        <p class="muted section-inline-label">读取/测试/应用运行时 LLM 配置</p>
+        <button id="runtimeRefreshBtn" class="ghost-btn small-btn">读取</button>
+      </div>
+      <p id="runtimeConfigStatus" class="muted">加载中...</p>
+      <label class="input-label" for="configOutputLanguage">默认输出语言</label>
+      <select id="configOutputLanguage" class="text-input">
+        <option value="zh-CN">中文（zh-CN）</option>
+        <option value="en-US">English（en-US）</option>
+        <option value="ja-JP">日本語（ja-JP）</option>
+      </select>
+
+      <h4>需求 / 架构 LLM</h4>
+      <label class="input-label" for="reqProvider">Provider</label>
+      <select id="reqProvider" class="text-input">
+        <option value="mock">mock（默认）</option>
+        <option value="bailian">bailian</option>
+      </select>
+      <label class="input-label" for="reqBaseUrl">Base URL</label>
+      <input id="reqBaseUrl" class="text-input" type="text" placeholder="https://dashscope.aliyuncs.com/compatible-mode/v1">
+      <label class="input-label" for="reqModel">Model</label>
+      <input id="reqModel" class="text-input" type="text" placeholder="qwen3.5-plus-2026-02-15">
+      <label class="input-label" for="reqApiKey">API Key（仅用于测试/应用）</label>
+      <input id="reqApiKey" class="text-input" type="password" autocomplete="off" placeholder="sk-...">
+
+      <h4>Worker Runtime LLM</h4>
+      <label class="input-label" for="workerProvider">Provider</label>
+      <select id="workerProvider" class="text-input">
+        <option value="mock">mock（默认）</option>
+        <option value="bailian">bailian</option>
+      </select>
+      <label class="input-label" for="workerBaseUrl">Base URL</label>
+      <input id="workerBaseUrl" class="text-input" type="text" placeholder="https://dashscope.aliyuncs.com/compatible-mode/v1">
+      <label class="input-label" for="workerModel">Model</label>
+      <input id="workerModel" class="text-input" type="text" placeholder="qwen3.5-plus-2026-02-15">
+      <label class="input-label" for="workerApiKey">API Key（仅用于测试/应用）</label>
+      <input id="workerApiKey" class="text-input" type="password" autocomplete="off" placeholder="sk-...">
+
+      <div class="chat-actions">
+        <button id="runtimeTestBtn" class="ghost-btn small-btn">连通性测试</button>
+        <button id="runtimeApplyBtn" class="primary-btn small-btn">应用配置</button>
+      </div>
+    </section>
+
+    <section class="right-card right-collapsible" data-right-panel-id="tickets">
+      <button
+        type="button"
+        class="right-collapse-toggle"
+        data-right-toggle="tickets"
+        aria-expanded="true"
+      >
+        <span class="right-collapse-title">架构师提请</span>
+        <span class="right-collapse-indicator">收起</span>
+      </button>
+      <div class="right-card-title-row">
+        <p class="muted section-inline-label">用户待处理提请</p>
+        <button id="refreshTicketBtn" class="ghost-btn small-btn">刷新</button>
+      </div>
+      <div id="ticketList" class="accordion-list"></div>
+    </section>
+
+    <section class="right-card right-collapsible is-collapsed" data-right-panel-id="progress">
+      <button
+        type="button"
+        class="right-collapse-toggle"
+        data-right-toggle="progress"
+        aria-expanded="false"
+      >
+        <span class="right-collapse-title">流程进展</span>
+        <span class="right-collapse-indicator">展开</span>
+      </button>
+      <label class="input-label" for="gitAddressInput">代码克隆地址（自动生成，可手动覆盖）</label>
+      <input id="gitAddressInput" class="text-input" type="text" placeholder="git@github.com:your-org/agentx-backend.git">
+      <ol id="progressList" class="progress-list"></ol>
+
+      <div class="worker-title-row">
+        <h4>Worker 视图</h4>
+        <button id="autoProvisionBtn" class="ghost-btn small-btn">自动分配</button>
+        <button id="autoRunBtn" class="ghost-btn small-btn">执行轮询</button>
+      </div>
+      <div id="workerList" class="accordion-list"></div>
+    </section>
+  </aside>
+</div>
+
+<div id="toast" class="toast hidden"></div>
+
+<div id="gitModal" class="modal hidden">
+  <div class="modal-content">
+    <h3>代码产出完成</h3>
+    <p>请执行以下命令拉取代码:</p>
+    <code id="gitCloneCommand">git clone git@github.com:your-org/agentx-backend.git</code>
+    <p>仓库地址:</p>
+    <code id="gitAddress">git@github.com:your-org/agentx-backend.git</code>
+    <p id="gitCloneMeta" class="muted"></p>
+    <div class="modal-actions">
+      <button id="copyGitBtn" class="ghost-btn">复制地址</button>
+      <button id="closeModalBtn" class="primary-btn">关闭</button>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="./app.js"></script>
+</body>
+</html>

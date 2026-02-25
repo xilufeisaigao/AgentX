@@ -1,0 +1,1620 @@
+openapi: 3.0.3
+info:
+  title: AgentX Control Plane API
+  version: v0
+  description: |
+    Shape-only OpenAPI spec for AgentX Control Plane v0.
+
+    Semantic source of truth (state machines, triggers):
+      - docs/09-control-plane-api-contract.md
+
+servers:
+  - url: http://localhost:8080
+    description: Local dev
+
+tags:
+  - name: sessions
+  - name: requirementDocs
+  - name: tickets
+  - name: modules
+  - name: tasks
+  - name: workers
+  - name: runs
+  - name: context
+
+paths:
+  /api/v0/sessions:
+    get:
+      tags: [sessions]
+      operationId: listSessionsWithCurrentRequirementDoc
+      summary: List sessions with current requirement doc snapshot
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SessionHistory'
+        '500': { $ref: '#/components/responses/InternalError' }
+
+    post:
+      tags: [sessions]
+      operationId: createSession
+      summary: Create a new session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSessionRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v0/sessions/{sessionId}/pause:
+    post:
+      tags: [sessions]
+      operationId: pauseSession
+      summary: Pause a session
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v0/sessions/{sessionId}:
+    get:
+      tags: [sessions]
+      operationId: getSessionWithCurrentRequirementDoc
+      summary: Get a single session with current requirement doc snapshot
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionHistory'
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v0/sessions/{sessionId}/resume:
+    post:
+      tags: [sessions]
+      operationId: resumeSession
+      summary: Resume a session
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v0/sessions/{sessionId}/complete:
+    post:
+      tags: [sessions]
+      operationId: completeSession
+      summary: Complete a session (terminal)
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v0/sessions/{sessionId}/requirement-docs:
+    post:
+      tags: [requirementDocs]
+      operationId: createRequirementDoc
+      summary: Create a requirement doc for a session
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRequirementDocRequest'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequirementDoc'
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v0/sessions/{sessionId}/requirement-agent/drafts:
+    post:
+      tags: [requirementDocs]
+      operationId: generateRequirementAgentDraft
+      summary: Requirement-agent discovery chat and draft generation (mock/bailian)
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GenerateRequirementAgentDraftRequest'
+      responses:
+        '200':
+          description: OK (discovery chat or dry-run draft)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenerateRequirementAgentDraftResponse'
+        '201':
+          description: Created (persisted draft/version)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenerateRequirementAgentDraftResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v0/requirement-docs/{docId}/versions:
+    post:
+      tags: [requirementDocs]
+      operationId: createRequirementDocVersion
+      summary: Create a new requirement doc version (markdown)
+      parameters:
+        - $ref: '#/components/parameters/DocId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRequirementDocVersionRequest'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequirementDocVersion'
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v0/requirement-docs/{docId}/confirm:
+    post:
+      tags: [requirementDocs]
+      operationId: confirmRequirementDoc
+      summary: Confirm the current requirement version (side-effect: create ARCH_REVIEW ticket)
+      parameters:
+        - $ref: '#/components/parameters/DocId'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequirementDoc'
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v0/sessions/{sessionId}/tickets:
+    get:
+      tags: [tickets]
+      operationId: listTicketsBySession
+      summary: List tickets for a session (v0 only requires WAITING_USER)
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            description: v0 client uses WAITING_USER for user inbox.
+            example: WAITING_USER
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Ticket'
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+    post:
+      tags: [tickets]
+      operationId: createTicket
+      summary: Create a ticket (HANDOFF/DECISION/CLARIFICATION/ARCH_REVIEW)
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTicketRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ticket'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v0/requirement-docs/{docId}/content:
+    put:
+      tags: [requirementDocs]
+      operationId: overwriteRequirementDocCurrentContent
+      summary: Overwrite current requirement doc content via a new version (frontend direct-edit shortcut)
+      parameters:
+        - $ref: '#/components/parameters/DocId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OverwriteRequirementDocContentRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequirementDocVersion'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v0/tickets/{ticketId}/claim:
+    post:
+      tags: [tickets]
+      operationId: claimTicket
+      summary: Claim a ticket lease (prevents concurrent handling)
+      parameters:
+        - $ref: '#/components/parameters/TicketId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClaimTicketRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ticket'
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v0/tickets/{ticketId}/events:
+    post:
+      tags: [tickets]
+      operationId: appendTicketEvent
+      summary: Append a ticket event (audit chain)
+      parameters:
+        - $ref: '#/components/parameters/TicketId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AppendTicketEventRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TicketEvent'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v0/sessions/{sessionId}/modules:
+    post:
+      tags: [modules]
+      operationId: createModule
+      summary: Create a module under a session
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateModuleRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkModule'
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v0/modules/{moduleId}/tasks:
+    post:
+      tags: [tasks]
+      operationId: createTask
+      summary: Create a task under a module (foreman dispatch)
+      parameters:
+        - $ref: '#/components/parameters/ModuleId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTaskRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkTask'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v0/tasks/{taskId}/context-status:
+    get:
+      tags: [tasks, context]
+      operationId: getTaskContextStatus
+      summary: Get latest context snapshot status for a task
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContextSnapshotStatus'
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v0/foreman/tasks/{taskId}/merge-gate/start:
+    post:
+      tags: [tasks]
+      operationId: startMergeGate
+      summary: Enter merge gate and create a VERIFY run
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MergeGateStartResponse'
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v0/workforce/auto-provision:
+    post:
+      tags: [workers]
+      operationId: workforceAutoProvision
+      summary: Trigger auto-provisioner once for WAITING_WORKER tasks
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AutoProvisionRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutoProvisionResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v0/execution/lease-recovery:
+    post:
+      tags: [runs]
+      operationId: executionLeaseRecovery
+      summary: Recover expired run leases once
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LeaseRecoveryRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LeaseRecoveryResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v0/workers/{workerId}/claim:
+    post:
+      tags: [workers]
+      operationId: workerClaimTask
+      summary: Worker pulls a task (requires latest READY context snapshot; may return 204 when no eligible task)
+      parameters:
+        - $ref: '#/components/parameters/WorkerId'
+      responses:
+        '200':
+          description: A task package was allocated for the worker.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskPackage'
+        '204':
+          description: No task available.
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v0/workforce/runtime/auto-run:
+    post:
+      tags: [workers]
+      operationId: workforceRuntimeAutoRun
+      summary: Trigger worker runtime to claim and execute tasks once
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorkerRuntimeAutoRunRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkerRuntimeAutoRunResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v0/workforce/cleanup:
+    post:
+      tags: [workers]
+      operationId: workforceCleanup
+      summary: Trigger worker pool cleanup once (disable idle READY workers only)
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorkerPoolCleanupRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkerPoolCleanupResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v0/runs/{runId}/heartbeat:
+    post:
+      tags: [runs]
+      operationId: heartbeat
+      summary: Extend lease and update last heartbeat timestamp
+      parameters:
+        - $ref: '#/components/parameters/RunId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HeartbeatRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskRun'
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v0/runs/{runId}/events:
+    post:
+      tags: [runs]
+      operationId: appendRunEvent
+      summary: Append a task run event (progress / NEED_* / artifact)
+      parameters:
+        - $ref: '#/components/parameters/RunId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AppendTaskRunEventRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskRunEvent'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v0/runs/{runId}/finish:
+    post:
+      tags: [runs]
+      operationId: finishRun
+      summary: Finish a run with a work report (SUCCEEDED / FAILED / CANCELLED)
+      parameters:
+        - $ref: '#/components/parameters/RunId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FinishRunRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskRun'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v0/context/role-pack:compile:
+    post:
+      tags: [context]
+      operationId: compileRolePack
+      summary: Compile a role context pack (context processor)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CompileRolePackRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoleContextPack'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v0/context/task-context-pack:compile:
+    post:
+      tags: [context]
+      operationId: compileTaskContextPack
+      summary: Compile a task context pack (task_context)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CompileTaskContextPackRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskContextPack'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v0/context/task-skill:compile:
+    post:
+      tags: [context]
+      operationId: compileTaskSkill
+      summary: Compile a task_skill artifact for a task
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CompileTaskSkillRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskSkill'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+components:
+  parameters:
+    SessionId:
+      name: sessionId
+      in: path
+      required: true
+      schema: { type: string }
+    DocId:
+      name: docId
+      in: path
+      required: true
+      schema: { type: string }
+    TicketId:
+      name: ticketId
+      in: path
+      required: true
+      schema: { type: string }
+    ModuleId:
+      name: moduleId
+      in: path
+      required: true
+      schema: { type: string }
+    TaskId:
+      name: taskId
+      in: path
+      required: true
+      schema: { type: string }
+    WorkerId:
+      name: workerId
+      in: path
+      required: true
+      schema: { type: string }
+    RunId:
+      name: runId
+      in: path
+      required: true
+      schema: { type: string }
+
+  responses:
+    BadRequest:
+      description: Bad Request
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+    NotFound:
+      description: Not Found
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+    Conflict:
+      description: Conflict
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+    PreconditionFailed:
+      description: Precondition Failed
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+    InternalError:
+      description: Internal Error
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  schemas:
+    Timestamp:
+      type: string
+      format: date-time
+
+    JsonText:
+      type: string
+      description: Must be a valid JSON text (string) if present.
+      example: "{}"
+
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              enum: [CONFLICT, NOT_FOUND, VALIDATION, PRECONDITION_FAILED, INTERNAL]
+            message:
+              type: string
+            details:
+              type: object
+              additionalProperties: true
+
+    SessionStatus:
+      type: string
+      enum: [ACTIVE, PAUSED, COMPLETED]
+
+    Session:
+      type: object
+      required: [session_id, title, status, created_at, updated_at]
+      properties:
+        session_id: { type: string }
+        title: { type: string }
+        status: { $ref: '#/components/schemas/SessionStatus' }
+        created_at: { $ref: '#/components/schemas/Timestamp' }
+        updated_at: { $ref: '#/components/schemas/Timestamp' }
+
+    CurrentRequirementDocSnapshot:
+      type: object
+      required: [doc_id, current_version, status, title, updated_at]
+      properties:
+        doc_id: { type: string }
+        current_version: { type: integer, minimum: 0 }
+        confirmed_version:
+          type: integer
+          nullable: true
+          minimum: 1
+        status: { $ref: '#/components/schemas/RequirementDocStatus' }
+        title: { type: string }
+        content:
+          type: string
+          nullable: true
+          description: Current markdown content; null when current_version=0.
+        updated_at: { $ref: '#/components/schemas/Timestamp' }
+
+    SessionHistory:
+      type: object
+      required: [session_id, title, status, created_at, updated_at]
+      properties:
+        session_id: { type: string }
+        title: { type: string }
+        status: { $ref: '#/components/schemas/SessionStatus' }
+        created_at: { $ref: '#/components/schemas/Timestamp' }
+        updated_at: { $ref: '#/components/schemas/Timestamp' }
+        current_requirement_doc:
+          allOf:
+            - $ref: '#/components/schemas/CurrentRequirementDocSnapshot'
+          nullable: true
+
+    CreateSessionRequest:
+      type: object
+      required: [title]
+      properties:
+        title:
+          type: string
+          maxLength: 256
+
+    RequirementDocStatus:
+      type: string
+      enum: [DRAFT, IN_REVIEW, CONFIRMED]
+
+    RequirementDoc:
+      type: object
+      required: [doc_id, session_id, current_version, status, title, created_at, updated_at]
+      properties:
+        doc_id: { type: string }
+        session_id: { type: string }
+        current_version: { type: integer, minimum: 0 }
+        confirmed_version:
+          type: integer
+          nullable: true
+          minimum: 1
+        status: { $ref: '#/components/schemas/RequirementDocStatus' }
+        title: { type: string }
+        created_at: { $ref: '#/components/schemas/Timestamp' }
+        updated_at: { $ref: '#/components/schemas/Timestamp' }
+
+    RequirementDocCreatedByRole:
+      type: string
+      enum: [user, requirement_agent]
+
+    RequirementDocVersion:
+      type: object
+      required: [doc_id, version, content, created_by_role, created_at]
+      properties:
+        doc_id: { type: string }
+        version: { type: integer, minimum: 1 }
+        content:
+          type: string
+          description: Markdown following REQ-DOC-v1 or REQ-DOC-v1-zh (`schema_version: req_doc_v1|req_doc_v1_zh`).
+        created_by_role: { $ref: '#/components/schemas/RequirementDocCreatedByRole' }
+        created_at: { $ref: '#/components/schemas/Timestamp' }
+
+    CreateRequirementDocRequest:
+      type: object
+      required: [title]
+      properties:
+        title:
+          type: string
+          maxLength: 256
+
+    CreateRequirementDocVersionRequest:
+      type: object
+      required: [content, created_by_role]
+      properties:
+        content:
+          type: string
+          description: Markdown text following REQ-DOC-v1 or REQ-DOC-v1-zh.
+        created_by_role:
+          $ref: '#/components/schemas/RequirementDocCreatedByRole'
+
+    OverwriteRequirementDocContentRequest:
+      type: object
+      required: [content]
+      properties:
+        content:
+          type: string
+          description: Full markdown text following REQ-DOC-v1 or REQ-DOC-v1-zh.
+
+    GenerateRequirementAgentDraftRequest:
+      type: object
+      required: [user_input]
+      properties:
+        title:
+          type: string
+          description: Required before the first draft is created for this session.
+          maxLength: 256
+        user_input:
+          type: string
+          description: User message. Backend decides whether to stay in discovery chat or generate/revise draft.
+        doc_id:
+          type: string
+          nullable: true
+          description: Existing requirement doc id. If present, backend revises latest version directly.
+        persist:
+          type: boolean
+          default: true
+          description: If false, backend may return draft content without DB writes.
+
+    GenerateRequirementAgentDraftResponse:
+      type: object
+      required: [persisted, provider, model, phase, ready_to_draft, missing_information]
+      properties:
+        doc_id:
+          type: string
+          nullable: true
+        version:
+          type: integer
+          nullable: true
+          minimum: 1
+        status:
+          allOf:
+            - $ref: '#/components/schemas/RequirementDocStatus'
+          nullable: true
+        content:
+          type: string
+          nullable: true
+          description: Markdown following REQ-DOC-v1 or REQ-DOC-v1-zh when phase is DRAFT_CREATED/DRAFT_REVISED.
+        persisted:
+          type: boolean
+        provider:
+          type: string
+          enum: [mock, bailian]
+        model:
+          type: string
+        phase:
+          type: string
+          enum: [DISCOVERY_CHAT, READY_TO_DRAFT, NEED_MORE_INFO, HANDOFF_CREATED, DRAFT_CREATED, DRAFT_REVISED]
+        assistant_message:
+          type: string
+          nullable: true
+          description: Backend-generated conversational guidance shown to user.
+        ready_to_draft:
+          type: boolean
+          description: Whether backend judged requirement facts sufficient for first draft.
+        missing_information:
+          type: array
+          description: Missing value-layer facts when backend cannot start drafting yet.
+          items:
+            type: string
+
+    TicketType:
+      type: string
+      enum: [HANDOFF, ARCH_REVIEW, DECISION, CLARIFICATION]
+
+    TicketStatus:
+      type: string
+      enum: [OPEN, IN_PROGRESS, WAITING_USER, DONE, BLOCKED]
+
+    TicketRole:
+      type: string
+      enum: [user, requirement_agent, architect_agent]
+
+    TicketAssigneeRole:
+      type: string
+      enum: [requirement_agent, architect_agent]
+
+    Ticket:
+      type: object
+      required: [ticket_id, session_id, type, status, title, created_by_role, assignee_role, payload_json, created_at, updated_at]
+      properties:
+        ticket_id: { type: string }
+        session_id: { type: string }
+        type: { $ref: '#/components/schemas/TicketType' }
+        status: { $ref: '#/components/schemas/TicketStatus' }
+        title: { type: string }
+        created_by_role: { $ref: '#/components/schemas/TicketRole' }
+        assignee_role: { $ref: '#/components/schemas/TicketAssigneeRole' }
+        requirement_doc_id:
+          type: string
+          nullable: true
+        requirement_doc_ver:
+          type: integer
+          nullable: true
+          minimum: 1
+        payload_json: { $ref: '#/components/schemas/JsonText' }
+        claimed_by:
+          type: string
+          nullable: true
+        lease_until:
+          allOf:
+            - $ref: '#/components/schemas/Timestamp'
+          nullable: true
+        created_at: { $ref: '#/components/schemas/Timestamp' }
+        updated_at: { $ref: '#/components/schemas/Timestamp' }
+
+    TicketEventType:
+      type: string
+      enum: [STATUS_CHANGED, COMMENT, DECISION_REQUESTED, USER_RESPONDED, ARTIFACT_LINKED]
+
+    TicketEvent:
+      type: object
+      required: [event_id, ticket_id, event_type, actor_role, body, created_at]
+      properties:
+        event_id: { type: string }
+        ticket_id: { type: string }
+        event_type: { $ref: '#/components/schemas/TicketEventType' }
+        actor_role: { $ref: '#/components/schemas/TicketRole' }
+        body:
+          type: string
+          description: Human-readable summary.
+        data_json:
+          allOf:
+            - $ref: '#/components/schemas/JsonText'
+          nullable: true
+        created_at: { $ref: '#/components/schemas/Timestamp' }
+
+    CreateTicketRequest:
+      type: object
+      required: [type, title, created_by_role, assignee_role, payload_json]
+      properties:
+        type: { $ref: '#/components/schemas/TicketType' }
+        title: { type: string }
+        created_by_role: { $ref: '#/components/schemas/TicketRole' }
+        assignee_role: { $ref: '#/components/schemas/TicketAssigneeRole' }
+        requirement_doc_id:
+          type: string
+          nullable: true
+        requirement_doc_ver:
+          type: integer
+          nullable: true
+          minimum: 1
+        payload_json: { $ref: '#/components/schemas/JsonText' }
+
+    ClaimTicketRequest:
+      type: object
+      required: [claimed_by]
+      properties:
+        claimed_by:
+          type: string
+          description: Agent instance id.
+        lease_seconds:
+          type: integer
+          description: Requested lease duration in seconds.
+          minimum: 5
+          maximum: 3600
+
+    AppendTicketEventRequest:
+      type: object
+      required: [event_type, actor_role, body]
+      properties:
+        event_type: { $ref: '#/components/schemas/TicketEventType' }
+        actor_role: { $ref: '#/components/schemas/TicketRole' }
+        body: { type: string }
+        data_json:
+          allOf:
+            - $ref: '#/components/schemas/JsonText'
+          nullable: true
+
+    WorkModule:
+      type: object
+      required: [module_id, session_id, name, created_at, updated_at]
+      properties:
+        module_id: { type: string }
+        session_id: { type: string }
+        name: { type: string }
+        description:
+          type: string
+          nullable: true
+        created_at: { $ref: '#/components/schemas/Timestamp' }
+        updated_at: { $ref: '#/components/schemas/Timestamp' }
+
+    CreateModuleRequest:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+        description:
+          type: string
+          nullable: true
+
+    TaskTemplateId:
+      type: string
+      enum: [tmpl.init.v0, tmpl.impl.v0, tmpl.verify.v0, tmpl.bugfix.v0, tmpl.refactor.v0, tmpl.test.v0]
+
+    TaskStatus:
+      type: string
+      enum: [PLANNED, WAITING_WORKER, READY_FOR_ASSIGN, ASSIGNED, DELIVERED, DONE]
+
+    WorkTask:
+      type: object
+      required: [task_id, module_id, title, task_template_id, status, required_toolpacks_json, created_by_role, created_at, updated_at]
+      properties:
+        task_id: { type: string }
+        module_id: { type: string }
+        title: { type: string }
+        task_template_id: { $ref: '#/components/schemas/TaskTemplateId' }
+        status: { $ref: '#/components/schemas/TaskStatus' }
+        required_toolpacks_json:
+          type: string
+          description: JSON array text of toolpack ids.
+          example: '["TP-java@21", "TP-maven@3"]'
+        active_run_id:
+          type: string
+          nullable: true
+        created_by_role:
+          type: string
+          enum: [architect_agent]
+        created_at: { $ref: '#/components/schemas/Timestamp' }
+        updated_at: { $ref: '#/components/schemas/Timestamp' }
+
+    CreateTaskRequest:
+      type: object
+      required: [title, task_template_id, required_toolpacks_json]
+      properties:
+        title: { type: string }
+        task_template_id: { $ref: '#/components/schemas/TaskTemplateId' }
+        required_toolpacks_json:
+          type: string
+          description: JSON array text of toolpack ids.
+          example: '["TP-java@21", "TP-maven@3"]'
+
+    ContextSnapshotState:
+      type: string
+      enum: [PENDING, COMPILING, READY, FAILED, STALE]
+
+    TaskContextSnapshot:
+      type: object
+      required:
+        - snapshot_id
+        - task_id
+        - run_kind
+        - status
+        - trigger_type
+        - source_fingerprint
+        - retained_until
+        - created_at
+        - updated_at
+      properties:
+        snapshot_id: { type: string }
+        task_id: { type: string }
+        run_kind: { $ref: '#/components/schemas/RunKind' }
+        status: { $ref: '#/components/schemas/ContextSnapshotState' }
+        trigger_type: { type: string }
+        source_fingerprint: { type: string }
+        task_context_ref:
+          type: string
+          nullable: true
+        task_skill_ref:
+          type: string
+          nullable: true
+        error_code:
+          type: string
+          nullable: true
+        error_message:
+          type: string
+          nullable: true
+        compiled_at:
+          allOf:
+            - $ref: '#/components/schemas/Timestamp'
+          nullable: true
+        retained_until: { $ref: '#/components/schemas/Timestamp' }
+        created_at: { $ref: '#/components/schemas/Timestamp' }
+        updated_at: { $ref: '#/components/schemas/Timestamp' }
+
+    ContextSnapshotStatus:
+      type: object
+      required: [task_id]
+      properties:
+        task_id: { type: string }
+        latest:
+          allOf:
+            - $ref: '#/components/schemas/TaskContextSnapshot'
+          nullable: true
+        snapshots:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskContextSnapshot'
+
+    RunKind:
+      type: string
+      enum: [IMPL, VERIFY]
+
+    RunStatus:
+      type: string
+      enum: [RUNNING, WAITING_FOREMAN, SUCCEEDED, FAILED, CANCELLED]
+
+    TaskRun:
+      type: object
+      required:
+        - run_id
+        - task_id
+        - worker_id
+        - status
+        - run_kind
+        - context_snapshot_id
+        - lease_until
+        - last_heartbeat_at
+        - started_at
+        - toolpacks_snapshot_json
+        - base_commit
+        - branch_name
+        - worktree_path
+        - created_at
+        - updated_at
+      properties:
+        run_id: { type: string }
+        task_id: { type: string }
+        worker_id: { type: string }
+        status: { $ref: '#/components/schemas/RunStatus' }
+        run_kind: { $ref: '#/components/schemas/RunKind' }
+        context_snapshot_id: { type: string }
+        lease_until: { $ref: '#/components/schemas/Timestamp' }
+        last_heartbeat_at: { $ref: '#/components/schemas/Timestamp' }
+        started_at: { $ref: '#/components/schemas/Timestamp' }
+        finished_at:
+          allOf:
+            - $ref: '#/components/schemas/Timestamp'
+          nullable: true
+        task_skill_ref:
+          type: string
+          nullable: true
+        toolpacks_snapshot_json: { $ref: '#/components/schemas/JsonText' }
+        base_commit: { type: string }
+        branch_name: { type: string }
+        worktree_path: { type: string }
+        created_at: { $ref: '#/components/schemas/Timestamp' }
+        updated_at: { $ref: '#/components/schemas/Timestamp' }
+
+    MergeGateStartResponse:
+      type: object
+      required: [task_id, accepted, message]
+      properties:
+        task_id: { type: string }
+        verify_run_id:
+          type: string
+          nullable: true
+        accepted: { type: boolean }
+        message: { type: string }
+
+    TaskRunEventType:
+      type: string
+      enum:
+        - RUN_STARTED
+        - HEARTBEAT
+        - PROGRESS
+        - NEED_CLARIFICATION
+        - NEED_DECISION
+        - ARTIFACT_LINKED
+        - RUN_FINISHED
+
+    TaskRunEvent:
+      type: object
+      required: [event_id, run_id, event_type, body, created_at]
+      properties:
+        event_id: { type: string }
+        run_id: { type: string }
+        event_type: { $ref: '#/components/schemas/TaskRunEventType' }
+        body: { type: string }
+        data_json:
+          allOf:
+            - $ref: '#/components/schemas/JsonText'
+          nullable: true
+        created_at: { $ref: '#/components/schemas/Timestamp' }
+
+    HeartbeatRequest:
+      type: object
+      additionalProperties: false
+      properties: {}
+
+    AppendTaskRunEventRequest:
+      type: object
+      required: [event_type, body]
+      properties:
+        event_type: { $ref: '#/components/schemas/TaskRunEventType' }
+        body: { type: string }
+        data_json:
+          allOf:
+            - $ref: '#/components/schemas/JsonText'
+          nullable: true
+
+    FinishRunRequest:
+      type: object
+      required: [result_status, work_report]
+      properties:
+        result_status:
+          type: string
+          enum: [SUCCEEDED, FAILED, CANCELLED]
+        work_report:
+          type: string
+          description: Human-readable work report (markdown is allowed).
+        delivery_commit:
+          type: string
+          nullable: true
+          description: Required for IMPL templates that deliver via git.
+        artifact_refs_json:
+          type: string
+          nullable: true
+          description: Optional JSON array text for produced artifacts.
+          example: '["file:.agentx/reports/RUN-xxx.md"]'
+
+    TaskContext:
+      type: object
+      required: [requirement_ref, repo_baseline_ref]
+      properties:
+        requirement_ref: { type: string }
+        architecture_refs:
+          type: array
+          items: { type: string }
+        prior_run_refs:
+          type: array
+          items: { type: string }
+        repo_baseline_ref: { type: string }
+
+    GitAlloc:
+      type: object
+      required: [base_commit, branch_name, worktree_path]
+      properties:
+        base_commit: { type: string }
+        branch_name: { type: string }
+        worktree_path: { type: string }
+
+    TaskPackage:
+      type: object
+      required:
+        - run_id
+        - task_id
+        - module_id
+        - context_snapshot_id
+        - run_kind
+        - task_template_id
+        - required_toolpacks
+        - task_context
+        - read_scope
+        - write_scope
+        - stop_rules
+        - expected_outputs
+        - git
+      properties:
+        run_id: { type: string }
+        task_id: { type: string }
+        module_id: { type: string }
+        context_snapshot_id: { type: string }
+        run_kind: { $ref: '#/components/schemas/RunKind' }
+        task_template_id: { $ref: '#/components/schemas/TaskTemplateId' }
+        required_toolpacks:
+          type: array
+          items: { type: string }
+        task_skill_ref:
+          type: string
+          nullable: true
+        task_context: { $ref: '#/components/schemas/TaskContext' }
+        read_scope:
+          type: array
+          items: { type: string }
+        write_scope:
+          type: array
+          items: { type: string }
+        verify_commands:
+          type: array
+          items: { type: string }
+        stop_rules:
+          type: array
+          items: { type: string }
+        expected_outputs:
+          type: array
+          items: { type: string }
+        git: { $ref: '#/components/schemas/GitAlloc' }
+
+    WorkerRuntimeAutoRunRequest:
+      type: object
+      properties:
+        max_workers:
+          type: integer
+          minimum: 1
+          maximum: 256
+
+    WorkerRuntimeAutoRunResponse:
+      type: object
+      required: [scanned_ready_workers, claimed_runs, succeeded_runs, need_input_runs, failed_runs]
+      properties:
+        scanned_ready_workers:
+          type: integer
+          minimum: 0
+        claimed_runs:
+          type: integer
+          minimum: 0
+        succeeded_runs:
+          type: integer
+          minimum: 0
+        need_input_runs:
+          type: integer
+          minimum: 0
+        failed_runs:
+          type: integer
+          minimum: 0
+
+    WorkerPoolCleanupRequest:
+      type: object
+      properties:
+        max_disable:
+          type: integer
+          minimum: 1
+          maximum: 256
+
+    WorkerPoolCleanupResponse:
+      type: object
+      required:
+        - total_workers
+        - scanned_ready_workers
+        - over_capacity_workers
+        - skipped_active_workers
+        - skipped_too_fresh_workers
+        - disabled_workers
+        - disabled_worker_ids
+      properties:
+        total_workers:
+          type: integer
+          minimum: 0
+        scanned_ready_workers:
+          type: integer
+          minimum: 0
+        over_capacity_workers:
+          type: integer
+          minimum: 0
+        skipped_active_workers:
+          type: integer
+          minimum: 0
+        skipped_too_fresh_workers:
+          type: integer
+          minimum: 0
+        disabled_workers:
+          type: integer
+          minimum: 0
+        disabled_worker_ids:
+          type: array
+          items: { type: string }
+
+    AutoProvisionRequest:
+      type: object
+      properties:
+        max_tasks:
+          type: integer
+          minimum: 1
+          maximum: 500
+
+    AutoProvisionResponse:
+      type: object
+      required:
+        - scanned_waiting_tasks
+        - created_workers
+        - skipped_too_fresh
+        - skipped_missing_toolpacks
+        - skipped_by_capacity
+        - created_clarification_tickets
+        - created_worker_ids
+        - created_clarification_ticket_ids
+      properties:
+        scanned_waiting_tasks:
+          type: integer
+          minimum: 0
+        created_workers:
+          type: integer
+          minimum: 0
+        skipped_too_fresh:
+          type: integer
+          minimum: 0
+        skipped_missing_toolpacks:
+          type: integer
+          minimum: 0
+        skipped_by_capacity:
+          type: integer
+          minimum: 0
+        created_clarification_tickets:
+          type: integer
+          minimum: 0
+        created_worker_ids:
+          type: array
+          items: { type: string }
+        created_clarification_ticket_ids:
+          type: array
+          items: { type: string }
+
+    LeaseRecoveryRequest:
+      type: object
+      properties:
+        max_runs:
+          type: integer
+          minimum: 1
+          maximum: 500
+
+    LeaseRecoveryResponse:
+      type: object
+      required: [recovered_runs]
+      properties:
+        recovered_runs:
+          type: integer
+          minimum: 0
+
+    RoleName:
+      type: string
+      enum: [requirement_agent, architect_agent, foreman, worker, context_processor]
+
+    CompileRolePackRequest:
+      type: object
+      required: [session_id, role]
+      properties:
+        session_id: { type: string }
+        role: { $ref: '#/components/schemas/RoleName' }
+
+    RoleContextPack:
+      type: object
+      required: [pack_id, session_id, role, generated_at, source_refs, summary, next_actions]
+      properties:
+        pack_id: { type: string }
+        session_id: { type: string }
+        role: { $ref: '#/components/schemas/RoleName' }
+        generated_at: { $ref: '#/components/schemas/Timestamp' }
+        source_refs:
+          type: array
+          items: { type: string }
+        summary:
+          type: object
+          required: [goal, hard_constraints, current_state, open_questions]
+          properties:
+            goal: { type: string }
+            hard_constraints:
+              type: array
+              items: { type: string }
+            current_state:
+              type: array
+              items: { type: string }
+            open_questions:
+              type: array
+              items: { type: string }
+        next_actions:
+          type: array
+          items: { type: string }
+
+    CompileTaskContextPackRequest:
+      type: object
+      required: [task_id, run_kind]
+      properties:
+        task_id: { type: string }
+        run_kind: { $ref: '#/components/schemas/RunKind' }
+
+    TaskContextPack:
+      type: object
+      required: [task_id, run_kind, requirement_ref, architecture_refs, module_ref, repo_baseline_ref]
+      properties:
+        snapshot_id:
+          type: string
+          description: Optional snapshot id linked when persisted into task_context_snapshots.
+        task_id: { type: string }
+        run_kind: { $ref: '#/components/schemas/RunKind' }
+        requirement_ref: { type: string }
+        architecture_refs:
+          type: array
+          items: { type: string }
+        module_ref: { type: string }
+        prior_run_refs:
+          type: array
+          items: { type: string }
+        repo_baseline_ref: { type: string }
+        decision_refs:
+          type: array
+          items: { type: string }
+
+    CompileTaskSkillRequest:
+      type: object
+      required: [task_id]
+      properties:
+        task_id: { type: string }
+
+    TaskSkill:
+      type: object
+      required:
+        - skill_id
+        - task_id
+        - generated_at
+        - source_fragments
+        - toolpack_assumptions
+        - conventions
+        - recommended_commands
+        - pitfalls
+        - stop_rules
+        - expected_outputs
+      properties:
+        snapshot_id:
+          type: string
+          description: Optional snapshot id linked when persisted into task_context_snapshots.
+        skill_id: { type: string }
+        task_id: { type: string }
+        generated_at: { $ref: '#/components/schemas/Timestamp' }
+        source_fragments:
+          type: array
+          items: { type: string }
+        toolpack_assumptions:
+          type: array
+          items: { type: string }
+        conventions:
+          type: array
+          items: { type: string }
+        recommended_commands:
+          type: array
+          items: { type: string }
+        pitfalls:
+          type: array
+          items: { type: string }
+        stop_rules:
+          type: array
+          items: { type: string }
+        expected_outputs:
+          type: array
+          items: { type: string }

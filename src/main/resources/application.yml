@@ -1,0 +1,232 @@
+spring:
+  application:
+    name: agentx-backend
+  datasource:
+    url: ${AGENTX_DB_URL:jdbc:mysql://${AGENTX_DB_HOST:127.0.0.1}:${AGENTX_DB_PORT:3306}/${AGENTX_DB_NAME:agentx_backend}?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=${AGENTX_DB_TIMEZONE:Asia/Shanghai}}
+    username: ${AGENTX_DB_USERNAME:root}
+    password: ${AGENTX_DB_PASSWORD:}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      maximum-pool-size: ${AGENTX_DB_POOL_SIZE:10}
+      minimum-idle: ${AGENTX_DB_POOL_MIN_IDLE:2}
+      connection-timeout: 30000
+      validation-timeout: 5000
+  data:
+    redis:
+      host: ${AGENTX_REDIS_HOST:127.0.0.1}
+      port: ${AGENTX_REDIS_PORT:6379}
+      password: ${AGENTX_REDIS_PASSWORD:}
+      timeout: 3000ms
+
+mybatis:
+  configuration:
+    map-underscore-to-camel-case: true
+    default-fetch-size: 100
+    default-statement-timeout: 30
+
+logging:
+  level:
+    com.agentx.agentxbackend.requirement.infrastructure.persistence: debug
+    com.agentx.agentxbackend.requirement.infrastructure.external: info
+    org.mybatis: info
+
+agentx:
+  llm:
+    output-language: ${AGENTX_LLM_OUTPUT_LANGUAGE:zh-CN}
+    runtime-config:
+      file-path: ${AGENTX_RUNTIME_LLM_CONFIG_FILE_PATH:.agentx/runtime/runtime-llm-config.json}
+  session:
+    bootstrap:
+      init:
+        module-name: ${AGENTX_SESSION_BOOTSTRAP_INIT_MODULE_NAME:bootstrap}
+        module-description: ${AGENTX_SESSION_BOOTSTRAP_INIT_MODULE_DESCRIPTION:Session bootstrap module for initialization gate task.}
+        task-title: ${AGENTX_SESSION_BOOTSTRAP_INIT_TASK_TITLE:Initialize project baseline and runtime workspace}
+        task-template-id: ${AGENTX_SESSION_BOOTSTRAP_INIT_TASK_TEMPLATE_ID:tmpl.init.v0}
+        required-toolpacks-json: ${AGENTX_SESSION_BOOTSTRAP_INIT_REQUIRED_TOOLPACKS_JSON:["TP-GIT-2","TP-JAVA-21","TP-MAVEN-3"]}
+        context-trigger-type: ${AGENTX_SESSION_BOOTSTRAP_INIT_CONTEXT_TRIGGER_TYPE:MANUAL_REFRESH}
+        compile-verify-context: ${AGENTX_SESSION_BOOTSTRAP_INIT_COMPILE_VERIFY_CONTEXT:true}
+  workforce:
+    bootstrap-default-toolpacks: ${AGENTX_WORKFORCE_BOOTSTRAP_DEFAULT_TOOLPACKS:true}
+    bootstrap-default-workers: ${AGENTX_WORKFORCE_BOOTSTRAP_DEFAULT_WORKERS:false}
+    runtime-environment:
+      enabled: ${AGENTX_WORKFORCE_RUNTIME_ENVIRONMENT_ENABLED:true}
+      mode: ${AGENTX_WORKFORCE_RUNTIME_ENVIRONMENT_MODE:docker}
+      root: ${AGENTX_WORKFORCE_RUNTIME_ENVIRONMENT_ROOT:.agentx/runtime-env}
+      python-executable: ${AGENTX_WORKFORCE_RUNTIME_ENVIRONMENT_PYTHON_EXECUTABLE:python}
+      command-timeout-ms: ${AGENTX_WORKFORCE_RUNTIME_ENVIRONMENT_COMMAND_TIMEOUT_MS:120000}
+      docker:
+        executable: ${AGENTX_WORKFORCE_RUNTIME_ENVIRONMENT_DOCKER_EXECUTABLE:docker}
+        pull-policy: ${AGENTX_WORKFORCE_RUNTIME_ENVIRONMENT_DOCKER_PULL_POLICY:if-not-present}
+        default-image: ${AGENTX_WORKFORCE_RUNTIME_ENVIRONMENT_DOCKER_DEFAULT_IMAGE:alpine:3.20}
+        image:
+          java21: ${AGENTX_WORKFORCE_RUNTIME_ENVIRONMENT_DOCKER_IMAGE_JAVA21:eclipse-temurin:21-jdk}
+          maven3: ${AGENTX_WORKFORCE_RUNTIME_ENVIRONMENT_DOCKER_IMAGE_MAVEN3:maven:3.9.11-eclipse-temurin-21}
+          git2: ${AGENTX_WORKFORCE_RUNTIME_ENVIRONMENT_DOCKER_IMAGE_GIT2:alpine/git:2.47.2}
+          python311: ${AGENTX_WORKFORCE_RUNTIME_ENVIRONMENT_DOCKER_IMAGE_PYTHON311:python:3.11-slim}
+      db-account:
+        enabled: ${AGENTX_WORKFORCE_RUNTIME_ENVIRONMENT_DB_ACCOUNT_ENABLED:true}
+        username-prefix: ${AGENTX_WORKFORCE_RUNTIME_ENVIRONMENT_DB_ACCOUNT_USERNAME_PREFIX:ax}
+        password-length: ${AGENTX_WORKFORCE_RUNTIME_ENVIRONMENT_DB_ACCOUNT_PASSWORD_LENGTH:20}
+        providers: ${AGENTX_WORKFORCE_RUNTIME_ENVIRONMENT_DB_ACCOUNT_PROVIDERS:mysql,postgresql,redis,mongodb,sqlserver,oracle}
+        command-templates-json: ${AGENTX_WORKFORCE_RUNTIME_ENVIRONMENT_DB_ACCOUNT_COMMAND_TEMPLATES_JSON:{}}
+        mysql:
+          host: ${AGENTX_WORKFORCE_RUNTIME_ENVIRONMENT_DB_ACCOUNT_MYSQL_HOST:${AGENTX_DB_HOST:127.0.0.1}}
+          port: ${AGENTX_WORKFORCE_RUNTIME_ENVIRONMENT_DB_ACCOUNT_MYSQL_PORT:${AGENTX_DB_PORT:3306}}
+          database: ${AGENTX_WORKFORCE_RUNTIME_ENVIRONMENT_DB_ACCOUNT_MYSQL_DATABASE:${AGENTX_DB_NAME:agentx_backend}}
+          admin-username: ${AGENTX_WORKFORCE_RUNTIME_ENVIRONMENT_DB_ACCOUNT_MYSQL_ADMIN_USERNAME:${AGENTX_DB_USERNAME:root}}
+          admin-password: ${AGENTX_WORKFORCE_RUNTIME_ENVIRONMENT_DB_ACCOUNT_MYSQL_ADMIN_PASSWORD:${AGENTX_DB_PASSWORD:}}
+        postgresql:
+          host: ${AGENTX_WORKFORCE_RUNTIME_ENVIRONMENT_DB_ACCOUNT_POSTGRESQL_HOST:127.0.0.1}
+          port: ${AGENTX_WORKFORCE_RUNTIME_ENVIRONMENT_DB_ACCOUNT_POSTGRESQL_PORT:5432}
+          database: ${AGENTX_WORKFORCE_RUNTIME_ENVIRONMENT_DB_ACCOUNT_POSTGRESQL_DATABASE:agentx_backend}
+          admin-database: ${AGENTX_WORKFORCE_RUNTIME_ENVIRONMENT_DB_ACCOUNT_POSTGRESQL_ADMIN_DATABASE:postgres}
+          admin-username: ${AGENTX_WORKFORCE_RUNTIME_ENVIRONMENT_DB_ACCOUNT_POSTGRESQL_ADMIN_USERNAME:postgres}
+          admin-password: ${AGENTX_WORKFORCE_RUNTIME_ENVIRONMENT_DB_ACCOUNT_POSTGRESQL_ADMIN_PASSWORD:}
+        redis:
+          host: ${AGENTX_WORKFORCE_RUNTIME_ENVIRONMENT_DB_ACCOUNT_REDIS_HOST:${AGENTX_REDIS_HOST:127.0.0.1}}
+          port: ${AGENTX_WORKFORCE_RUNTIME_ENVIRONMENT_DB_ACCOUNT_REDIS_PORT:${AGENTX_REDIS_PORT:6379}}
+          database: ${AGENTX_WORKFORCE_RUNTIME_ENVIRONMENT_DB_ACCOUNT_REDIS_DATABASE:0}
+          admin-username: ${AGENTX_WORKFORCE_RUNTIME_ENVIRONMENT_DB_ACCOUNT_REDIS_ADMIN_USERNAME:}
+          admin-password: ${AGENTX_WORKFORCE_RUNTIME_ENVIRONMENT_DB_ACCOUNT_REDIS_ADMIN_PASSWORD:${AGENTX_REDIS_PASSWORD:}}
+        mongodb:
+          host: ${AGENTX_WORKFORCE_RUNTIME_ENVIRONMENT_DB_ACCOUNT_MONGODB_HOST:127.0.0.1}
+          port: ${AGENTX_WORKFORCE_RUNTIME_ENVIRONMENT_DB_ACCOUNT_MONGODB_PORT:27017}
+          database: ${AGENTX_WORKFORCE_RUNTIME_ENVIRONMENT_DB_ACCOUNT_MONGODB_DATABASE:agentx_backend}
+          admin-database: ${AGENTX_WORKFORCE_RUNTIME_ENVIRONMENT_DB_ACCOUNT_MONGODB_ADMIN_DATABASE:admin}
+          admin-username: ${AGENTX_WORKFORCE_RUNTIME_ENVIRONMENT_DB_ACCOUNT_MONGODB_ADMIN_USERNAME:root}
+          admin-password: ${AGENTX_WORKFORCE_RUNTIME_ENVIRONMENT_DB_ACCOUNT_MONGODB_ADMIN_PASSWORD:}
+      cleanup:
+        enabled: ${AGENTX_WORKFORCE_RUNTIME_ENVIRONMENT_CLEANUP_ENABLED:true}
+        poll-interval-ms: ${AGENTX_WORKFORCE_RUNTIME_ENVIRONMENT_CLEANUP_POLL_INTERVAL_MS:3600000}
+        initial-delay-ms: ${AGENTX_WORKFORCE_RUNTIME_ENVIRONMENT_CLEANUP_INITIAL_DELAY_MS:60000}
+        project-ttl-hours: ${AGENTX_WORKFORCE_RUNTIME_ENVIRONMENT_CLEANUP_PROJECT_TTL_HOURS:168}
+        max-delete-per-poll: ${AGENTX_WORKFORCE_RUNTIME_ENVIRONMENT_CLEANUP_MAX_DELETE_PER_POLL:16}
+    auto-provisioner:
+      enabled: ${AGENTX_WORKFORCE_AUTO_PROVISIONER_ENABLED:true}
+      poll-interval-ms: ${AGENTX_WORKFORCE_AUTO_PROVISIONER_POLL_INTERVAL_MS:3000}
+      initial-delay-ms: ${AGENTX_WORKFORCE_AUTO_PROVISIONER_INITIAL_DELAY_MS:3000}
+      max-tasks-per-poll: ${AGENTX_WORKFORCE_AUTO_PROVISIONER_MAX_TASKS_PER_POLL:64}
+      wait-threshold-seconds: ${AGENTX_WORKFORCE_AUTO_PROVISIONER_WAIT_THRESHOLD_SECONDS:5}
+      max-workers-total: ${AGENTX_WORKFORCE_AUTO_PROVISIONER_MAX_WORKERS_TOTAL:32}
+      max-workers-provisioning: ${AGENTX_WORKFORCE_AUTO_PROVISIONER_MAX_WORKERS_PROVISIONING:8}
+      max-creates-per-cycle: ${AGENTX_WORKFORCE_AUTO_PROVISIONER_MAX_CREATES_PER_CYCLE:2}
+      request-ticket:
+        agent-id: ${AGENTX_WORKFORCE_AUTO_PROVISIONER_REQUEST_TICKET_AGENT_ID:architect-agent-auto}
+        lease-seconds: ${AGENTX_WORKFORCE_AUTO_PROVISIONER_REQUEST_TICKET_LEASE_SECONDS:300}
+    worker-pool-cleanup:
+      enabled: ${AGENTX_WORKFORCE_WORKER_POOL_CLEANUP_ENABLED:true}
+      poll-interval-ms: ${AGENTX_WORKFORCE_WORKER_POOL_CLEANUP_POLL_INTERVAL_MS:300000}
+      initial-delay-ms: ${AGENTX_WORKFORCE_WORKER_POOL_CLEANUP_INITIAL_DELAY_MS:120000}
+      max-workers-total: ${AGENTX_WORKFORCE_WORKER_POOL_CLEANUP_MAX_WORKERS_TOTAL:32}
+      min-idle-seconds: ${AGENTX_WORKFORCE_WORKER_POOL_CLEANUP_MIN_IDLE_SECONDS:1800}
+      max-disable-per-poll: ${AGENTX_WORKFORCE_WORKER_POOL_CLEANUP_MAX_DISABLE_PER_POLL:2}
+      scan-limit: ${AGENTX_WORKFORCE_WORKER_POOL_CLEANUP_SCAN_LIMIT:256}
+      strategy: ${AGENTX_WORKFORCE_WORKER_POOL_CLEANUP_STRATEGY:oldest_idle}
+  planning:
+    waiting-task-refresher:
+      enabled: ${AGENTX_PLANNING_WAITING_TASK_REFRESHER_ENABLED:true}
+      poll-interval-ms: ${AGENTX_PLANNING_WAITING_TASK_REFRESHER_POLL_INTERVAL_MS:5000}
+      initial-delay-ms: ${AGENTX_PLANNING_WAITING_TASK_REFRESHER_INITIAL_DELAY_MS:5000}
+      max-tasks-per-cycle: ${AGENTX_PLANNING_WAITING_TASK_REFRESHER_MAX_TASKS_PER_CYCLE:100}
+    claim-scan:
+      batch-size: ${AGENTX_PLANNING_CLAIM_SCAN_BATCH_SIZE:64}
+      max-rows: ${AGENTX_PLANNING_CLAIM_SCAN_MAX_ROWS:2048}
+  execution:
+    lease-seconds: ${AGENTX_EXECUTION_LEASE_SECONDS:300}
+    default-base-commit: ${AGENTX_EXECUTION_DEFAULT_BASE_COMMIT:BASELINE_UNAVAILABLE}
+    verify-worker-id: ${AGENTX_EXECUTION_VERIFY_WORKER_ID:WRK-BOOT-JAVA-CORE}
+    lease-watchdog:
+      enabled: ${AGENTX_EXECUTION_LEASE_WATCHDOG_ENABLED:true}
+      poll-interval-ms: ${AGENTX_EXECUTION_LEASE_WATCHDOG_POLL_INTERVAL_MS:5000}
+      initial-delay-ms: ${AGENTX_EXECUTION_LEASE_WATCHDOG_INITIAL_DELAY_MS:5000}
+      max-runs-per-poll: ${AGENTX_EXECUTION_LEASE_WATCHDOG_MAX_RUNS_PER_POLL:64}
+  workspace:
+    git:
+      executable: ${AGENTX_WORKSPACE_GIT_EXECUTABLE:git}
+      repo-root: ${AGENTX_WORKSPACE_GIT_REPO_ROOT:.}
+      command-timeout-ms: ${AGENTX_WORKSPACE_GIT_COMMAND_TIMEOUT_MS:120000}
+  mergegate:
+    lock:
+      mode: ${AGENTX_MERGEGATE_LOCK_MODE:redis}
+      redis:
+        key-prefix: ${AGENTX_MERGEGATE_LOCK_REDIS_KEY_PREFIX:agentx:mergegate:lock:}
+        ttl-seconds: ${AGENTX_MERGEGATE_LOCK_REDIS_TTL_SECONDS:600}
+    git:
+      executable: ${AGENTX_MERGEGATE_GIT_EXECUTABLE:git}
+      repo-root: ${AGENTX_MERGEGATE_GIT_REPO_ROOT:.}
+      main-branch: ${AGENTX_MERGEGATE_GIT_MAIN_BRANCH:main}
+      task-branch-prefix: ${AGENTX_MERGEGATE_GIT_TASK_BRANCH_PREFIX:task/}
+      command-timeout-ms: ${AGENTX_MERGEGATE_GIT_COMMAND_TIMEOUT_MS:120000}
+  process:
+    runtime-garbage-collector:
+      enabled: ${AGENTX_PROCESS_RUNTIME_GARBAGE_COLLECTOR_ENABLED:true}
+      poll-interval-ms: ${AGENTX_PROCESS_RUNTIME_GARBAGE_COLLECTOR_POLL_INTERVAL_MS:10000}
+      initial-delay-ms: ${AGENTX_PROCESS_RUNTIME_GARBAGE_COLLECTOR_INITIAL_DELAY_MS:10000}
+      assigned-scan-limit: ${AGENTX_PROCESS_RUNTIME_GARBAGE_COLLECTOR_ASSIGNED_SCAN_LIMIT:128}
+      delivered-scan-limit: ${AGENTX_PROCESS_RUNTIME_GARBAGE_COLLECTOR_DELIVERED_SCAN_LIMIT:128}
+      delivered-stale-seconds: ${AGENTX_PROCESS_RUNTIME_GARBAGE_COLLECTOR_DELIVERED_STALE_SECONDS:120}
+      max-mergegate-starts-per-poll: ${AGENTX_PROCESS_RUNTIME_GARBAGE_COLLECTOR_MAX_MERGEGATE_STARTS:4}
+  contextpack:
+    artifact-root: ${AGENTX_CONTEXTPACK_ARTIFACT_ROOT:.agentx}
+    snapshot-retention-days: ${AGENTX_CONTEXTPACK_SNAPSHOT_RETENTION_DAYS:180}
+    refresh:
+      enabled: ${AGENTX_CONTEXTPACK_REFRESH_ENABLED:true}
+      max-session-tasks-per-refresh: ${AGENTX_CONTEXTPACK_REFRESH_MAX_SESSION_TASKS:512}
+      max-ticket-tasks-per-refresh: ${AGENTX_CONTEXTPACK_REFRESH_MAX_TICKET_TASKS:512}
+    facts:
+      recent-ticket-limit: ${AGENTX_CONTEXTPACK_FACTS_RECENT_TICKET_LIMIT:20}
+      recent-run-limit: ${AGENTX_CONTEXTPACK_FACTS_RECENT_RUN_LIMIT:8}
+  delivery:
+    clone-publish:
+      git-executable: ${AGENTX_DELIVERY_CLONE_PUBLISH_GIT_EXECUTABLE:git}
+      repo-root: ${AGENTX_DELIVERY_CLONE_PUBLISH_REPO_ROOT:${AGENTX_WORKSPACE_GIT_REPO_ROOT:.}}
+      remote-root: ${AGENTX_DELIVERY_CLONE_PUBLISH_REMOTE_ROOT:}
+      public-base: ${AGENTX_DELIVERY_CLONE_PUBLISH_PUBLIC_BASE:}
+      repo-prefix: ${AGENTX_DELIVERY_CLONE_PUBLISH_REPO_PREFIX:agentx-session-}
+      main-branch: ${AGENTX_DELIVERY_CLONE_PUBLISH_MAIN_BRANCH:${AGENTX_MERGEGATE_GIT_MAIN_BRANCH:main}}
+      retention-hours: ${AGENTX_DELIVERY_CLONE_PUBLISH_RETENTION_HOURS:72}
+      command-timeout-ms: ${AGENTX_DELIVERY_CLONE_PUBLISH_COMMAND_TIMEOUT_MS:120000}
+      cleanup:
+        enabled: ${AGENTX_DELIVERY_CLONE_PUBLISH_CLEANUP_ENABLED:true}
+        poll-interval-ms: ${AGENTX_DELIVERY_CLONE_PUBLISH_CLEANUP_POLL_INTERVAL_MS:600000}
+        initial-delay-ms: ${AGENTX_DELIVERY_CLONE_PUBLISH_CLEANUP_INITIAL_DELAY_MS:120000}
+  architect:
+    auto-processor:
+      enabled: ${AGENTX_ARCHITECT_AUTO_PROCESSOR_ENABLED:true}
+      poll-interval-ms: ${AGENTX_ARCHITECT_AUTO_PROCESSOR_POLL_INTERVAL_MS:2000}
+      initial-delay-ms: ${AGENTX_ARCHITECT_AUTO_PROCESSOR_INITIAL_DELAY_MS:2000}
+      max-tickets-per-poll: ${AGENTX_ARCHITECT_AUTO_PROCESSOR_MAX_TICKETS:8}
+      max-recent-events: ${AGENTX_ARCHITECT_AUTO_PROCESSOR_MAX_RECENT_EVENTS:12}
+      lease-seconds: ${AGENTX_ARCHITECT_AUTO_PROCESSOR_LEASE_SECONDS:300}
+      agent-id: ${AGENTX_ARCHITECT_AUTO_PROCESSOR_AGENT_ID:architect-agent-auto}
+      owned-session-ids: ${AGENTX_ARCHITECT_AUTO_PROCESSOR_OWNED_SESSION_IDS:}
+      shard-total: ${AGENTX_ARCHITECT_AUTO_PROCESSOR_SHARD_TOTAL:1}
+      shard-index: ${AGENTX_ARCHITECT_AUTO_PROCESSOR_SHARD_INDEX:0}
+  worker-runtime:
+    enabled: ${AGENTX_WORKER_RUNTIME_ENABLED:false}
+    poll-interval-ms: ${AGENTX_WORKER_RUNTIME_POLL_INTERVAL_MS:5000}
+    initial-delay-ms: ${AGENTX_WORKER_RUNTIME_INITIAL_DELAY_MS:5000}
+    max-workers-per-poll: ${AGENTX_WORKER_RUNTIME_MAX_WORKERS_PER_POLL:8}
+    repo-root: ${AGENTX_WORKER_RUNTIME_REPO_ROOT:.}
+    git:
+      executable: ${AGENTX_WORKER_RUNTIME_GIT_EXECUTABLE:git}
+    command-timeout-ms: ${AGENTX_WORKER_RUNTIME_COMMAND_TIMEOUT_MS:120000}
+    max-edits-per-run: ${AGENTX_WORKER_RUNTIME_MAX_EDITS_PER_RUN:20}
+    llm:
+      provider: ${AGENTX_WORKER_RUNTIME_LLM_PROVIDER:mock}
+      framework: ${AGENTX_WORKER_RUNTIME_LLM_FRAMEWORK:langchain4j}
+      base-url: ${AGENTX_WORKER_RUNTIME_LLM_BASE_URL:${AGENTX_REQUIREMENT_LLM_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}}
+      model: ${AGENTX_WORKER_RUNTIME_LLM_MODEL:${AGENTX_REQUIREMENT_LLM_MODEL:qwen3.5-plus-2026-02-15}}
+      api-key: ${AGENTX_WORKER_RUNTIME_LLM_API_KEY:${AGENTX_REQUIREMENT_LLM_API_KEY:}}
+  requirement:
+    discovery-history:
+      max-messages: ${AGENTX_REQUIREMENT_DISCOVERY_HISTORY_MAX_MESSAGES:24}
+      ttl-seconds: ${AGENTX_REQUIREMENT_DISCOVERY_HISTORY_TTL_SECONDS:86400}
+    llm:
+      provider: ${AGENTX_REQUIREMENT_LLM_PROVIDER:mock}
+      framework: ${AGENTX_REQUIREMENT_LLM_FRAMEWORK:langchain4j}
+      base-url: ${AGENTX_REQUIREMENT_LLM_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
+      model: ${AGENTX_REQUIREMENT_LLM_MODEL:qwen3.5-plus-2026-02-15}
+      api-key: ${AGENTX_REQUIREMENT_LLM_API_KEY:}
+      timeout-ms: ${AGENTX_REQUIREMENT_LLM_TIMEOUT_MS:120000}
+
