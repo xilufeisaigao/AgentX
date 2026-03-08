@@ -65,9 +65,12 @@ The host only needs to provide one mounted workspace directory for generated pro
 8. Optional default worker profile bootstrap:
    - `AGENTX_WORKFORCE_BOOTSTRAP_DEFAULT_WORKERS=true`
    - On backend startup this creates common READY worker profiles (idempotent):
-     - `WRK-BOOT-JAVA-CORE` -> `TP-GIT-2`,`TP-JAVA-21`,`TP-MAVEN-3`
-     - `WRK-BOOT-JAVA-DB` -> `TP-GIT-2`,`TP-JAVA-21`,`TP-MAVEN-3`,`TP-MYSQL-8`
+     - `WRK-BOOT-JAVA-CORE` -> `TP-GIT-2`,`TP-JAVA-17`,`TP-JAVA-21`,`TP-MAVEN-3`
+     - `WRK-BOOT-JAVA-DB` -> `TP-GIT-2`,`TP-JAVA-17`,`TP-JAVA-21`,`TP-MAVEN-3`,`TP-MYSQL-8`
      - `WRK-BOOT-PYTHON-AUX` -> `TP-GIT-2`,`TP-PYTHON-3_11`
+   - Compatibility note:
+     - runtime now treats `TP-JAVA-21` as satisfying `TP-JAVA-17` task requirements
+     - planner output may still contain either id, both are accepted by the default Java worker profiles
 
 ## 2. Start Stack
 
@@ -75,11 +78,25 @@ The host only needs to provide one mounted workspace directory for generated pro
 docker compose --env-file .env.docker up -d --build
 ```
 
+Recommended for daily development/testing (isolated artifacts per startup):
+
+```powershell
+pwsh -NoLogo -NoProfile -File tests/e2e/start_isolated_runtime.ps1 -EnvFile .env.docker -DownFirst
+```
+
+This command creates a fresh host artifact directory under `runtime-projects/<timestamp-random>/`
+and injects it as `AGENTX_HOST_REPO_ROOT` only for that startup.
+
 Services:
 1. `backend` at `http://127.0.0.1:${AGENTX_BACKEND_PORT}` (default `18082`)
 2. `mysql` at `127.0.0.1:${AGENTX_MYSQL_PORT}` (default `13306`)
 3. `redis` at `127.0.0.1:${AGENTX_REDIS_PORT}` (default `16379`)
 4. `git-export` at `git://127.0.0.1:${AGENTX_GIT_EXPORT_PORT}` (default `19418`)
+
+Validated on 2026-03-09:
+1. `SES-365c1b01de6a44bfadc5bc0ae499bed2` reached `complete` and published a clone repo.
+2. `SES-8c9b63dae1454b43ad435e3c2cdbe155` reached `complete` and published a clone repo.
+3. Both published repos were cloned on the host, passed `mvn test`, and returned the expected HTTP response after startup.
 
 ## 3. Check Health
 
@@ -89,7 +106,7 @@ docker compose logs -f backend
 ```
 
 The backend entrypoint automatically:
-1. Initializes the mounted workspace as a git repository if missing.
+1. Initializes the mounted workspace template repository if missing.
 2. Creates an initial baseline commit.
 3. Exports `AGENTX_EXECUTION_DEFAULT_BASE_COMMIT` from current `HEAD` when unset.
 4. Session creation automatically bootstraps one `tmpl.init.v0` task (INIT gate).
@@ -102,7 +119,12 @@ All runtime code output and git worktrees are under the host path configured by:
 
 Default path:
 
-`./agentx-repo`
+`./runtime-projects/default-repo`
+
+Session repository layout:
+
+1. Session git repository root: `sessions/<session-id>/repo/`
+2. Run worktree path (inside that session repo): `worktrees/<session-id>/<run-id>/`
 
 Runtime environment manifests are written under Docker volume `runtime_data`, for example:
 

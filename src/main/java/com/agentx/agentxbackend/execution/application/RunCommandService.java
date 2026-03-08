@@ -44,7 +44,6 @@ import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.locks.ReentrantLock;
 
 @Service
 public class RunCommandService implements RunCommandUseCase, RunInternalUseCase, RunLeaseRecoveryUseCase, RunQueryUseCase {
@@ -80,10 +79,10 @@ public class RunCommandService implements RunCommandUseCase, RunInternalUseCase,
     private final ObjectMapper objectMapper;
     private final int leaseSeconds;
     private final String defaultBaseCommit;
+    private final int verifyMaxAttemptsPerCandidate;
     private final String verifyWorkerId;
     private final Path repoRoot;
     private final List<Path> artifactReadRoots;
-    private final ReentrantLock initGateLock = new ReentrantLock();
 
     public RunCommandService(
         TaskRunRepository taskRunRepository,
@@ -96,6 +95,7 @@ public class RunCommandService implements RunCommandUseCase, RunInternalUseCase,
         ObjectMapper objectMapper,
         @Value("${agentx.execution.lease-seconds:300}") int leaseSeconds,
         @Value("${agentx.execution.default-base-commit:BASELINE_UNAVAILABLE}") String defaultBaseCommit,
+        @Value("${agentx.execution.verify.max-attempts-per-candidate:3}") int verifyMaxAttemptsPerCandidate,
         @Value("${agentx.execution.verify-worker-id:WRK-VERIFY-SYSTEM}") String verifyWorkerId,
         @Value("${agentx.execution.repo-root:.}") String repoRoot,
         @Value("${agentx.contextpack.artifact-root:.agentx}") String contextpackArtifactRoot
@@ -112,6 +112,7 @@ public class RunCommandService implements RunCommandUseCase, RunInternalUseCase,
         this.defaultBaseCommit = (defaultBaseCommit == null || defaultBaseCommit.isBlank())
             ? "BASELINE_UNAVAILABLE"
             : defaultBaseCommit.trim();
+        this.verifyMaxAttemptsPerCandidate = Math.max(1, verifyMaxAttemptsPerCandidate);
         this.verifyWorkerId = requireNotBlank(verifyWorkerId, "verifyWorkerId");
         this.repoRoot = Path.of(repoRoot == null || repoRoot.isBlank() ? "." : repoRoot.trim())
             .toAbsolutePath()
@@ -141,95 +142,103 @@ public class RunCommandService implements RunCommandUseCase, RunInternalUseCase,
         if (!workerRuntimePort.isWorkerReady(normalizedWorkerId)) {
             throw new IllegalStateException("Worker is not READY: " + normalizedWorkerId);
         }
-        boolean guardByInitGate = taskAllocationPort.isInitGateActive();
-        if (guardByInitGate) {
-            initGateLock.lock();
+        String runId = generateRunId();
+        Optional<TaskAllocationPort.ClaimedTask> claimedTaskOptional = taskAllocationPort.claimReadyTaskForWorker(
+            normalizedWorkerId,
+            runId
+        );
+        if (claimedTaskOptional.isEmpty()) {
+            return Optional.empty();
         }
-        try {
-            boolean initGateActive = guardByInitGate && taskAllocationPort.isInitGateActive();
-            if (initGateActive && taskRunRepository.countActiveRuns() > 0) {
-                throw new PreconditionFailedException(
-                    "INIT gate is active: only one active run is allowed until tmpl.init.v0 task reaches DONE."
-                );
-            }
-
-            String runId = generateRunId();
-            Optional<TaskAllocationPort.ClaimedTask> claimedTaskOptional = taskAllocationPort.claimReadyTaskForWorker(
-                normalizedWorkerId,
-                runId
+        TaskAllocationPort.ClaimedTask claimedTask = claimedTaskOptional.get();
+        boolean initGateActive = taskAllocationPort.isInitGateActive(claimedTask.sessionId());
+        if (initGateActive && taskRunRepository.existsActiveRunBySessionId(claimedTask.sessionId())) {
+            taskAllocationPort.releaseTaskAssignment(claimedTask.taskId());
+            throw new PreconditionFailedException(
+                "INIT gate is active for session " + claimedTask.sessionId()
+                    + ": only one active run is allowed until tmpl.init.v0 task reaches DONE."
             );
-            if (claimedTaskOptional.isEmpty()) {
-                return Optional.empty();
-            }
-            TaskAllocationPort.ClaimedTask claimedTask = claimedTaskOptional.get();
-            RunKind runKind = resolveRunKind(claimedTask.taskTemplateId());
+        }
+        if (!taskAllocationPort.isSessionActive(claimedTask.sessionId())) {
+            taskAllocationPort.releaseTaskAssignment(claimedTask.taskId());
+            log.debug(
+                "Skip task claim because session is not ACTIVE, sessionId={}, taskId={}",
+                claimedTask.sessionId(),
+                claimedTask.taskId()
+            );
+            return Optional.empty();
+        }
+        RunKind runKind = resolveRunKind(claimedTask.taskTemplateId());
 
-            if (initGateActive && !isInitTemplate(claimedTask.taskTemplateId())) {
-                taskAllocationPort.releaseTaskAssignment(claimedTask.taskId());
-                throw new PreconditionFailedException(
-                    "INIT gate is active: only tmpl.init.v0 task can be assigned before INIT is DONE."
-                );
-            }
-
-            ContextSnapshotReadPort.ReadySnapshot readySnapshot = contextSnapshotReadPort
-                .findLatestReadySnapshot(claimedTask.taskId(), runKind)
-                .orElseThrow(() -> {
-                    taskAllocationPort.releaseTaskAssignment(claimedTask.taskId());
-                    return new PreconditionFailedException(
-                        "No READY context snapshot available for task " + claimedTask.taskId() + ", runKind=" + runKind
-                    );
-                });
-
-            String baseCommit = defaultBaseCommit;
-            String branchName = "run/" + runId;
-            String worktreePath = buildWorktreePath(claimedTask.taskId(), runId);
-
-            Instant now = Instant.now();
-            TaskRun run = new TaskRun(
-                runId,
+        if (initGateActive && !isInitTemplate(claimedTask.taskTemplateId())) {
+            taskAllocationPort.releaseTaskAssignment(claimedTask.taskId());
+            log.debug(
+                "Skip non-init task under init gate, taskId={}, templateId={}, sessionId={}",
                 claimedTask.taskId(),
-                normalizedWorkerId,
-                RunStatus.RUNNING,
-                runKind,
-                readySnapshot.snapshotId(),
-                now.plusSeconds(leaseSeconds),
-                now,
-                now,
-                null,
-                readySnapshot.taskSkillRef(),
-                toJsonArray(workerRuntimePort.listWorkerToolpackIds(normalizedWorkerId)),
-                baseCommit,
-                branchName,
-                worktreePath,
-                now,
-                now
+                claimedTask.taskTemplateId(),
+                claimedTask.sessionId()
             );
-            try {
-                taskRunRepository.save(run);
-                workspacePort.allocateWorkspace(
-                    runId,
-                    claimedTask.taskId(),
-                    baseCommit,
-                    branchName
-                );
-                taskRunEventRepository.save(newEvent(
-                    runId,
-                    RunEventType.RUN_STARTED,
-                    "Run started by worker claim.",
-                    null
-                ));
-            } catch (RuntimeException ex) {
-                safeReleaseWorkspace(runId, worktreePath);
-                taskAllocationPort.releaseTaskAssignment(claimedTask.taskId());
-                throw ex;
-            }
-
-            return Optional.of(toTaskPackage(claimedTask, run, readySnapshot));
-        } finally {
-            if (guardByInitGate) {
-                initGateLock.unlock();
-            }
+            return Optional.empty();
         }
+
+        ContextSnapshotReadPort.ReadySnapshot readySnapshot = contextSnapshotReadPort
+            .findLatestReadySnapshot(claimedTask.taskId(), runKind)
+            .orElseThrow(() -> {
+                taskAllocationPort.releaseTaskAssignment(claimedTask.taskId());
+                return new PreconditionFailedException(
+                    "No READY context snapshot available for task " + claimedTask.taskId() + ", runKind=" + runKind
+                );
+            });
+
+        String baseCommit = resolveBaseCommitFromContextRef(readySnapshot.taskContextRef());
+        if (baseCommit == null || baseCommit.isBlank()) {
+            baseCommit = defaultBaseCommit;
+        }
+        String branchName = "run/" + runId;
+        String worktreePath = buildWorktreePath(claimedTask.sessionId(), runId);
+
+        Instant now = Instant.now();
+        TaskRun run = new TaskRun(
+            runId,
+            claimedTask.taskId(),
+            normalizedWorkerId,
+            RunStatus.RUNNING,
+            runKind,
+            readySnapshot.snapshotId(),
+            now.plusSeconds(leaseSeconds),
+            now,
+            now,
+            null,
+            readySnapshot.taskSkillRef(),
+            toJsonArray(workerRuntimePort.listWorkerToolpackIds(normalizedWorkerId)),
+            baseCommit,
+            branchName,
+            worktreePath,
+            now,
+            now
+        );
+        try {
+            taskRunRepository.save(run);
+            workspacePort.allocateWorkspace(
+                runId,
+                claimedTask.sessionId(),
+                claimedTask.taskId(),
+                baseCommit,
+                branchName
+            );
+            taskRunEventRepository.save(newEvent(
+                runId,
+                RunEventType.RUN_STARTED,
+                "Run started by worker claim.",
+                null
+            ));
+        } catch (RuntimeException ex) {
+            safeReleaseWorkspace(runId, worktreePath);
+            taskAllocationPort.releaseTaskAssignment(claimedTask.taskId());
+            throw ex;
+        }
+
+        return Optional.of(toTaskPackage(claimedTask, run, readySnapshot));
     }
 
     @Override
@@ -394,7 +403,9 @@ public class RunCommandService implements RunCommandUseCase, RunInternalUseCase,
         }
         RunStatus resultStatus = parseResultStatus(payload.resultStatus());
         if (shouldUpdateTaskBranch(current, resultStatus)) {
+            String sessionId = resolveSessionIdForTask(current.taskId());
             workspacePort.updateTaskBranch(
+                sessionId,
                 current.taskId(),
                 requireNotBlank(payload.deliveryCommit(), "deliveryCommit")
             );
@@ -465,11 +476,13 @@ public class RunCommandService implements RunCommandUseCase, RunInternalUseCase,
             .orElseThrow(() -> new PreconditionFailedException(
                 "No READY context snapshot available for task " + normalizedTaskId + ", runKind=VERIFY"
             ));
-        ensureNoDuplicateVerifyRun(normalizedTaskId, normalizedMergeCandidateCommit);
+          ensureNoDuplicateVerifyRun(normalizedTaskId, normalizedMergeCandidateCommit);
 
-        String runId = generateRunId();
-        String branchName = "run/" + runId;
-        String worktreePath = buildWorktreePath(normalizedTaskId, runId);
+          String runId = generateRunId();
+          String branchName = "run/" + runId;
+          String sessionId = resolveSessionIdForTask(normalizedTaskId);
+          ensureSessionActive(sessionId, normalizedTaskId);
+          String worktreePath = buildWorktreePath(sessionId, runId);
         Instant now = Instant.now();
         TaskRun run = new TaskRun(
             runId,
@@ -494,6 +507,7 @@ public class RunCommandService implements RunCommandUseCase, RunInternalUseCase,
             taskRunRepository.save(run);
             workspacePort.allocateWorkspace(
                 runId,
+                sessionId,
                 normalizedTaskId,
                 normalizedMergeCandidateCommit,
                 branchName
@@ -534,15 +548,14 @@ public class RunCommandService implements RunCommandUseCase, RunInternalUseCase,
                     + ", runId="
                     + existing.runId()
             );
-            case FAILED -> throw new PreconditionFailedException(
-                "Merge candidate verify already failed for task "
-                    + taskId
-                    + ", mergeCandidateCommit="
-                    + mergeCandidateCommit
-                    + ", runId="
-                    + existing.runId()
-                    + ". A new delivery commit is required before re-verify."
-            );
+            case FAILED -> {
+                if (isVerifyRetryAllowed(taskId, mergeCandidateCommit)) {
+                    return;
+                }
+                throw new PreconditionFailedException(
+                    buildVerifyRetryRejectedMessage(taskId, mergeCandidateCommit)
+                );
+            }
             case CANCELLED -> {
                 // Explicit cancellation allows a retried VERIFY run on the same candidate commit.
             }
@@ -614,6 +627,9 @@ public class RunCommandService implements RunCommandUseCase, RunInternalUseCase,
             if (isTerminal(latest.status()) || !latest.leaseUntil().isBefore(now)) {
                 continue;
             }
+            if (latest.status() == RunStatus.WAITING_FOREMAN) {
+                continue;
+            }
             boolean marked = taskRunRepository.markFailedIfLeaseExpired(latest.runId(), now, now);
             if (!marked) {
                 continue;
@@ -682,17 +698,37 @@ public class RunCommandService implements RunCommandUseCase, RunInternalUseCase,
         return taskRunRepository.existsActiveRunByTaskAndKind(normalizedTaskId, runKind);
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public boolean hasActiveRunsBySession(String sessionId) {
+        String normalizedSessionId = requireNotBlank(sessionId, "sessionId");
+        return taskRunRepository.existsActiveRunBySessionId(normalizedSessionId);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public int countVerifyRunsByTaskAndBaseCommit(String taskId, String baseCommit) {
+        String normalizedTaskId = requireNotBlank(taskId, "taskId");
+        String normalizedBaseCommit = requireNotBlank(baseCommit, "baseCommit");
+        return taskRunRepository.countVerifyRunsByTaskAndBaseCommit(normalizedTaskId, normalizedBaseCommit);
+    }
+
     private TaskPackage toTaskPackage(
         TaskAllocationPort.ClaimedTask claimedTask,
         TaskRun run,
         ContextSnapshotReadPort.ReadySnapshot readySnapshot
     ) {
         List<String> requiredToolpacks = parseRequiredToolpacks(claimedTask.requiredToolpacksJson());
+        boolean hasPendingDependentTestTask = taskAllocationPort.hasNonDoneDependentTaskByTemplate(
+            run.taskId(),
+            "tmpl.test.v0"
+        );
         List<String> writeScope = resolveWriteScope(
             run.runKind(),
             claimedTask.taskTemplateId(),
             claimedTask.moduleId(),
-            requiredToolpacks
+            requiredToolpacks,
+            hasPendingDependentTestTask
         );
         List<String> verifyCommands = run.runKind() == RunKind.VERIFY
             ? resolveVerifyCommands(readySnapshot.taskSkillRef(), requiredToolpacks)
@@ -774,6 +810,31 @@ public class RunCommandService implements RunCommandUseCase, RunInternalUseCase,
         }
     }
 
+    private String resolveBaseCommitFromContextRef(String taskContextRef) {
+        Optional<Path> taskContextPathOptional = resolveArtifactPath(taskContextRef);
+        if (taskContextPathOptional.isEmpty()) {
+            return null;
+        }
+        Path taskContextPath = taskContextPathOptional.get();
+        try {
+            JsonNode root = objectMapper.readTree(Files.readString(taskContextPath, StandardCharsets.UTF_8));
+            if (root == null || !root.isObject()) {
+                return null;
+            }
+            String repoBaselineRef = readTextOrDefault(root, "repo_baseline_ref", "repoBaselineRef", "");
+            if (repoBaselineRef.isBlank()) {
+                return null;
+            }
+            if (repoBaselineRef.startsWith("git:")) {
+                return repoBaselineRef.substring("git:".length()).trim();
+            }
+            return repoBaselineRef.trim();
+        } catch (Exception ex) {
+            log.warn("Failed to resolve repo baseline from task context, taskContextRef={}", taskContextRef, ex);
+            return null;
+        }
+    }
+
     private static List<String> readTextArray(JsonNode node) {
         if (node == null || !node.isArray()) {
             return List.of();
@@ -833,7 +894,8 @@ public class RunCommandService implements RunCommandUseCase, RunInternalUseCase,
         RunKind runKind,
         String taskTemplateId,
         String moduleId,
-        List<String> requiredToolpacks
+        List<String> requiredToolpacks,
+        boolean hasPendingDependentTestTask
     ) {
         if (runKind == RunKind.VERIFY) {
             return List.of();
@@ -851,7 +913,8 @@ public class RunCommandService implements RunCommandUseCase, RunInternalUseCase,
             scopes.add(moduleScope + "/");
         }
 
-        boolean hasJava = hasToolpack(requiredToolpacks, "TP-JAVA-21") || hasToolpack(requiredToolpacks, "TP-MAVEN-3");
+        boolean hasMaven = hasToolpack(requiredToolpacks, "TP-MAVEN-3");
+        boolean hasJava = hasToolpack(requiredToolpacks, "TP-JAVA-21") || hasMaven;
         boolean hasPython = requiredToolpacks.stream().anyMatch(id -> id.toUpperCase(Locale.ROOT).startsWith("TP-PYTHON"));
         if ("tmpl.test.v0".equals(normalizedTemplate)) {
             if (hasJava) {
@@ -871,9 +934,16 @@ public class RunCommandService implements RunCommandUseCase, RunInternalUseCase,
         if (hasJava) {
             scopes.add("src/main/java/");
             scopes.add("src/main/resources/");
-            scopes.add("src/test/java/");
-            scopes.add("src/test/resources/");
+            if (!hasPendingDependentTestTask) {
+                scopes.add("src/test/java/");
+                scopes.add("src/test/resources/");
+            }
             scopes.add("pom.xml");
+            if (hasMaven) {
+                scopes.add(".mvn/");
+                scopes.add("mvnw");
+                scopes.add("mvnw.cmd");
+            }
         } else if (hasPython) {
             scopes.add("src/");
             scopes.add("tests/");
@@ -1109,7 +1179,9 @@ public class RunCommandService implements RunCommandUseCase, RunInternalUseCase,
     }
 
     private static boolean shouldReleaseAssignmentOnLeaseRecovery(TaskRun run) {
-        return run != null && run.runKind() == RunKind.IMPL;
+        return run != null
+            && run.runKind() == RunKind.IMPL
+            && run.status() == RunStatus.RUNNING;
     }
 
     private static boolean shouldUpdateTaskBranch(TaskRun run, RunStatus resultStatus) {
@@ -1152,7 +1224,43 @@ public class RunCommandService implements RunCommandUseCase, RunInternalUseCase,
         return "REV-" + UUID.randomUUID().toString().replace("-", "");
     }
 
-    private static String buildWorktreePath(String taskId, String runId) {
-        return "worktrees/" + taskId + "/" + runId;
+    private String buildVerifyRetryRejectedMessage(String taskId, String mergeCandidateCommit) {
+        int attempts = taskRunRepository.countVerifyRunsByTaskAndBaseCommit(taskId, mergeCandidateCommit);
+        return "Merge candidate verify attempt limit reached for task "
+            + taskId
+            + ", mergeCandidateCommit="
+            + mergeCandidateCommit
+            + ". attempts="
+            + attempts
+            + ", max="
+            + verifyMaxAttemptsPerCandidate
+            + ". A new delivery commit is required before re-verify.";
+    }
+
+    private boolean isVerifyRetryAllowed(String taskId, String mergeCandidateCommit) {
+        int attempts = taskRunRepository.countVerifyRunsByTaskAndBaseCommit(taskId, mergeCandidateCommit);
+        return attempts < verifyMaxAttemptsPerCandidate;
+    }
+
+    private String resolveSessionIdForTask(String taskId) {
+        String normalizedTaskId = requireNotBlank(taskId, "taskId");
+        return taskAllocationPort.findSessionIdByTaskId(normalizedTaskId)
+            .orElseThrow(() -> new PreconditionFailedException(
+                "Session not found for task " + normalizedTaskId + "."
+            ));
+    }
+
+    private void ensureSessionActive(String sessionId, String taskId) {
+        String normalizedSessionId = requireNotBlank(sessionId, "sessionId");
+        String normalizedTaskId = requireNotBlank(taskId, "taskId");
+        if (!taskAllocationPort.isSessionActive(normalizedSessionId)) {
+            throw new PreconditionFailedException(
+                "Session is not ACTIVE for task " + normalizedTaskId + ": " + normalizedSessionId
+            );
+        }
+    }
+
+    private static String buildWorktreePath(String sessionId, String runId) {
+        return "worktrees/" + requireNotBlank(sessionId, "sessionId") + "/" + runId;
     }
 }

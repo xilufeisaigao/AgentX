@@ -1,28 +1,39 @@
 # AgentX Frontend Demo
 
-一个放在仓库根目录的最小前端演示页，目标是展示 Agent 工程化流程：
+当前前端演示页已经从“聊天式控制台”切换为 React 版 `Mission Room`，围绕：
 
-1. 左侧：会话历史 + 新建会话
-2. 中间：需求/增量开发对话台
-3. 右侧顶部：运行时初始化配置（LLM provider/base-url/model/api-key，支持连通性测试与应用）
-4. 右上：架构师提请列表（可下拉看详情并回覆）
-5. 右下：流程进展 + worker 列表（可下拉看任务与上下文）
-6. 代码产出后弹窗展示 Git 地址
+1. Session 列表与切换
+2. Overview 总览
+3. Requirement Studio
+4. Decision Inbox
+5. Execution 现场（Task Board / Run Timeline）
+6. Delivery 与 Ops Console
 
 ## 启动方式
 
 先确保后端已启动（默认 `http://127.0.0.1:18082`），然后在仓库根目录执行：
 
 ```powershell
-npm --prefix frontend-demo install
-npm --prefix frontend-demo run dev
+Set-Location frontend-demo
+npm install
+npm run dev
 ```
 
 打开 `http://127.0.0.1:5173`。
 
-## 初始化配置（无需重启后端）
+说明：
 
-右侧“初始化配置”支持：
+1. 右上角支持 `ZH / EN` 切换，页面文案已经统一走同一套字典，不再中英文混排。
+2. 如果你更习惯在仓库根目录执行命令，也可以用：
+
+```powershell
+cmd /c npm --prefix frontend-demo run build
+cmd /c npm --prefix frontend-demo run dev
+```
+
+## 运行时配置（无需重启后端）
+
+`Ops Console` 中的 Runtime 页面支持：
 
 1. 读取当前生效配置：`GET /api/v0/runtime/llm-config`
 2. 连通性测试：`POST /api/v0/runtime/llm-config:test`
@@ -31,9 +42,9 @@ npm --prefix frontend-demo run dev
 默认 provider 是 `mock`，不填 key 也能跑演示流程。  
 应用配置成功后，后续请求会立刻使用新配置，无需重启后端。
 
-## 自动克隆地址（推荐）
+## Delivery Clone 地址
 
-当流程进入“代码产出可拉取”后，前端会自动调用后端接口：
+当流程进入可交付状态后，前端可调用后端接口：
 
 `POST /api/v0/sessions/{sessionId}/delivery/clone-repo`
 
@@ -49,13 +60,14 @@ git clone <clone_url>
 
 ```powershell
 # 本地开发
-npm --prefix frontend-demo run dev
+Set-Location frontend-demo
+npm run dev
 
 # 生产构建
-npm --prefix frontend-demo run build
+npm run build
 
 # 本地预览构建产物
-npm --prefix frontend-demo run preview
+npm run preview
 ```
 
 ## 可选环境变量

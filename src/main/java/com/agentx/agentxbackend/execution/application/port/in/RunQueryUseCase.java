@@ -12,4 +12,8 @@ public interface RunQueryUseCase {
     Optional<TaskRun> findLatestRunByTaskAndKind(String taskId, RunKind runKind);
 
     boolean hasActiveRunByTaskAndKind(String taskId, RunKind runKind);
+
+    boolean hasActiveRunsBySession(String sessionId);
+
+    int countVerifyRunsByTaskAndBaseCommit(String taskId, String baseCommit);
 }

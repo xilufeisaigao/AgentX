@@ -35,16 +35,20 @@ public class RuntimeGarbageCollectionScheduler {
             RuntimeGarbageCollectionService.CleanupResult result = runtimeGarbageCollectionService.collectOnce();
             if (result.repositoryRecovered()
                 || result.releasedAssignments() > 0
+                || result.promotedDeliveredAssignments() > 0
+                || result.completedVerifyAssignments() > 0
                 || result.kickedMergeGates() > 0
                 || result.failedAssignmentReleases() > 0
                 || result.mergeGateFailures() > 0
                 || result.repositoryRecoveryFailures() > 0) {
                 log.info(
-                    "Runtime garbage collector result, repoRecovered={}, repoRecoveryFailures={}, assignedReleased={}/{}, assignedReleaseFailures={}, deliveredStale={}/{}, mergeGateKicked={}, mergeGateRejected={}, mergeGateFailures={}",
+                    "Runtime garbage collector result, repoRecovered={}, repoRecoveryFailures={}, assignedReleased={}/{}, assignedPromotedDelivered={}, assignedCompletedVerify={}, assignedReleaseFailures={}, deliveredStale={}/{}, mergeGateKicked={}, mergeGateRejected={}, mergeGateFailures={}",
                     result.repositoryRecovered(),
                     result.repositoryRecoveryFailures(),
                     result.releasedAssignments(),
                     result.scannedAssignedTasks(),
+                    result.promotedDeliveredAssignments(),
+                    result.completedVerifyAssignments(),
                     result.failedAssignmentReleases(),
                     result.staleDeliveredTasks(),
                     result.scannedDeliveredTasks(),

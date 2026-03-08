@@ -42,16 +42,23 @@ class WorkspaceServiceTest {
         when(gitWorkspaceRepository.findByRunId("RUN-1")).thenReturn(Optional.empty());
         when(gitWorkspaceRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
-        GitWorkspace workspace = workspaceService.allocate("RUN-1", "abc123", "run/RUN-1", "worktrees/TASK-1/RUN-1");
+        GitWorkspace workspace = workspaceService.allocate(
+            "RUN-1",
+            "SES-1",
+            "abc123",
+            "run/RUN-1",
+            "worktrees/SES-1/RUN-1"
+        );
 
         assertEquals("RUN-1", workspace.runId());
         assertEquals(GitWorkspaceStatus.ALLOCATED, workspace.status());
         InOrder inOrder = inOrder(gitClientPort, gitWorkspaceRepository);
         inOrder.verify(gitClientPort).createRunBranchAndWorktree(
             "RUN-1",
+            "SES-1",
             "abc123",
             "run/RUN-1",
-            "worktrees/TASK-1/RUN-1"
+            "worktrees/SES-1/RUN-1"
         );
         inOrder.verify(gitWorkspaceRepository).save(any());
     }
@@ -63,9 +70,15 @@ class WorkspaceServiceTest {
 
         assertThrows(
             IllegalStateException.class,
-            () -> workspaceService.allocate("RUN-2", "abc123", "run/RUN-2", "worktrees/TASK-2/RUN-2")
+            () -> workspaceService.allocate(
+                "RUN-2",
+                "SES-2",
+                "abc123",
+                "run/RUN-2",
+                "worktrees/SES-2/RUN-2"
+            )
         );
-        verify(gitClientPort).removeWorktree("worktrees/TASK-2/RUN-2");
+        verify(gitClientPort).removeWorktree("worktrees/SES-2/RUN-2");
     }
 
     @Test
@@ -99,9 +112,9 @@ class WorkspaceServiceTest {
 
     @Test
     void updateTaskBranchShouldDelegateToGitClient() {
-        workspaceService.updateTaskBranch("TASK-5", "abc123");
+        workspaceService.updateTaskBranch("SES-5", "TASK-5", "abc123");
 
-        verify(gitClientPort).updateTaskBranch("TASK-5", "abc123");
+        verify(gitClientPort).updateTaskBranch("SES-5", "TASK-5", "abc123");
         verify(gitWorkspaceRepository, never()).findByRunId(any());
     }
 }

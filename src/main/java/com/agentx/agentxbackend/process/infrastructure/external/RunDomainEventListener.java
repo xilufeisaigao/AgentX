@@ -4,6 +4,7 @@ import com.agentx.agentxbackend.execution.domain.event.RunFinishedEvent;
 import com.agentx.agentxbackend.execution.domain.event.RunNeedsClarificationEvent;
 import com.agentx.agentxbackend.execution.domain.event.RunNeedsDecisionEvent;
 import com.agentx.agentxbackend.execution.domain.model.RunKind;
+import com.agentx.agentxbackend.process.application.DeliveredTaskMergeGateProcessManager;
 import com.agentx.agentxbackend.process.application.MergeGateCompletionProcessManager;
 import com.agentx.agentxbackend.process.application.RunFinishedProcessManager;
 import com.agentx.agentxbackend.process.application.RunNeedsInputProcessManager;
@@ -19,17 +20,20 @@ public class RunDomainEventListener {
 
     private final RunNeedsInputProcessManager runNeedsInputProcessManager;
     private final RunFinishedProcessManager runFinishedProcessManager;
+    private final DeliveredTaskMergeGateProcessManager deliveredTaskMergeGateProcessManager;
     private final MergeGateCompletionProcessManager mergeGateCompletionProcessManager;
     private final VerifyFailureRecoveryProcessManager verifyFailureRecoveryProcessManager;
 
     public RunDomainEventListener(
         RunNeedsInputProcessManager runNeedsInputProcessManager,
         RunFinishedProcessManager runFinishedProcessManager,
+        DeliveredTaskMergeGateProcessManager deliveredTaskMergeGateProcessManager,
         MergeGateCompletionProcessManager mergeGateCompletionProcessManager,
         VerifyFailureRecoveryProcessManager verifyFailureRecoveryProcessManager
     ) {
         this.runNeedsInputProcessManager = runNeedsInputProcessManager;
         this.runFinishedProcessManager = runFinishedProcessManager;
+        this.deliveredTaskMergeGateProcessManager = deliveredTaskMergeGateProcessManager;
         this.mergeGateCompletionProcessManager = mergeGateCompletionProcessManager;
         this.verifyFailureRecoveryProcessManager = verifyFailureRecoveryProcessManager;
     }
@@ -47,6 +51,9 @@ public class RunDomainEventListener {
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
     public void onRunFinished(RunFinishedEvent event) {
         runFinishedProcessManager.handle(event);
+        if (event.runKind() == RunKind.IMPL && isSucceeded(event)) {
+            deliveredTaskMergeGateProcessManager.onTaskDelivered(event.taskId());
+        }
         if (event.runKind() == RunKind.VERIFY && isFailed(event)) {
             verifyFailureRecoveryProcessManager.onVerifyFailed(event);
             return;

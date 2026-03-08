@@ -48,6 +48,14 @@
 7. INIT 独占：在 INIT 任务 `DONE` 前，全局只允许一个 active run（模块 06），API 必须强制此约束
 8. 上下文门禁：run 创建/恢复前必须绑定最新 `READY` 的 `task_context_snapshot`；缺失或过期一律返回 `PRECONDITION_FAILED`
 9. Session 创建后必须自动引导 bootstrap：自动创建 `bootstrap` 模块 + 唯一 `tmpl.init.v0` 任务，并预编译该任务的 IMPL/VERIFY `READY` 快照
+10. Git 仓库隔离：每个 session 使用独立仓库根（`sessions/<session_id>/repo`）；`task/*`、`run/*`、`main` 都限定在该 session 仓库内
+11. `DELIVERED` 任务进入 merge gate 采用“事件驱动立即触发 + GC 兜底补偿”双路径，避免长时间滞留
+12. VERIFY 失败策略：
+   - 基础设施失败：允许同一 merge candidate 自动重试（最多 2 次）
+   - 业务失败：原任务从 `DELIVERED` 回退到可调度状态继续 debug（不自动拆分 verify-failed bugfix 任务）
+13. Git 证据链要求：
+   - rebase 产出的 merge candidate 必须写入 `refs/agentx/candidate/<task>/<attempt>`
+   - merge 成功后 `main` 必须至少存在一个注释 `delivery/<YYYYMMDD-HHmm>` tag
 
 ---
 
@@ -280,6 +288,39 @@ task_run_event:
 2. `runs/{runId}/finish` 的 `result_status/work_report/delivery_commit/artifact_refs_json` 统一写入 `task_run_events(event_type=RUN_FINISHED).data_json`，重资产内容通过 `ARTIFACT_LINKED` 引用。
 3. `task_runs.context_snapshot_id` 必须指向 `status=READY` 的快照；若快照 `STALE/FAILED/PENDING`，run 创建必须被拒绝。
 
+### 3.7 Query Read Models（前端聚合查询）
+
+前端工作台需要一组“页面可直接消费”的聚合查询，而不是只拼底层写接口。
+
+这些读模型当前约定：
+1. 仅用于读取，不承载状态推进。
+2. 响应字段以 `camelCase` 返回，便于当前前端 demo 直接消费。
+3. 语义仍以底层账本为准；例如 `canCompleteSession=false` 时，前端必须以服务端 gate 为准。
+
+最小返回范围：
+
+1. `GET /api/v0/sessions/{sessionId}/progress`
+   - session 基本信息
+   - requirement 摘要
+   - task / ticket / run 计数
+   - latest run 摘要
+   - delivery 摘要
+   - `phase / blockerSummary / primaryAction / canCompleteSession / completionBlockers`
+2. `GET /api/v0/sessions/{sessionId}/ticket-inbox`
+   - 当前 session 的 ticket 列表
+   - latest event 摘要
+   - run/task 来源锚点
+   - `requestKind / question / needsUserAction`
+3. `GET /api/v0/sessions/{sessionId}/task-board`
+   - 按 module 分组的 tasks
+   - 依赖 task ids
+   - latest context snapshot 状态
+   - latest run / latest verify / latest delivery 摘要
+4. `GET /api/v0/sessions/{sessionId}/run-timeline`
+   - 最近 run event 时间线
+   - 关联的 task/module/worker
+   - `eventType / eventBody / eventDataJson`
+
 ---
 
 ## 4. Worker 任务包（Task Package）契约（API 下发）
@@ -348,10 +389,15 @@ task_package:
 8. `POST /api/v0/requirement-docs/{docId}/confirm`：用户确认需求版本（触发 ARCH_REVIEW ticket）
 9. `GET /api/v0/sessions/{sessionId}/tickets?status=WAITING_USER`：拉取需要用户响应的提请
 10. `POST /api/v0/tickets/{ticketId}/events`：用户响应（写 USER_RESPONDED 事件并推进 ticket 状态）
+11. `GET /api/v0/sessions/{sessionId}/progress`：读取 session 工作台总览聚合视图
+12. `GET /api/v0/sessions/{sessionId}/ticket-inbox`：读取当前 session 的提请收件箱聚合视图
+13. `GET /api/v0/sessions/{sessionId}/task-board`：读取按模块分组的任务看板聚合视图
+14. `GET /api/v0/sessions/{sessionId}/run-timeline`：读取最近 run 事件时间线聚合视图
 
 说明（v0 进度视图范围）：
 1. 用户侧“查看进度”的最小闭环是提请收件箱与关键状态（session/ticket/task 状态）。
-2. run 级细粒度执行事件主要面向 Agent/总工消费，后续如需用户级运行看板再增量扩展读取接口。
+2. `progress / ticket-inbox / task-board / run-timeline` 是面向工作台页面的前端 read-model，不替代底层写接口。
+3. run 级细粒度执行事件原本主要面向 Agent/总工消费；v0 现已补充 `run-timeline` 作为用户级只读可观测视图，但仍不允许前端直接改写 run 状态。
 
 ### 5.2 Agent（需求/架构/上下文处理/总工）
 
@@ -424,7 +470,7 @@ task_package:
 3. Worker claim 获得 run 与 worktree（run 绑定 `context_snapshot_id`）
 4. Worker 执行并 `finish(SUCCEEDED)`，报告中包含 `delivery_commit`
 5. 服务端将 task 标为 `DELIVERED` 并更新 `task/<task_id>` 到交付候选
-6. 总工触发 merge gate start，服务端 rebase 并创建 VERIFY run（同样绑定 `context_snapshot_id`）
+6. 服务端在 `DELIVERED` 后立即触发 merge gate start（若车道繁忙则后续由 GC 兜底重试）
 7. VERIFY 通过后服务端快进 main，并 `DELIVERED -> DONE`
 
 ---

@@ -44,7 +44,7 @@ public class RuntimeLlmConfigService implements RuntimeLlmConfigUseCase {
         @Value("${agentx.worker-runtime.llm.base-url:https://dashscope.aliyuncs.com/compatible-mode/v1}") String workerBaseUrl,
         @Value("${agentx.worker-runtime.llm.model:qwen3.5-plus-2026-02-15}") String workerModel,
         @Value("${agentx.worker-runtime.llm.api-key:}") String workerApiKey,
-        @Value("${agentx.worker-runtime.command-timeout-ms:120000}") long workerTimeoutMs
+        @Value("${agentx.worker-runtime.llm.timeout-ms:${agentx.worker-runtime.command-timeout-ms:120000}}") long workerTimeoutMs
     ) {
         this.testerPort = testerPort;
         this.storePort = storePort;

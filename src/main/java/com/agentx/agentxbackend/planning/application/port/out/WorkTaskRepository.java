@@ -22,4 +22,8 @@ public interface WorkTaskRepository {
     boolean claimIfReady(String taskId, String runId, Instant updatedAt);
 
     int countNonDoneByTemplateId(String taskTemplateId);
+
+    int countNonDoneBySessionIdAndTemplateId(String sessionId, String taskTemplateId);
+
+    int countNonDoneBySessionId(String sessionId);
 }

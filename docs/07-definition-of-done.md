@@ -150,7 +150,7 @@ VERIFY run 的定位是：把“交付候选”变成“可验证事实”。
 
 ## 5. DoD 未通过时怎么处理（避免“带病 DONE”）
 
-1. VERIFY 失败：不允许进入 `DONE`；必须通过新任务修复（BUGFIX/IMPL/补测试）后再重新触发 VERIFY
+1. VERIFY 失败：不允许进入 `DONE`；基础设施失败可在同一 merge candidate 上自动重试（最多 2 次），业务失败则回退原任务进入 debug 再触发 VERIFY
 2. 合并门禁失败（冲突/不满足约束）：不允许进入 `DONE`；可创建“冲突修复任务”或回收原任务继续修改，见模块 06 的 C9
 3. 需要取舍/补信息：只能通过 `DECISION/CLARIFICATION` 工单进入用户决策面（模块 03），不允许 Worker 自行决定
 

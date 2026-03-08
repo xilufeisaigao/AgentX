@@ -36,6 +36,13 @@ public class DefaultToolpackBootstrap {
             return;
         }
         register(
+            "TP-JAVA-17",
+            "java",
+            "17",
+            "language",
+            "Java runtime compatibility target for legacy Spring Boot task plans."
+        );
+        register(
             "TP-JAVA-21",
             "java",
             "21",
@@ -87,11 +94,11 @@ public class DefaultToolpackBootstrap {
     private void registerDefaultWorkers() {
         registerWorkerProfile(
             "WRK-BOOT-JAVA-CORE",
-            List.of("TP-GIT-2", "TP-JAVA-21", "TP-MAVEN-3")
+            List.of("TP-GIT-2", "TP-JAVA-17", "TP-JAVA-21", "TP-MAVEN-3")
         );
         registerWorkerProfile(
             "WRK-BOOT-JAVA-DB",
-            List.of("TP-GIT-2", "TP-JAVA-21", "TP-MAVEN-3", "TP-MYSQL-8")
+            List.of("TP-GIT-2", "TP-JAVA-17", "TP-JAVA-21", "TP-MAVEN-3", "TP-MYSQL-8")
         );
         registerWorkerProfile(
             "WRK-BOOT-PYTHON-AUX",
@@ -101,9 +108,16 @@ public class DefaultToolpackBootstrap {
 
     private void registerWorkerProfile(String workerId, List<String> toolpackIds) {
         try {
-            workerCapabilityUseCase.registerWorker(workerId);
+            boolean exists = workerCapabilityUseCase.workerExists(workerId);
+            if (!exists) {
+                workerCapabilityUseCase.registerWorker(workerId);
+            } else {
+                workerCapabilityUseCase.updateWorkerStatus(workerId, WorkerStatus.READY);
+            }
             workerCapabilityUseCase.bindToolpacks(workerId, toolpackIds);
-            workerCapabilityUseCase.updateWorkerStatus(workerId, WorkerStatus.READY);
+            if (!exists) {
+                workerCapabilityUseCase.updateWorkerStatus(workerId, WorkerStatus.READY);
+            }
         } catch (RuntimeException ex) {
             log.warn(
                 "Skip default worker bootstrap: workerId={}, toolpacks={}, reason={}",

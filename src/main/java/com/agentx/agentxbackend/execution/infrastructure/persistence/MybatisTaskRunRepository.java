@@ -98,6 +98,17 @@ public class MybatisTaskRunRepository implements TaskRunRepository {
     }
 
     @Override
+    public int countVerifyRunsByTaskAndBaseCommit(String taskId, String baseCommit) {
+        if (taskId == null || taskId.isBlank()) {
+            throw new IllegalArgumentException("taskId must not be blank");
+        }
+        if (baseCommit == null || baseCommit.isBlank()) {
+            throw new IllegalArgumentException("baseCommit must not be blank");
+        }
+        return mapper.countVerifyRunsByTaskAndBaseCommit(taskId.trim(), baseCommit.trim());
+    }
+
+    @Override
     public Optional<TaskRun> findLatestRunByTaskAndKind(String taskId, RunKind runKind) {
         if (taskId == null || taskId.isBlank()) {
             throw new IllegalArgumentException("taskId must not be blank");
@@ -118,6 +129,14 @@ public class MybatisTaskRunRepository implements TaskRunRepository {
             throw new IllegalArgumentException("runKind must not be null");
         }
         return mapper.countActiveRunsByTaskAndKind(taskId.trim(), runKind.name()) > 0;
+    }
+
+    @Override
+    public boolean existsActiveRunBySessionId(String sessionId) {
+        if (sessionId == null || sessionId.isBlank()) {
+            throw new IllegalArgumentException("sessionId must not be blank");
+        }
+        return mapper.countActiveRunsBySessionId(sessionId.trim()) > 0;
     }
 
     @Override

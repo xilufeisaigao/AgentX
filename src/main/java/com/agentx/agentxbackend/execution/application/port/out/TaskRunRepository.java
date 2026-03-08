@@ -26,9 +26,13 @@ public interface TaskRunRepository {
 
     Optional<TaskRun> findLatestVerifyRunByTaskAndBaseCommit(String taskId, String baseCommit);
 
+    int countVerifyRunsByTaskAndBaseCommit(String taskId, String baseCommit);
+
     Optional<TaskRun> findLatestRunByTaskAndKind(String taskId, RunKind runKind);
 
     boolean existsActiveRunByTaskAndKind(String taskId, RunKind runKind);
+
+    boolean existsActiveRunBySessionId(String sessionId);
 
     List<TaskRun> findExpiredActiveRuns(Instant leaseBefore, int limit);
 

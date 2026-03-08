@@ -1,6 +1,7 @@
 package com.agentx.agentxbackend.session.application;
 
-import com.agentx.agentxbackend.session.application.port.out.DeliveryProofPort;
+import com.agentx.agentxbackend.session.application.port.in.SessionCompletionReadinessUseCase;
+import com.agentx.agentxbackend.session.application.query.SessionCompletionReadiness;
 import com.agentx.agentxbackend.session.application.port.out.DomainEventPublisher;
 import com.agentx.agentxbackend.session.application.port.out.SessionRepository;
 import com.agentx.agentxbackend.session.domain.model.Session;
@@ -12,6 +13,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Optional;
 
@@ -29,9 +31,9 @@ class SessionCommandServiceTest {
     @Mock
     private SessionRepository sessionRepository;
     @Mock
-    private DeliveryProofPort deliveryProofPort;
-    @Mock
     private DomainEventPublisher domainEventPublisher;
+    @Mock
+    private SessionCompletionReadinessUseCase sessionCompletionReadinessUseCase;
     @InjectMocks
     private SessionCommandService service;
 
@@ -120,7 +122,7 @@ class SessionCommandServiceTest {
     }
 
     @Test
-    void completeSessionShouldRequireDeliveryProof() {
+    void completeSessionShouldRejectWhenReadinessHasBlocker() {
         Session current = new Session(
             "SES-1",
             "x",
@@ -129,14 +131,26 @@ class SessionCommandServiceTest {
             Instant.now()
         );
         when(sessionRepository.findById("SES-1")).thenReturn(Optional.of(current));
-        when(deliveryProofPort.hasAtLeastOneDeliveryTagOnMain("SES-1")).thenReturn(false);
+        when(sessionCompletionReadinessUseCase.getCompletionReadiness("SES-1"))
+            .thenReturn(new SessionCompletionReadiness(
+                "SES-1",
+                "ACTIVE",
+                false,
+                true,
+                false,
+                false,
+                false,
+                List.of("Session has unfinished tasks.")
+            ));
 
-        assertThrows(IllegalStateException.class, () -> service.completeSession("SES-1"));
+        IllegalStateException ex = assertThrows(IllegalStateException.class, () -> service.completeSession("SES-1"));
+
+        assertTrue(ex.getMessage().contains("Session has unfinished tasks"));
         verify(sessionRepository, never()).updateStatus(any(), any());
     }
 
     @Test
-    void completeSessionShouldMoveToCompletedWhenProofExists() {
+    void completeSessionShouldMoveToCompletedWhenReadinessAllows() {
         Session current = new Session(
             "SES-1",
             "x",
@@ -152,16 +166,28 @@ class SessionCommandServiceTest {
             Instant.now()
         );
         when(sessionRepository.findById("SES-1")).thenReturn(Optional.of(current));
-        when(deliveryProofPort.hasAtLeastOneDeliveryTagOnMain("SES-1")).thenReturn(true);
+        when(sessionCompletionReadinessUseCase.getCompletionReadiness("SES-1"))
+            .thenReturn(new SessionCompletionReadiness(
+                "SES-1",
+                "ACTIVE",
+                true,
+                false,
+                false,
+                false,
+                true,
+                List.of()
+            ));
         when(sessionRepository.updateStatus("SES-1", SessionStatus.COMPLETED)).thenReturn(completed);
 
         Session result = service.completeSession("SES-1");
+
         assertEquals(SessionStatus.COMPLETED, result.status());
     }
 
     @Test
     void sessionOperationsShouldFailWhenSessionMissing() {
         when(sessionRepository.findById("SES-404")).thenReturn(Optional.empty());
+
         assertThrows(NoSuchElementException.class, () -> service.pauseSession("SES-404"));
         assertThrows(NoSuchElementException.class, () -> service.resumeSession("SES-404"));
         assertThrows(NoSuchElementException.class, () -> service.completeSession("SES-404"));

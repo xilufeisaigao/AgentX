@@ -43,8 +43,6 @@ agentx:
         task-title: ${AGENTX_SESSION_BOOTSTRAP_INIT_TASK_TITLE:Initialize project baseline and runtime workspace}
         task-template-id: ${AGENTX_SESSION_BOOTSTRAP_INIT_TASK_TEMPLATE_ID:tmpl.init.v0}
         required-toolpacks-json: ${AGENTX_SESSION_BOOTSTRAP_INIT_REQUIRED_TOOLPACKS_JSON:["TP-GIT-2","TP-JAVA-21","TP-MAVEN-3"]}
-        context-trigger-type: ${AGENTX_SESSION_BOOTSTRAP_INIT_CONTEXT_TRIGGER_TYPE:MANUAL_REFRESH}
-        compile-verify-context: ${AGENTX_SESSION_BOOTSTRAP_INIT_COMPILE_VERIFY_CONTEXT:true}
   workforce:
     bootstrap-default-toolpacks: ${AGENTX_WORKFORCE_BOOTSTRAP_DEFAULT_TOOLPACKS:true}
     bootstrap-default-workers: ${AGENTX_WORKFORCE_BOOTSTRAP_DEFAULT_WORKERS:false}
@@ -211,6 +209,8 @@ agentx:
     git:
       executable: ${AGENTX_WORKER_RUNTIME_GIT_EXECUTABLE:git}
     command-timeout-ms: ${AGENTX_WORKER_RUNTIME_COMMAND_TIMEOUT_MS:120000}
+    execution:
+      command-timeout-ms: ${AGENTX_WORKER_RUNTIME_EXECUTION_COMMAND_TIMEOUT_MS:${AGENTX_WORKER_RUNTIME_COMMAND_TIMEOUT_MS:600000}}
     max-edits-per-run: ${AGENTX_WORKER_RUNTIME_MAX_EDITS_PER_RUN:20}
     llm:
       provider: ${AGENTX_WORKER_RUNTIME_LLM_PROVIDER:mock}
@@ -218,6 +218,7 @@ agentx:
       base-url: ${AGENTX_WORKER_RUNTIME_LLM_BASE_URL:${AGENTX_REQUIREMENT_LLM_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}}
       model: ${AGENTX_WORKER_RUNTIME_LLM_MODEL:${AGENTX_REQUIREMENT_LLM_MODEL:qwen3.5-plus-2026-02-15}}
       api-key: ${AGENTX_WORKER_RUNTIME_LLM_API_KEY:${AGENTX_REQUIREMENT_LLM_API_KEY:}}
+      timeout-ms: ${AGENTX_WORKER_RUNTIME_LLM_TIMEOUT_MS:${AGENTX_WORKER_RUNTIME_COMMAND_TIMEOUT_MS:120000}}
   requirement:
     discovery-history:
       max-messages: ${AGENTX_REQUIREMENT_DISCOVERY_HISTORY_MAX_MESSAGES:24}

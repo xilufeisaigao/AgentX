@@ -118,6 +118,14 @@ class ArchitectTicketAutoProcessorServiceTest {
                             List.of("con"),
                             List.of("risk"),
                             List.of("cost")
+                        ),
+                        new ArchitectTicketProposalGeneratorPort.DecisionOption(
+                            "OPT-B",
+                            "Option B",
+                            List.of("pro2"),
+                            List.of("con2"),
+                            List.of("risk2"),
+                            List.of("cost2")
                         )
                     ),
                     new ArchitectTicketProposalGeneratorPort.Recommendation("OPT-A", "reason"),
@@ -164,6 +172,169 @@ class ArchitectTicketAutoProcessorServiceTest {
         assertTrue(types.contains("COMMENT"));
         assertTrue(types.contains("DECISION_REQUESTED"));
         assertTrue(dataCaptor.getAllValues().stream().anyMatch(v -> v.contains("\"request_kind\":\"DECISION\"")));
+    }
+
+    @Test
+    void processOpenArchitectTicketsShouldAutoRespondWhenOnlyOneRecommendedOptionExists() {
+        ArchitectTicketAutoProcessorService service = new ArchitectTicketAutoProcessorService(
+            sessionHistoryQueryUseCase,
+            requirementDocQueryUseCase,
+            ticketQueryUseCase,
+            ticketCommandUseCase,
+            proposalGeneratorPort,
+            architectWorkPlanningService,
+            new ObjectMapper(),
+            "architect-auto-test",
+            300,
+            "",
+            1,
+            0,
+            12
+        );
+
+        Ticket handoff = sampleTicket("TCK-AUTO-1", TicketType.HANDOFF, TicketStatus.OPEN);
+        when(ticketQueryUseCase.listBySession("SES-1", null, "architect_agent", null))
+            .thenReturn(List.of(handoff));
+        when(ticketQueryUseCase.listEvents("TCK-AUTO-1")).thenReturn(List.of());
+        when(requirementDocQueryUseCase.findCurrentBySessionId("SES-1")).thenReturn(confirmedRequirementDoc());
+        when(ticketCommandUseCase.claimTicket("TCK-AUTO-1", "architect-auto-test", 300)).thenReturn(handoff);
+        when(proposalGeneratorPort.generate(any()))
+            .thenReturn(
+                new ArchitectTicketProposalGeneratorPort.Proposal(
+                    "DECISION",
+                    "Choose the project structure?",
+                    List.of("ctx"),
+                    List.of(
+                        new ArchitectTicketProposalGeneratorPort.DecisionOption(
+                            "OPT-A",
+                            "Single-module Spring Boot structure",
+                            List.of("simple"),
+                            List.of("none"),
+                            List.of("low"),
+                            List.of("low")
+                        )
+                    ),
+                    new ArchitectTicketProposalGeneratorPort.Recommendation("OPT-A", "Only viable option"),
+                    "Only one viable option remains.",
+                    "mock",
+                    "qwen3.5-plus-2026-02-15"
+                )
+            );
+        when(ticketCommandUseCase.appendEvent(any(), any(), any(), any(), any()))
+            .thenReturn(
+                new TicketEvent(
+                    "TEV-AUTO-1",
+                    "TCK-AUTO-1",
+                    TicketEventType.COMMENT,
+                    "architect_agent",
+                    "summary",
+                    "{}",
+                    Instant.parse("2026-02-21T00:00:00Z")
+                )
+            );
+
+        ArchitectTicketAutoProcessorService.AutoProcessResult result = service.processOpenArchitectTickets("SES-1", 8);
+
+        assertEquals(1, result.processedCount());
+        ArgumentCaptor<String> eventTypeCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> bodyCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> dataCaptor = ArgumentCaptor.forClass(String.class);
+        verify(ticketCommandUseCase, org.mockito.Mockito.times(3)).appendEvent(
+            eq("TCK-AUTO-1"),
+            eq("architect_agent"),
+            eventTypeCaptor.capture(),
+            bodyCaptor.capture(),
+            dataCaptor.capture()
+        );
+        assertEquals(List.of("COMMENT", "DECISION_REQUESTED", "USER_RESPONDED"), eventTypeCaptor.getAllValues());
+        assertTrue(bodyCaptor.getAllValues().get(2).contains("Auto-adopted recommendation"));
+        assertTrue(dataCaptor.getAllValues().get(2).contains("\"auto_selected\":true"));
+        verify(architectWorkPlanningService, never()).planAndPersist(any(), any(), any());
+    }
+
+    @Test
+    void processOpenArchitectTicketsShouldAutoRespondForArchReviewRecommendationWithMultipleOptions() {
+        ArchitectTicketAutoProcessorService service = new ArchitectTicketAutoProcessorService(
+            sessionHistoryQueryUseCase,
+            requirementDocQueryUseCase,
+            ticketQueryUseCase,
+            ticketCommandUseCase,
+            proposalGeneratorPort,
+            architectWorkPlanningService,
+            new ObjectMapper(),
+            "architect-auto-test",
+            300,
+            "",
+            1,
+            0,
+            12
+        );
+
+        Ticket archReview = sampleTicket("TCK-ARCH-AUTO-1", TicketType.ARCH_REVIEW, TicketStatus.OPEN);
+        when(ticketQueryUseCase.listBySession("SES-1", null, "architect_agent", null))
+            .thenReturn(List.of(archReview));
+        when(ticketQueryUseCase.listEvents("TCK-ARCH-AUTO-1")).thenReturn(List.of());
+        when(requirementDocQueryUseCase.findCurrentBySessionId("SES-1")).thenReturn(confirmedRequirementDoc());
+        when(ticketCommandUseCase.claimTicket("TCK-ARCH-AUTO-1", "architect-auto-test", 300)).thenReturn(archReview);
+        when(proposalGeneratorPort.generate(any()))
+            .thenReturn(
+                new ArchitectTicketProposalGeneratorPort.Proposal(
+                    "DECISION",
+                    "Choose the Spring Boot baseline?",
+                    List.of("Requirement already mandates Spring Boot 3.x and Maven."),
+                    List.of(
+                        new ArchitectTicketProposalGeneratorPort.DecisionOption(
+                            "OPT-A",
+                            "Use spring-boot-starter-parent managed dependencies",
+                            List.of("official default"),
+                            List.of(),
+                            List.of("low"),
+                            List.of("low")
+                        ),
+                        new ArchitectTicketProposalGeneratorPort.DecisionOption(
+                            "OPT-B",
+                            "Manually pin starter dependency versions",
+                            List.of("more control"),
+                            List.of("more complexity"),
+                            List.of("higher drift risk"),
+                            List.of("higher")
+                        )
+                    ),
+                    new ArchitectTicketProposalGeneratorPort.Recommendation("OPT-A", "Prefer the default Spring Boot baseline."),
+                    "The requirement is already explicit enough to choose the default safely.",
+                    "mock",
+                    "qwen3.5-plus-2026-02-15"
+                )
+            );
+        when(ticketCommandUseCase.appendEvent(any(), any(), any(), any(), any()))
+            .thenReturn(
+                new TicketEvent(
+                    "TEV-ARCH-AUTO-1",
+                    "TCK-ARCH-AUTO-1",
+                    TicketEventType.COMMENT,
+                    "architect_agent",
+                    "summary",
+                    "{}",
+                    Instant.parse("2026-02-21T00:00:00Z")
+                )
+            );
+
+        ArchitectTicketAutoProcessorService.AutoProcessResult result = service.processOpenArchitectTickets("SES-1", 8);
+
+        assertEquals(1, result.processedCount());
+        ArgumentCaptor<String> eventTypeCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> dataCaptor = ArgumentCaptor.forClass(String.class);
+        verify(ticketCommandUseCase, org.mockito.Mockito.times(3)).appendEvent(
+            eq("TCK-ARCH-AUTO-1"),
+            eq("architect_agent"),
+            eventTypeCaptor.capture(),
+            any(),
+            dataCaptor.capture()
+        );
+        assertEquals(List.of("COMMENT", "DECISION_REQUESTED", "USER_RESPONDED"), eventTypeCaptor.getAllValues());
+        assertTrue(dataCaptor.getAllValues().get(2).contains("\"auto_selected\":true"));
+        assertTrue(dataCaptor.getAllValues().get(2).contains("\"selected_option_id\":\"OPT-A\""));
+        verify(architectWorkPlanningService, never()).planAndPersist(any(), any(), any());
     }
 
     @Test
@@ -225,7 +396,7 @@ class ArchitectTicketAutoProcessorServiceTest {
     }
 
     @Test
-    void processOpenArchitectTicketsShouldSkipWhenRequirementNotConfirmed() {
+    void processOpenArchitectTicketsShouldProcessWithEmptyRequirementContextWhenRequirementNotConfirmed() {
         ArchitectTicketAutoProcessorService service = new ArchitectTicketAutoProcessorService(
             sessionHistoryQueryUseCase,
             requirementDocQueryUseCase,
@@ -257,12 +428,41 @@ class ArchitectTicketAutoProcessorServiceTest {
                     Instant.parse("2026-02-21T00:00:00Z")
                 )
             ));
+        when(ticketCommandUseCase.claimTicket("TCK-NOT-CONFIRMED", "architect-auto-test", 300)).thenReturn(handoff);
+        when(proposalGeneratorPort.generate(any()))
+            .thenReturn(
+                new ArchitectTicketProposalGeneratorPort.Proposal(
+                    "CLARIFICATION",
+                    "Need clarification",
+                    List.of(),
+                    List.of(),
+                    null,
+                    "summary",
+                    "mock",
+                    "qwen3.5-plus-2026-02-15"
+                )
+            );
+        when(ticketCommandUseCase.appendEvent(any(), any(), any(), any(), any()))
+            .thenReturn(
+                new TicketEvent(
+                    "TEV-NOT-CONFIRMED-1",
+                    "TCK-NOT-CONFIRMED",
+                    TicketEventType.COMMENT,
+                    "architect_agent",
+                    "summary",
+                    "{}",
+                    Instant.parse("2026-02-21T00:00:00Z")
+                )
+            );
 
         ArchitectTicketAutoProcessorService.AutoProcessResult result = service.processOpenArchitectTickets("SES-1", 8);
 
-        assertEquals(0, result.processedCount());
-        verify(ticketCommandUseCase, never()).claimTicket(any(), any(), anyInt());
-        verify(proposalGeneratorPort, never()).generate(any());
+        assertEquals(1, result.processedCount());
+        verify(ticketCommandUseCase).claimTicket("TCK-NOT-CONFIRMED", "architect-auto-test", 300);
+        ArgumentCaptor<ArchitectTicketProposalGeneratorPort.GenerateInput> inputCaptor =
+            ArgumentCaptor.forClass(ArchitectTicketProposalGeneratorPort.GenerateInput.class);
+        verify(proposalGeneratorPort).generate(inputCaptor.capture());
+        assertEquals("", inputCaptor.getValue().requirementDocContent());
         verify(architectWorkPlanningService, never()).planAndPersist(any(), any(), any());
     }
 

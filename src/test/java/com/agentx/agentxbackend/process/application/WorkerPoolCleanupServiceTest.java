@@ -40,7 +40,8 @@ class WorkerPoolCleanupServiceTest {
             0,
             2,
             128,
-            "oldest_idle"
+            "oldest_idle",
+            ""
         );
     }
 
@@ -75,7 +76,8 @@ class WorkerPoolCleanupServiceTest {
             0,
             2,
             128,
-            "least_used"
+            "least_used",
+            ""
         );
         Instant now = Instant.now();
         Worker w1 = new Worker("WRK-A", WorkerStatus.READY, now.minusSeconds(1000), now.minusSeconds(1000));
@@ -96,5 +98,33 @@ class WorkerPoolCleanupServiceTest {
 
         assertEquals(1, result.overCapacityWorkers());
         verify(workerCapabilityUseCase).updateWorkerStatus("WRK-B", WorkerStatus.DISABLED);
+    }
+
+    @Test
+    void cleanupShouldSkipReservedWorkers() {
+        WorkerPoolCleanupService reservedAwareService = new WorkerPoolCleanupService(
+            workerCapabilityUseCase,
+            workerRunStatsUseCase,
+            1,
+            0,
+            2,
+            128,
+            "oldest_idle",
+            "WRK-BOOT-JAVA-CORE"
+        );
+        Instant now = Instant.now();
+        Worker reserved = new Worker("WRK-BOOT-JAVA-CORE", WorkerStatus.READY, now.minusSeconds(1000), now.minusSeconds(1000));
+        Worker disposable = new Worker("WRK-AUTO-1", WorkerStatus.READY, now.minusSeconds(1000), now.minusSeconds(1000));
+
+        when(workerCapabilityUseCase.countWorkers()).thenReturn(2);
+        when(workerCapabilityUseCase.listWorkersByStatus(WorkerStatus.READY, 128)).thenReturn(List.of(reserved, disposable));
+        when(workerRunStatsUseCase.listActiveWorkerIds(512)).thenReturn(Set.of());
+        when(workerRunStatsUseCase.findWorkerRunStats("WRK-AUTO-1")).thenReturn(Optional.empty());
+
+        WorkerPoolCleanupService.CleanupResult result = reservedAwareService.cleanupOnce(2);
+
+        assertEquals(List.of("WRK-AUTO-1"), result.disabledWorkerIds());
+        verify(workerCapabilityUseCase, never()).updateWorkerStatus("WRK-BOOT-JAVA-CORE", WorkerStatus.DISABLED);
+        verify(workerCapabilityUseCase).updateWorkerStatus("WRK-AUTO-1", WorkerStatus.DISABLED);
     }
 }

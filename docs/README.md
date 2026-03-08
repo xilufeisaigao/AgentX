@@ -27,7 +27,21 @@
 1. Docker 运行指南：`docs/deployment/docker-runtime.md`
 2. 接口契约：`docs/openapi/agentx-control-plane.v0.yaml`
 3. 数据库结构：`docs/schema/agentx_schema_v0.sql`
+4. 当前工程快照：`docs/plans/status/2026-03-08-codex-project-snapshot.md`
+5. 当前前端交互方案：`docs/plans/status/2026-03-08-codex-frontend-redesign.md`
 
 ## 文档整理说明
 
-`docs/plans/**` 下的阶段性计划/交接稿已从主文档集移除（历史内容保留在 git 提交历史），避免发布版本中出现过期执行计划干扰阅读。
+`docs/plans/**` 仅保留阶段性状态快照与仍在跟踪的事项；
+过期的交接稿/临时计划会在收敛后删除，避免发布版本中出现失效执行说明。
+
+其中推荐优先阅读：
+
+1. `docs/plans/status/2026-03-08-codex-project-snapshot.md`
+   - 当前真实可跑到哪一步
+   - 已验证的端到端场景
+   - 仍待继续扩大的风险面
+2. `docs/plans/status/2026-03-08-codex-frontend-redesign.md`
+   - 当前前端信息架构
+   - 已实现页面分区
+   - 下一步前后端并行接口面

@@ -1,1605 +1,1764 @@
-const API_TIMEOUT_MS = 240000;
-const DEFAULT_GIT_URL = "git@github.com:your-org/agentx-backend.git";
-const DEFAULT_UI_LANGUAGE = "zh-CN";
-const SESSION_PREVIEW_LIMIT = 20;
+const API_TIMEOUT_MS = 30000;
+const AUTO_REFRESH_MS = 15000;
+const PHASE_STEPS = ["DRAFTING", "REVIEWING", "WAITING_USER", "EXECUTING", "DELIVERED", "COMPLETED"];
+const PROJECT_TABS = [
+  { id: "overview", label: "Overview" },
+  { id: "requirement", label: "Requirement" },
+  { id: "tickets", label: "Tickets" },
+  { id: "tasks", label: "Tasks" },
+  { id: "runs", label: "Runs" },
+  { id: "delivery", label: "Delivery" },
+];
+const OPS_TABS = [
+  { id: "runtime", label: "Runtime" },
+  { id: "workforce", label: "Workforce" },
+];
 
 const state = {
   sessions: [],
   activeSessionId: null,
-  showAllSessions: false,
-  messagesBySession: new Map(),
-  tickets: [],
+  activeWorkspace: "project",
+  activeProjectTab: "overview",
+  activeOpsTab: "runtime",
+  sessionDetails: new Map(),
+  progressBySession: new Map(),
+  ticketInboxBySession: new Map(),
+  taskBoardBySession: new Map(),
+  runTimelineBySession: new Map(),
+  cloneRepoBySession: new Map(),
   ticketEventsById: new Map(),
-  openTicketIds: new Set(),
-  ticketDraftsById: new Map(),
-  workersById: new Map(),
-  uiLanguage: DEFAULT_UI_LANGUAGE,
-  runtimeSummary: {
-    claimedRuns: 0,
-    succeededRuns: 0,
-    needInputRuns: 0,
-    failedRuns: 0,
-  },
-  rightPanelOpenOrder: [],
-  clonePublicationBySession: new Map(),
-  modalShown: false,
+  selectedTicketIdBySession: new Map(),
+  selectedTaskIdBySession: new Map(),
+  selectedRunIdBySession: new Map(),
+  requirementComposerBySession: new Map(),
+  requirementContentBySession: new Map(),
+  ticketReplyById: new Map(),
+  runtimeConfig: null,
+  runtimeEditor: null,
+  runtimeProbe: null,
+  workers: null,
+  lastAutomationResult: null,
+  detail: null,
   refreshTimer: null,
 };
 
 const refs = {
+  workspaceSwitch: document.getElementById("workspaceSwitch"),
+  systemLead: document.getElementById("systemLead"),
+  systemSummary: document.getElementById("systemSummary"),
   sessionList: document.getElementById("sessionList"),
-  sessionCount: document.getElementById("sessionCount"),
-  toggleSessionBtn: document.getElementById("toggleSessionBtn"),
-  newSessionBtn: document.getElementById("newSessionBtn"),
+  missionEyebrow: document.getElementById("missionEyebrow"),
   activeSessionTitle: document.getElementById("activeSessionTitle"),
   activeSessionMeta: document.getElementById("activeSessionMeta"),
-  chatFeed: document.getElementById("chatFeed"),
-  chatForm: document.getElementById("chatForm"),
-  messageInput: document.getElementById("messageInput"),
-  sendBtn: document.getElementById("sendBtn"),
-  refreshBtn: document.getElementById("refreshBtn"),
-  confirmBtn: document.getElementById("confirmBtn"),
-  advanceBtn: document.getElementById("advanceBtn"),
-  ticketList: document.getElementById("ticketList"),
-  refreshTicketBtn: document.getElementById("refreshTicketBtn"),
-  progressList: document.getElementById("progressList"),
-  workerList: document.getElementById("workerList"),
-  autoProvisionBtn: document.getElementById("autoProvisionBtn"),
-  autoRunBtn: document.getElementById("autoRunBtn"),
+  headerActions: document.getElementById("headerActions"),
+  phaseRibbon: document.getElementById("phaseRibbon"),
+  tabStrip: document.getElementById("tabStrip"),
+  mainView: document.getElementById("mainView"),
+  detailDrawer: document.getElementById("detailDrawer"),
+  detailTitle: document.getElementById("detailTitle"),
+  detailContent: document.getElementById("detailContent"),
   toast: document.getElementById("toast"),
-  gitModal: document.getElementById("gitModal"),
-  gitAddress: document.getElementById("gitAddress"),
-  gitCloneCommand: document.getElementById("gitCloneCommand"),
-  gitCloneMeta: document.getElementById("gitCloneMeta"),
-  gitAddressInput: document.getElementById("gitAddressInput"),
-  copyGitBtn: document.getElementById("copyGitBtn"),
-  closeModalBtn: document.getElementById("closeModalBtn"),
-  languageSelect: document.getElementById("languageSelect"),
-  runtimeRefreshBtn: document.getElementById("runtimeRefreshBtn"),
-  runtimeTestBtn: document.getElementById("runtimeTestBtn"),
-  runtimeApplyBtn: document.getElementById("runtimeApplyBtn"),
-  runtimeConfigStatus: document.getElementById("runtimeConfigStatus"),
-  configOutputLanguage: document.getElementById("configOutputLanguage"),
-  reqProvider: document.getElementById("reqProvider"),
-  reqBaseUrl: document.getElementById("reqBaseUrl"),
-  reqModel: document.getElementById("reqModel"),
-  reqApiKey: document.getElementById("reqApiKey"),
-  workerProvider: document.getElementById("workerProvider"),
-  workerBaseUrl: document.getElementById("workerBaseUrl"),
-  workerModel: document.getElementById("workerModel"),
-  workerApiKey: document.getElementById("workerApiKey"),
-  rightPanelToggles: Array.from(document.querySelectorAll(".right-collapse-toggle")),
 };
 
 document.addEventListener("DOMContentLoaded", () => {
-  initializeRightPanels();
-  wireEvents();
+  document.addEventListener("click", handleClick);
+  document.addEventListener("input", handleInput);
   void bootstrap();
 });
 
-function wireEvents() {
-  refs.newSessionBtn.addEventListener("click", () => void createSession(false));
-  refs.toggleSessionBtn.addEventListener("click", () => {
-    state.showAllSessions = !state.showAllSessions;
-    renderSessions();
-  });
-  refs.refreshBtn.addEventListener("click", () => void refreshActiveSession(true));
-  refs.confirmBtn.addEventListener("click", () => void confirmRequirement(false));
-  refs.advanceBtn.addEventListener("click", () => void advanceOneStep());
-  refs.refreshTicketBtn.addEventListener("click", () => void refreshTickets(true));
-  refs.autoProvisionBtn.addEventListener("click", () => void triggerAutoProvision());
-  refs.autoRunBtn.addEventListener("click", () => void triggerAutoRun());
-  refs.chatForm.addEventListener("submit", (event) => {
+async function handleClick(event) {
+  const actionElement = event.target.closest("[data-action]");
+  if (actionElement) {
     event.preventDefault();
-    void sendChatMessage();
-  });
-  refs.copyGitBtn.addEventListener("click", () => void copyGitUrl());
-  refs.closeModalBtn.addEventListener("click", () => closeGitModal());
-  refs.gitAddressInput.addEventListener("change", () => persistGitAddress());
-  refs.languageSelect.addEventListener("change", () => handleLanguageChange());
-  refs.runtimeRefreshBtn.addEventListener("click", () => void loadRuntimeConfig(true));
-  refs.runtimeTestBtn.addEventListener("click", () => void testRuntimeConfig());
-  refs.runtimeApplyBtn.addEventListener("click", () => void applyRuntimeConfig());
-  refs.rightPanelToggles.forEach((toggle) => {
-    toggle.addEventListener("click", () => {
-      const panelId = toggle.dataset.rightToggle;
-      if (!panelId) {
-        return;
+    await withErrorToast(async () => {
+      const action = actionElement.dataset.action;
+      switch (action) {
+        case "create-session":
+          await createSession();
+          break;
+        case "refresh-session":
+          await refreshActiveSession(true);
+          break;
+        case "pause-session":
+        case "resume-session":
+        case "complete-session":
+          await runSessionCommand(action.replace("-session", ""));
+          break;
+        case "save-requirement":
+          await saveRequirementContent();
+          break;
+        case "create-draft":
+          await submitRequirementDraft(actionElement.dataset.persist !== "false");
+          break;
+        case "confirm-requirement":
+          await confirmRequirement();
+          break;
+        case "reply-ticket":
+          await submitTicketResponse(actionElement.dataset.ticketId || "");
+          break;
+        case "publish-clone":
+          await publishCloneRepo();
+          break;
+        case "refresh-runtime":
+          await loadRuntimeConfig(true);
+          break;
+        case "test-runtime":
+          await testRuntimeConfig();
+          break;
+        case "apply-runtime":
+          await applyRuntimeConfig();
+          break;
+        case "refresh-workers":
+          await loadWorkers(true);
+          break;
+        case "auto-provision":
+          await runAutomation("/api/v0/workforce/auto-provision", {}, "Worker 自动供给已执行。");
+          break;
+        case "auto-run":
+          await runAutomation("/api/v0/workforce/runtime/auto-run", {}, "Worker 自动运行已执行。");
+          break;
+        case "lease-recovery":
+          await runAutomation("/api/v0/execution/lease-recovery", {}, "Lease recovery 已执行。");
+          break;
+        case "cleanup-workers":
+          await runAutomation("/api/v0/workforce/cleanup", {}, "Worker cleanup 已执行。");
+          break;
+        case "close-drawer":
+          state.detail = null;
+          render();
+          break;
+        default:
+          break;
       }
-      toggleRightPanel(panelId);
     });
-  });
-}
+    return;
+  }
 
-function initializeRightPanels() {
-  const panels = getRightPanels();
-  state.rightPanelOpenOrder = [];
-  panels.forEach((panel) => {
-    const panelId = panel.dataset.rightPanelId;
-    if (!panelId) {
-      return;
+  const workspaceElement = event.target.closest("[data-workspace]");
+  if (workspaceElement) {
+    event.preventDefault();
+    await withErrorToast(() => switchWorkspace(workspaceElement.dataset.workspace || "project"));
+    return;
+  }
+
+  const tabElement = event.target.closest("[data-tab]");
+  if (tabElement) {
+    event.preventDefault();
+    await withErrorToast(() => switchTab(tabElement.dataset.tab || "overview"));
+    return;
+  }
+
+  const detailElement = event.target.closest("[data-detail-kind]");
+  if (detailElement) {
+    event.preventDefault();
+    await withErrorToast(() => openDetail(detailElement.dataset.detailKind || "", detailElement.dataset.detailId || ""));
+    return;
+  }
+
+  const sessionElement = event.target.closest("[data-session-id]");
+  if (sessionElement) {
+    event.preventDefault();
+    const sessionId = sessionElement.dataset.sessionId || "";
+    if (sessionId && sessionId !== state.activeSessionId) {
+      await withErrorToast(() => selectSession(sessionId));
     }
-    if (!panel.classList.contains("is-collapsed")) {
-      state.rightPanelOpenOrder.push(panelId);
-    }
-    updateRightPanelToggleState(panel);
-  });
-  enforceRightPanelOpenLimit();
+  }
 }
 
-function getRightPanels() {
-  return Array.from(document.querySelectorAll(".right-collapsible"));
-}
-
-function findRightPanel(panelId) {
-  return document.querySelector(`.right-collapsible[data-right-panel-id="${panelId}"]`);
-}
-
-function toggleRightPanel(panelId) {
-  const panel = findRightPanel(panelId);
-  if (!panel) {
+function handleInput(event) {
+  const model = event.target.dataset.model;
+  if (!model) {
     return;
   }
-  if (panel.classList.contains("is-collapsed")) {
-    openRightPanel(panelId);
-    return;
-  }
-  closeRightPanel(panelId);
-}
 
-function openRightPanel(panelId) {
-  const panel = findRightPanel(panelId);
-  if (!panel) {
-    return;
-  }
-  panel.classList.remove("is-collapsed");
-  touchRightPanelOrder(panelId);
-  enforceRightPanelOpenLimit(panelId);
-  updateRightPanelToggleState(panel);
-}
-
-function closeRightPanel(panelId) {
-  const panel = findRightPanel(panelId);
-  if (!panel) {
-    return;
-  }
-  panel.classList.add("is-collapsed");
-  state.rightPanelOpenOrder = state.rightPanelOpenOrder.filter((id) => id !== panelId);
-  updateRightPanelToggleState(panel);
-}
-
-function touchRightPanelOrder(panelId) {
-  state.rightPanelOpenOrder = state.rightPanelOpenOrder.filter((id) => id !== panelId);
-  state.rightPanelOpenOrder.push(panelId);
-}
-
-function enforceRightPanelOpenLimit(preferredPanelId = "") {
-  const isOpen = (id) => {
-    const panel = findRightPanel(id);
-    return panel && !panel.classList.contains("is-collapsed");
-  };
-  state.rightPanelOpenOrder = state.rightPanelOpenOrder.filter((id) => isOpen(id));
-  while (state.rightPanelOpenOrder.length > 2) {
-    let closeId = state.rightPanelOpenOrder[0];
-    if (closeId === preferredPanelId && state.rightPanelOpenOrder.length > 1) {
-      closeId = state.rightPanelOpenOrder[1];
-    }
-    const panel = findRightPanel(closeId);
-    if (panel) {
-      panel.classList.add("is-collapsed");
-      updateRightPanelToggleState(panel);
-    }
-    state.rightPanelOpenOrder = state.rightPanelOpenOrder.filter((id) => id !== closeId);
-  }
-}
-
-function updateRightPanelToggleState(panel) {
-  const toggle = panel.querySelector(".right-collapse-toggle");
-  if (!toggle) {
-    return;
-  }
-  const collapsed = panel.classList.contains("is-collapsed");
-  toggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
-  const indicator = toggle.querySelector(".right-collapse-indicator");
-  if (indicator) {
-    indicator.textContent = collapsed ? "展开" : "收起";
+  const sessionId = state.activeSessionId;
+  switch (model) {
+    case "requirement-title":
+      getRequirementComposer(sessionId).title = event.target.value;
+      break;
+    case "requirement-user-input":
+      getRequirementComposer(sessionId).userInput = event.target.value;
+      break;
+    case "requirement-content":
+      state.requirementContentBySession.set(sessionId, event.target.value);
+      break;
+    case "ticket-reply":
+      state.ticketReplyById.set(event.target.dataset.ticketId || "", event.target.value);
+      break;
+    default:
+      updateRuntimeEditor(model, event.target.value, event.target.dataset.profile || "");
+      break;
   }
 }
 
 async function bootstrap() {
-  const initialGitUrl = localStorage.getItem("agentx_git_url") || DEFAULT_GIT_URL;
-  refs.gitAddressInput.value = initialGitUrl;
-  syncCloneDisplay(initialGitUrl);
-  state.uiLanguage = normalizeLanguageCode(localStorage.getItem("agentx_ui_language"));
-  refs.languageSelect.value = state.uiLanguage;
-  refs.configOutputLanguage.value = state.uiLanguage;
-
-  await loadRuntimeConfig(false);
-
-  try {
-    await loadSessions();
-    if (state.sessions.length === 0) {
-      await createSession(true);
-    } else {
-      state.activeSessionId = state.sessions[0].session_id;
-      if (!state.messagesBySession.has(state.activeSessionId)) {
-        state.messagesBySession.set(state.activeSessionId, []);
-      }
-      await refreshActiveSession(false);
-    }
-  } catch (error) {
-    showToast(String(error.message || error), true);
-  } finally {
-    render();
-    startAutoRefresh();
+  render();
+  await Promise.allSettled([loadSessions(), loadRuntimeConfig(false), loadWorkers(false)]);
+  if (!state.activeSessionId && state.sessions.length > 0) {
+    state.activeSessionId = getSessionId(state.sessions[0]);
   }
+  if (state.activeSessionId) {
+    await refreshActiveSession(false);
+  } else if (state.activeWorkspace === "ops") {
+    await Promise.allSettled([loadRuntimeConfig(false), loadWorkers(false)]);
+  }
+  render();
+  startAutoRefresh();
 }
 
 function startAutoRefresh() {
   if (state.refreshTimer) {
-    clearInterval(state.refreshTimer);
+    window.clearInterval(state.refreshTimer);
   }
-  state.refreshTimer = setInterval(() => {
+  state.refreshTimer = window.setInterval(() => {
+    if (document.hidden) {
+      return;
+    }
+    if (document.activeElement && ["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement.tagName)) {
+      return;
+    }
     void refreshActiveSession(false);
-  }, 12000);
+  }, AUTO_REFRESH_MS);
 }
 
-async function apiRequest(path, options = {}) {
-  const method = options.method || "GET";
-  const query = options.query || null;
-  const body = options.body;
-  const url = new URL(path, window.location.origin);
-  if (query) {
-    Object.entries(query).forEach(([key, value]) => {
-      if (value !== undefined && value !== null && String(value).trim() !== "") {
-        url.searchParams.set(key, String(value));
-      }
-    });
+async function switchWorkspace(workspace) {
+  state.activeWorkspace = workspace === "ops" ? "ops" : "project";
+  state.detail = null;
+  if (state.activeWorkspace === "ops") {
+    await Promise.allSettled([loadRuntimeConfig(false), loadWorkers(false)]);
+  } else {
+    await loadCurrentTabData(state.activeSessionId);
   }
+  render();
+}
 
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
-  const headers = {
-    "X-AgentX-Language": state.uiLanguage || DEFAULT_UI_LANGUAGE,
-  };
-  if (body) {
-    headers["Content-Type"] = "application/json";
+async function switchTab(tabId) {
+  if (state.activeWorkspace === "ops") {
+    state.activeOpsTab = tabId;
+  } else {
+    state.activeProjectTab = tabId;
   }
-  try {
-    const response = await fetch(url, {
-      method,
-      headers,
-      body: body ? JSON.stringify(body) : undefined,
-      signal: controller.signal,
-    });
-    clearTimeout(timeoutId);
-
-    if (response.status === 204) {
-      return { status: response.status, data: null };
-    }
-
-    let data = null;
-    const raw = await response.text();
-    if (raw) {
-      try {
-        data = JSON.parse(raw);
-      } catch {
-        data = { raw };
-      }
-    }
-
-    if (!response.ok) {
-      const detail = data && (data.message || data.code || data.raw) ? `: ${data.message || data.code || data.raw}` : "";
-      throw new Error(`${method} ${path} failed (${response.status}${detail})`);
-    }
-    return { status: response.status, data };
-  } catch (error) {
-    clearTimeout(timeoutId);
-    if (error.name === "AbortError") {
-      throw new Error(`${method} ${path} timeout after ${API_TIMEOUT_MS / 1000}s`);
-    }
-    throw error;
-  }
-}
-
-async function loadRuntimeConfig(showNotice) {
-  try {
-    const { data } = await apiRequest("/api/v0/runtime/llm-config");
-    applyRuntimeConfigToForm(data);
-    if (showNotice) {
-      showToast("运行时配置已读取");
-    }
-  } catch (error) {
-    refs.runtimeConfigStatus.textContent = `读取失败: ${error.message}`;
-    refs.runtimeConfigStatus.classList.add("error");
-    if (showNotice) {
-      showToast(String(error.message || error), true);
-    }
-  }
-}
-
-async function testRuntimeConfig() {
-  refs.runtimeTestBtn.disabled = true;
-  refs.runtimeApplyBtn.disabled = true;
-  refs.runtimeConfigStatus.textContent = "连通性测试中...";
-  refs.runtimeConfigStatus.classList.remove("error");
-  try {
-    const payload = buildRuntimeConfigPayload(true);
-    const { data } = await apiRequest("/api/v0/runtime/llm-config:test", {
-      method: "POST",
-      body: payload,
-    });
-    const req = data.requirement_llm || {};
-    const wrk = data.worker_runtime_llm || {};
-    const allOk = Boolean(data.all_ok);
-    refs.runtimeConfigStatus.textContent =
-      `测试${allOk ? "通过" : "失败"} | 需求:${req.ok ? "OK" : "FAIL"} (${req.latency_ms || 0}ms) | Worker:${wrk.ok ? "OK" : "FAIL"} (${wrk.latency_ms || 0}ms)`;
-    refs.runtimeConfigStatus.classList.toggle("error", !allOk);
-    if (!allOk) {
-      const msg = req.error_message || wrk.error_message || "至少一个 LLM 连通性失败";
-      showToast(msg, true);
-    } else {
-      showToast("连通性测试通过");
-    }
-  } catch (error) {
-    refs.runtimeConfigStatus.textContent = `测试失败: ${error.message}`;
-    refs.runtimeConfigStatus.classList.add("error");
-    showToast(String(error.message || error), true);
-  } finally {
-    refs.runtimeTestBtn.disabled = false;
-    refs.runtimeApplyBtn.disabled = false;
-  }
-}
-
-async function applyRuntimeConfig() {
-  refs.runtimeApplyBtn.disabled = true;
-  refs.runtimeTestBtn.disabled = true;
-  refs.runtimeConfigStatus.textContent = "正在应用配置...";
-  refs.runtimeConfigStatus.classList.remove("error");
-  try {
-    const payload = buildRuntimeConfigPayload(true);
-    const { data } = await apiRequest("/api/v0/runtime/llm-config:apply", {
-      method: "POST",
-      body: payload,
-    });
-    applyRuntimeConfigToForm(data);
-    const language = normalizeLanguageCode(data.output_language);
-    state.uiLanguage = language;
-    refs.languageSelect.value = language;
-    localStorage.setItem("agentx_ui_language", language);
-    showToast("配置已应用，后续请求无需重启即可生效");
-  } catch (error) {
-    refs.runtimeConfigStatus.textContent = `应用失败: ${error.message}`;
-    refs.runtimeConfigStatus.classList.add("error");
-    showToast(String(error.message || error), true);
-  } finally {
-    refs.runtimeApplyBtn.disabled = false;
-    refs.runtimeTestBtn.disabled = false;
-  }
-}
-
-function buildRuntimeConfigPayload(includeApiKey) {
-  const outputLanguage = normalizeLanguageCode(refs.configOutputLanguage.value);
-  const reqApiKey = refs.reqApiKey.value.trim();
-  const workerApiKey = refs.workerApiKey.value.trim();
-  return {
-    output_language: outputLanguage,
-    requirement_llm: {
-      provider: normalizeProvider(refs.reqProvider.value),
-      framework: "langchain4j",
-      base_url: refs.reqBaseUrl.value.trim(),
-      model: refs.reqModel.value.trim(),
-      api_key: includeApiKey && reqApiKey ? reqApiKey : undefined,
-      timeout_ms: 120000,
-    },
-    worker_runtime_llm: {
-      provider: normalizeProvider(refs.workerProvider.value),
-      framework: "langchain4j",
-      base_url: refs.workerBaseUrl.value.trim(),
-      model: refs.workerModel.value.trim(),
-      api_key: includeApiKey && workerApiKey ? workerApiKey : undefined,
-      timeout_ms: 120000,
-    },
-  };
-}
-
-function applyRuntimeConfigToForm(config) {
-  if (!config || typeof config !== "object") {
-    return;
-  }
-  const requirement = config.requirement_llm || {};
-  const worker = config.worker_runtime_llm || {};
-
-  refs.configOutputLanguage.value = normalizeLanguageCode(config.output_language);
-  refs.reqProvider.value = normalizeProvider(requirement.provider);
-  refs.reqBaseUrl.value = toText(requirement.base_url || "");
-  refs.reqModel.value = toText(requirement.model || "");
-  refs.reqApiKey.value = "";
-
-  refs.workerProvider.value = normalizeProvider(worker.provider);
-  refs.workerBaseUrl.value = toText(worker.base_url || "");
-  refs.workerModel.value = toText(worker.model || "");
-  refs.workerApiKey.value = "";
-
-  const reqKey = requirement.api_key_configured ? `已配置(${requirement.api_key_masked || "****"})` : "未配置";
-  const workerKey = worker.api_key_configured ? `已配置(${worker.api_key_masked || "****"})` : "未配置";
-  refs.runtimeConfigStatus.textContent =
-    `当前配置 v${config.version || 1} | requirement=${refs.reqProvider.value}(${reqKey}) | worker=${refs.workerProvider.value}(${workerKey})`;
-  refs.runtimeConfigStatus.classList.remove("error");
-}
-
-function normalizeProvider(value) {
-  const normalized = String(value || "").trim().toLowerCase();
-  if (normalized === "bailian") {
-    return "bailian";
-  }
-  return "mock";
-}
-
-async function loadSessions() {
-  const { data } = await apiRequest("/api/v0/sessions");
-  state.sessions = Array.isArray(data) ? data.slice().sort(compareByUpdatedAtDesc) : [];
-  if (!state.activeSessionId && state.sessions.length > 0) {
-    state.activeSessionId = state.sessions[0].session_id;
-  }
-}
-
-async function createSession(isAuto) {
-  const now = new Date();
-  const title = isAuto
-    ? `Auto Session ${formatDateTime(now)}`
-    : `Session ${formatDateTime(now)}`;
-  const { data } = await apiRequest("/api/v0/sessions", {
-    method: "POST",
-    body: { title },
-  });
-  state.activeSessionId = data.session_id;
-  if (!state.messagesBySession.has(data.session_id)) {
-    state.messagesBySession.set(data.session_id, []);
-  }
-  addMessage(data.session_id, "system", `已创建会话: ${title}`);
-  await loadSessions();
-  await refreshActiveSession(true);
-}
-
-function compareByUpdatedAtDesc(a, b) {
-  const aTime = new Date(a.updated_at || a.created_at || 0).getTime();
-  const bTime = new Date(b.updated_at || b.created_at || 0).getTime();
-  return bTime - aTime;
-}
-
-function getActiveSession() {
-  return state.sessions.find((item) => item.session_id === state.activeSessionId) || null;
+  state.detail = null;
+  await loadCurrentTabData(state.activeSessionId);
+  render();
 }
 
 async function selectSession(sessionId) {
   state.activeSessionId = sessionId;
-  if (!state.messagesBySession.has(sessionId)) {
-    state.messagesBySession.set(sessionId, []);
-  }
+  state.detail = null;
   await refreshActiveSession(false);
 }
 
-async function refreshActiveSession(showNotice) {
+async function refreshActiveSession(showToastMessage) {
+  if (state.activeWorkspace === "ops" && !state.activeSessionId) {
+    await Promise.allSettled([loadRuntimeConfig(false), loadWorkers(false)]);
+    render();
+    return;
+  }
   if (!state.activeSessionId) {
     render();
     return;
   }
-  try {
-    const { data } = await apiRequest(`/api/v0/sessions/${state.activeSessionId}`);
-    const index = state.sessions.findIndex((item) => item.session_id === state.activeSessionId);
-    if (index >= 0) {
-      state.sessions[index] = data;
-    } else {
-      state.sessions.unshift(data);
-    }
-    state.sessions.sort(compareByUpdatedAtDesc);
 
-    if (data.current_requirement_doc && data.current_requirement_doc.content) {
-      const messages = state.messagesBySession.get(state.activeSessionId) || [];
-      const alreadyInjected = messages.some((msg) => msg.kind === "snapshot-doc");
-      if (!alreadyInjected) {
-        addMessage(
-          state.activeSessionId,
-          "assistant",
-          `当前会话已有需求文档快照:\n${data.current_requirement_doc.content}`,
-          "snapshot-doc"
-        );
-      }
-    }
+  await loadSessionDetail(state.activeSessionId);
+  await Promise.allSettled([loadProgress(state.activeSessionId), loadCurrentTabData(state.activeSessionId)]);
+  render();
 
-    await refreshTickets(false);
-    await refreshWorkersFromBackend(false);
-    if (showNotice) {
-      showToast("会话信息已刷新");
-    }
-  } catch (error) {
-    showToast(String(error.message || error), true);
-  } finally {
-    render();
+  if (showToastMessage) {
+    showToast("工作台已刷新。");
   }
 }
 
-async function sendChatMessage() {
-  const text = refs.messageInput.value.trim();
-  if (!text) {
+function currentTab() {
+  return state.activeWorkspace === "ops" ? state.activeOpsTab : state.activeProjectTab;
+}
+
+async function loadCurrentTabData(sessionId) {
+  if (state.activeWorkspace === "ops") {
+    await Promise.allSettled([loadRuntimeConfig(false), loadWorkers(false)]);
     return;
   }
-  if (!state.activeSessionId) {
-    showToast("请先创建会话", true);
+
+  if (!sessionId) {
     return;
   }
 
-  refs.sendBtn.disabled = true;
-  refs.messageInput.disabled = true;
-  addMessage(state.activeSessionId, "user", text);
-  refs.messageInput.value = "";
-  renderChat();
-
-  try {
-    const activeSession = getActiveSession();
-    const { data } = await apiRequest(
-      `/api/v0/sessions/${state.activeSessionId}/requirement-agent/drafts`,
-      {
-        method: "POST",
-        body: {
-          title: activeSession?.title || `Session ${state.activeSessionId}`,
-          user_input: text,
-          persist: true,
-        },
-      }
-    );
-
-    const parts = [];
-    if (data.phase) {
-      parts.push(`[${data.phase}]`);
-    }
-    if (data.assistant_message) {
-      parts.push(data.assistant_message);
-    }
-    if (Array.isArray(data.missing_information) && data.missing_information.length > 0) {
-      parts.push(`缺失信息:\n- ${data.missing_information.join("\n- ")}`);
-    }
-    if (data.content) {
-      parts.push(data.content);
-    }
-    const textOut = parts.length > 0 ? parts.join("\n\n") : "已接收请求。";
-    addMessage(state.activeSessionId, "assistant", textOut);
-    await refreshActiveSession(false);
-  } catch (error) {
-    addMessage(state.activeSessionId, "system", `请求失败: ${error.message}`);
-    showToast(String(error.message || error), true);
-  } finally {
-    refs.sendBtn.disabled = false;
-    refs.messageInput.disabled = false;
-    refs.messageInput.focus();
-    render();
+  switch (state.activeProjectTab) {
+    case "tickets":
+      await loadTicketInbox(sessionId);
+      break;
+    case "tasks":
+      await loadTaskBoard(sessionId);
+      break;
+    case "runs":
+      await loadRunTimeline(sessionId);
+      break;
+    case "delivery":
+      await loadCloneRepoPublication(sessionId);
+      break;
+    default:
+      break;
   }
 }
 
-function addMessage(sessionId, role, text, kind = "") {
-  if (!state.messagesBySession.has(sessionId)) {
-    state.messagesBySession.set(sessionId, []);
+async function createSession() {
+  const defaultTitle = `mission-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-")}`;
+  const title = window.prompt("输入新的 Session 标题", defaultTitle);
+  if (!title || !title.trim()) {
+    return;
   }
-  const list = state.messagesBySession.get(sessionId);
-  list.push({
-    role,
-    text,
-    kind,
-    at: new Date().toISOString(),
+
+  const created = await apiRequest("/api/v0/sessions", {
+    method: "POST",
+    body: { title: title.trim() },
   });
+  await loadSessions();
+  await selectSession(getSessionId(created));
+  showToast("Session 已创建。");
 }
 
-async function confirmRequirement(silent) {
+async function runSessionCommand(command) {
   if (!state.activeSessionId) {
-    if (!silent) {
-      showToast("当前没有可确认的会话", true);
-    }
-    return false;
+    throw new Error("当前没有可操作的 Session。");
   }
-  try {
-    const { data: session } = await apiRequest(`/api/v0/sessions/${state.activeSessionId}`);
-    const doc = session.current_requirement_doc;
-    if (!doc || !doc.doc_id) {
-      if (!silent) {
-        showToast("还没有生成需求文档，先在中间对话区沟通需求", true);
-      }
-      return false;
-    }
-    if (doc.confirmed_version) {
-      if (!silent) {
-        showToast("需求已确认，无需重复确认");
-      }
-      return true;
-    }
-    const { data: confirmed } = await apiRequest(`/api/v0/requirement-docs/${doc.doc_id}/confirm`, {
-      method: "POST",
-    });
-    addMessage(state.activeSessionId, "system", `需求已确认: confirmed_version=${confirmed.confirmed_version}`);
-    await refreshActiveSession(false);
-    return true;
-  } catch (error) {
-    if (!silent) {
-      showToast(String(error.message || error), true);
-    }
-    return false;
+  if (command === "complete" && !window.confirm("确认尝试完成当前 Session？")) {
+    return;
   }
+  await apiRequest(`/api/v0/sessions/${state.activeSessionId}/${command}`, { method: "POST" });
+  await refreshActiveSession(false);
+  showToast(`Session ${command} 已执行。`);
 }
 
-async function refreshTickets(showNotice) {
+async function submitRequirementDraft(persist) {
   if (!state.activeSessionId) {
-    state.tickets = [];
-    render();
-    return;
+    throw new Error("当前没有活动 Session。");
   }
-  try {
-    const { data } = await apiRequest(`/api/v0/sessions/${state.activeSessionId}/tickets`, {
-      query: { assignee_role: "architect_agent" },
-    });
-    state.tickets = Array.isArray(data) ? data.slice().sort(compareByUpdatedAtDesc) : [];
-    await preloadActionableTicketEvents(state.tickets);
-    if (showNotice) {
-      showToast("提请列表已刷新");
-    }
-  } catch (error) {
-    if (showNotice) {
-      showToast(String(error.message || error), true);
-    }
-  } finally {
-    render();
-  }
-}
-
-async function preloadActionableTicketEvents(tickets) {
-  const actionable = tickets
-    .filter((ticket) => ticket.status === "WAITING_USER")
-    .map((ticket) => ticket.ticket_id);
-  if (actionable.length === 0) {
-    return;
-  }
-  const jobs = actionable.map(async (ticketId) => {
-    const { data } = await apiRequest(`/api/v0/tickets/${ticketId}/events`);
-    state.ticketEventsById.set(ticketId, Array.isArray(data) ? data : []);
-  });
-  await Promise.allSettled(jobs);
-}
-
-async function loadTicketEvents(ticketId, silent = false) {
-  try {
-    const { data } = await apiRequest(`/api/v0/tickets/${ticketId}/events`);
-    state.ticketEventsById.set(ticketId, Array.isArray(data) ? data : []);
-    renderTickets();
-    renderProgress();
-  } catch (error) {
-    if (!silent) {
-      showToast(String(error.message || error), true);
-    }
-  }
-}
-
-async function submitTicketResponse(ticket, request, formElement) {
-  const requestKind = normalizeRequestKind(request?.requestKind || request?.request_kind || "CLARIFICATION");
-  const selectedRadio = formElement.querySelector("input[type='radio']:checked");
-  const selectedOptionId = selectedRadio ? selectedRadio.value.trim() : "";
-  const customOptionInput = formElement.querySelector("[data-field='custom-option']");
-  const responseTextInput = formElement.querySelector("[data-field='response-text']");
-  const noteInput = formElement.querySelector("[data-field='note']");
-  const customOption = customOptionInput ? customOptionInput.value.trim() : "";
-  const responseText = responseTextInput ? responseTextInput.value.trim() : "";
-  const note = noteInput ? noteInput.value.trim() : "";
-
-  if (requestKind === "DECISION" && !selectedOptionId && !customOption && !responseText) {
-    showToast("请先选择方案，或填写自定义方案/补充说明。", true);
-    return;
-  }
-  if (requestKind === "CLARIFICATION" && !responseText && !customOption) {
-    showToast("请填写澄清回复，或填写自定义处理方案。", true);
-    return;
-  }
-
-  const bodyLines = [];
-  if (requestKind === "DECISION") {
-    if (selectedOptionId) {
-      bodyLines.push(`选择方案: ${selectedOptionId}`);
-    }
-    if (customOption) {
-      bodyLines.push(`自定义方案: ${customOption}`);
-    }
-    if (responseText) {
-      bodyLines.push(`说明: ${responseText}`);
-    }
-    if (note) {
-      bodyLines.push(`备注: ${note}`);
-    }
-  } else {
-    if (responseText) {
-      bodyLines.push(responseText);
-    }
-    if (customOption) {
-      bodyLines.push(`补充方案: ${customOption}`);
-    }
-    if (note) {
-      bodyLines.push(`备注: ${note}`);
-    }
-  }
-
-  const dataJson = {
-    request_kind: requestKind,
-    selected_option_id: selectedOptionId || null,
-    selected: selectedOptionId || customOption || null,
-    custom_option: customOption || null,
-    response_text: responseText || null,
-    note: note || null,
-    source_ticket_id: ticket.ticket_id,
-  };
-
-  try {
-    await apiRequest(`/api/v0/tickets/${ticket.ticket_id}/events`, {
-      method: "POST",
-      body: {
-        event_type: "USER_RESPONDED",
-        actor_role: "user",
-        body: bodyLines.join("\n") || responseText || customOption || "用户已提供反馈",
-        data_json: JSON.stringify(compactObject(dataJson)),
-      },
-    });
-    state.ticketDraftsById.delete(ticket.ticket_id);
-    state.openTicketIds.delete(ticket.ticket_id);
-    await apiRequest("/api/v0/architect/auto-process", {
-      method: "POST",
-      body: {
-        session_id: state.activeSessionId,
-        max_tickets: 8,
-      },
-    });
-    await refreshTickets(false);
-    await loadTicketEvents(ticket.ticket_id, true);
-    addMessage(state.activeSessionId, "system", `已对提请 ${ticket.ticket_id} 回应，架构师继续处理中。`);
-    showToast(`已提交 ${ticket.ticket_id} 的回应`);
-  } catch (error) {
-    showToast(String(error.message || error), true);
-  }
-}
-
-async function triggerArchitectAutoProcess() {
-  if (!state.activeSessionId) {
-    showToast("请先创建会话", true);
-    return null;
-  }
-  const { data } = await apiRequest("/api/v0/architect/auto-process", {
+  const composer = getRequirementComposer(state.activeSessionId);
+  const detail = state.sessionDetails.get(state.activeSessionId);
+  const doc = getRequirementDoc(detail);
+  const response = await apiRequest(`/api/v0/sessions/${state.activeSessionId}/requirement-agent/drafts`, {
     method: "POST",
     body: {
-      session_id: state.activeSessionId,
-      max_tickets: 8,
+      title: composer.title.trim() || getSessionTitle(detail),
+      user_input: composer.userInput.trim(),
+      doc_id: doc ? getDocId(doc) : null,
+      persist,
     },
   });
-  await refreshTickets(false);
-  return data;
-}
 
-async function refreshWorkersFromBackend(showNotice = false) {
-  try {
-    const { data } = await apiRequest("/api/v0/workforce/workers", {
-      query: {
-        status: "READY,PROVISIONING,DISABLED",
-        limit: 512,
-      },
-    });
-    const rows = Array.isArray(data?.workers) ? data.workers : [];
-    const nextWorkers = new Map();
-    rows.forEach((item) => {
-      const workerId = toText(item.worker_id);
-      if (!workerId) {
-        return;
-      }
-      const previous = state.workersById.get(workerId);
-      nextWorkers.set(workerId, {
-        workerId,
-        status: toText(item.status || "UNKNOWN"),
-        createdAt: item.created_at || previous?.createdAt || new Date().toISOString(),
-        updatedAt: item.updated_at || previous?.updatedAt || new Date().toISOString(),
-        toolpackIds: Array.isArray(item.toolpack_ids) ? item.toolpack_ids.map((v) => toText(v)).filter(Boolean) : [],
-        lastClaim: previous?.lastClaim || null,
-        lastRunSummary: previous?.lastRunSummary || null,
-      });
-    });
-    state.workersById = nextWorkers;
-    if (showNotice) {
-      showToast(`Worker 列表已刷新，可用 READY: ${countWorkersByStatus("READY")}`);
-    }
-  } catch (error) {
-    if (showNotice) {
-      showToast(String(error.message || error), true);
-    }
+  composer.assistantMessage = read(response, "assistantMessage") || "";
+  composer.readyToDraft = Boolean(read(response, "readyToDraft"));
+  composer.missingInformation = arrayOf(response, "missingInformation");
+  if (read(response, "content")) {
+    state.requirementContentBySession.set(state.activeSessionId, read(response, "content"));
   }
+
+  await loadSessionDetail(state.activeSessionId);
+  await loadProgress(state.activeSessionId);
+  render();
+  showToast(persist ? "需求草稿已生成。" : "需求缺口分析已完成。");
 }
 
-function countWorkersByStatus(status) {
-  const normalized = toText(status).toUpperCase();
-  return Array.from(state.workersById.values()).filter((worker) => toText(worker.status).toUpperCase() === normalized)
-    .length;
-}
-
-async function triggerAutoProvision() {
-  try {
-    const { data } = await apiRequest("/api/v0/workforce/auto-provision", {
-      method: "POST",
-      body: { max_tasks: 64 },
-    });
-    await refreshWorkersFromBackend(false);
-    const createdCount = Number(data?.created_workers || 0);
-    showToast(`自动分配完成，新增 worker: ${createdCount}，当前 READY: ${countWorkersByStatus("READY")}`);
-    renderWorkers();
-    renderProgress();
-  } catch (error) {
-    showToast(String(error.message || error), true);
-  }
-}
-
-async function triggerAutoRun() {
-  try {
-    const { data } = await apiRequest("/api/v0/workforce/runtime/auto-run", {
-      method: "POST",
-      body: { max_workers: 8 },
-    });
-    state.runtimeSummary = {
-      claimedRuns: data.claimed_runs || 0,
-      succeededRuns: data.succeeded_runs || 0,
-      needInputRuns: data.need_input_runs || 0,
-      failedRuns: data.failed_runs || 0,
-    };
-    const workerList = Array.from(state.workersById.values());
-    workerList.forEach((worker) => {
-      worker.lastRunSummary = { ...state.runtimeSummary, at: new Date().toISOString() };
-    });
-    await refreshWorkersFromBackend(false);
-    if (state.runtimeSummary.succeededRuns > 0) {
-      void openGitModalWithPublication();
-    }
-    const readyCount = countWorkersByStatus("READY");
-    const claimed = state.runtimeSummary.claimedRuns;
-    const reasonHint = claimed === 0
-      ? readyCount > 0
-        ? "，READY worker 已就绪，当前可能无可认领任务或被 gate 阻塞"
-        : "，当前没有 READY worker"
-      : "";
-    showToast(
-      `执行轮询完成: claimed=${claimed}, succeeded=${state.runtimeSummary.succeededRuns}${reasonHint}`
-    );
-    renderWorkers();
-    renderProgress();
-  } catch (error) {
-    showToast(String(error.message || error), true);
-  }
-}
-
-async function claimWorkerTask(workerId) {
-  try {
-    const { status, data } = await apiRequest(`/api/v0/workers/${workerId}/claim`, {
-      method: "POST",
-    });
-    const worker = state.workersById.get(workerId);
-    if (!worker) {
-      return;
-    }
-    if (status === 204 || !data) {
-      worker.lastClaim = {
-        at: new Date().toISOString(),
-        note: "当前无可认领任务",
-      };
-      showToast(`worker ${workerId} 当前无可认领任务`);
-      renderWorkers();
-      return;
-    }
-    worker.lastClaim = {
-      at: new Date().toISOString(),
-      note: "已认领任务",
-      package: data,
-    };
-    showToast(`worker ${workerId} 已认领任务 ${data.task_id}`);
-    renderWorkers();
-    renderProgress();
-  } catch (error) {
-    showToast(String(error.message || error), true);
-  }
-}
-
-async function advanceOneStep() {
+async function saveRequirementContent() {
   if (!state.activeSessionId) {
-    showToast("请先创建会话", true);
+    throw new Error("当前没有活动 Session。");
+  }
+  const content = (state.requirementContentBySession.get(state.activeSessionId) || "").trim();
+  if (!content) {
+    throw new Error("需求内容不能为空。");
+  }
+
+  const docId = await ensureRequirementDoc(state.activeSessionId);
+  await apiRequest(`/api/v0/requirement-docs/${docId}/content`, {
+    method: "PUT",
+    body: { content },
+  });
+  await loadSessionDetail(state.activeSessionId);
+  await loadProgress(state.activeSessionId);
+  render();
+  showToast("需求文档已保存为新版本。");
+}
+
+async function confirmRequirement() {
+  if (!state.activeSessionId) {
+    throw new Error("当前没有活动 Session。");
+  }
+  const detail = state.sessionDetails.get(state.activeSessionId);
+  const doc = getRequirementDoc(detail);
+  if (!doc) {
+    throw new Error("当前 Session 还没有 requirement doc。");
+  }
+
+  await apiRequest(`/api/v0/requirement-docs/${getDocId(doc)}/confirm`, { method: "POST" });
+  await Promise.allSettled([loadSessionDetail(state.activeSessionId), loadProgress(state.activeSessionId), loadTicketInbox(state.activeSessionId)]);
+  render();
+  showToast("Requirement 已确认。");
+}
+
+async function submitTicketResponse(ticketId) {
+  if (!ticketId) {
+    throw new Error("缺少 ticketId。");
+  }
+  const body = (state.ticketReplyById.get(ticketId) || "").trim();
+  if (!body) {
+    throw new Error("请输入响应内容。");
+  }
+
+  const ticket = findTicketById(state.activeSessionId, ticketId);
+  const dataJson = JSON.stringify({
+    source: "mission_room",
+    request_kind: getRequestKind(ticket) || null,
+  });
+
+  await apiRequest(`/api/v0/tickets/${ticketId}/events`, {
+    method: "POST",
+    body: {
+      event_type: "USER_RESPONDED",
+      actor_role: "user",
+      body,
+      data_json: dataJson,
+    },
+  });
+
+  state.ticketReplyById.set(ticketId, "");
+  await Promise.allSettled([loadTicketInbox(state.activeSessionId), loadProgress(state.activeSessionId), loadTicketEvents(ticketId)]);
+  render();
+  showToast("Ticket 响应已提交。");
+}
+
+async function publishCloneRepo() {
+  if (!state.activeSessionId) {
+    throw new Error("当前没有活动 Session。");
+  }
+  const response = await apiRequest(`/api/v0/sessions/${state.activeSessionId}/delivery/clone-repo`, { method: "POST" });
+  state.cloneRepoBySession.set(state.activeSessionId, response);
+  render();
+  showToast("交付 clone 地址已发布。");
+}
+
+async function testRuntimeConfig() {
+  const probe = await apiRequest("/api/v0/runtime/llm-config:test", {
+    method: "POST",
+    body: buildRuntimeRequest(),
+  });
+  state.runtimeProbe = probe;
+  render();
+  showToast(read(probe, "allOk") ? "运行时配置探测通过。" : "运行时配置存在失败项。", !read(probe, "allOk"));
+}
+
+async function applyRuntimeConfig() {
+  await apiRequest("/api/v0/runtime/llm-config:apply", {
+    method: "POST",
+    body: buildRuntimeRequest(),
+  });
+  await loadRuntimeConfig(true);
+  render();
+  showToast("运行时配置已应用。");
+}
+
+async function runAutomation(path, body, successMessage) {
+  const result = await apiRequest(path, { method: "POST", body });
+  state.lastAutomationResult = {
+    action: path,
+    payload: result,
+    executedAt: new Date().toISOString(),
+  };
+  await Promise.allSettled([loadWorkers(false), loadProgress(state.activeSessionId), loadCurrentTabData(state.activeSessionId)]);
+  render();
+  showToast(successMessage);
+}
+
+async function loadSessions() {
+  const data = await apiRequest("/api/v0/sessions");
+  state.sessions = Array.isArray(data) ? data : [];
+  if (!state.activeSessionId && state.sessions.length > 0) {
+    state.activeSessionId = getSessionId(state.sessions[0]);
+  }
+  render();
+}
+
+async function loadSessionDetail(sessionId) {
+  if (!sessionId) {
+    return null;
+  }
+  const detail = await apiRequest(`/api/v0/sessions/${sessionId}`);
+  state.sessionDetails.set(sessionId, detail);
+  seedRequirementState(sessionId, detail);
+  return detail;
+}
+
+async function loadProgress(sessionId) {
+  if (!sessionId) {
+    return null;
+  }
+  const response = await apiRequest(`/api/v0/sessions/${sessionId}/progress`, { allow404: true });
+  if (response && !response.__notFound) {
+    state.progressBySession.set(sessionId, response);
+    return response;
+  }
+
+  const detail = state.sessionDetails.get(sessionId) || await loadSessionDetail(sessionId);
+  const tickets = await listTicketsRaw(sessionId);
+  const fallback = buildFallbackProgress(detail, tickets);
+  state.progressBySession.set(sessionId, fallback);
+  return fallback;
+}
+
+async function loadTicketInbox(sessionId) {
+  if (!sessionId) {
+    return null;
+  }
+  const response = await apiRequest(`/api/v0/sessions/${sessionId}/ticket-inbox`, { allow404: true });
+  if (response && !response.__notFound) {
+    state.ticketInboxBySession.set(sessionId, response);
+    ensureSelectedTicket(sessionId, arrayOf(response, "tickets"));
+    return response;
+  }
+
+  const tickets = await listTicketsRaw(sessionId);
+  const fallback = {
+    sessionId,
+    appliedStatusFilter: null,
+    totalTickets: tickets.length,
+    waitingUserTickets: tickets.filter((ticket) => read(ticket, "status") === "WAITING_USER").length,
+    tickets: tickets.map((ticket) => ({
+      ticketId: getTicketId(ticket),
+      type: read(ticket, "type"),
+      status: read(ticket, "status"),
+      title: read(ticket, "title"),
+      createdByRole: read(ticket, "createdByRole"),
+      assigneeRole: read(ticket, "assigneeRole"),
+      requirementDocId: read(ticket, "requirementDocId"),
+      requirementDocVer: read(ticket, "requirementDocVer"),
+      payloadJson: read(ticket, "payloadJson"),
+      claimedBy: read(ticket, "claimedBy"),
+      leaseUntil: read(ticket, "leaseUntil"),
+      createdAt: read(ticket, "createdAt"),
+      updatedAt: read(ticket, "updatedAt"),
+      latestEventType: null,
+      latestEventBody: null,
+      latestEventDataJson: null,
+      latestEventAt: null,
+      sourceRunId: null,
+      sourceTaskId: null,
+      requestKind: inferRequestKind(ticket),
+      question: inferTicketQuestion(ticket),
+      needsUserAction: read(ticket, "status") === "WAITING_USER",
+    })),
+    source: "fallback",
+  };
+
+  state.ticketInboxBySession.set(sessionId, fallback);
+  ensureSelectedTicket(sessionId, fallback.tickets);
+  return fallback;
+}
+
+async function loadTaskBoard(sessionId) {
+  if (!sessionId) {
+    return null;
+  }
+  const response = await apiRequest(`/api/v0/sessions/${sessionId}/task-board`, { allow404: true });
+  if (response && !response.__notFound) {
+    state.taskBoardBySession.set(sessionId, response);
+    ensureSelectedTask(sessionId, flattenTasks(response));
+    return response;
+  }
+
+  const fallback = {
+    sessionId,
+    unavailableReason: "当前容器还未加载 task-board read-model。重建 backend 后，这里会展示按模块分组的任务看板。",
+  };
+  state.taskBoardBySession.set(sessionId, fallback);
+  return fallback;
+}
+
+async function loadRunTimeline(sessionId) {
+  if (!sessionId) {
+    return null;
+  }
+  const response = await apiRequest(`/api/v0/sessions/${sessionId}/run-timeline?limit=40`, { allow404: true });
+  if (response && !response.__notFound) {
+    state.runTimelineBySession.set(sessionId, response);
+    ensureSelectedRun(sessionId, arrayOf(response, "items"));
+    return response;
+  }
+
+  const fallback = {
+    sessionId,
+    unavailableReason: "当前容器还未加载 run-timeline read-model。重建 backend 后，这里会展示 run 事件时间线。",
+  };
+  state.runTimelineBySession.set(sessionId, fallback);
+  return fallback;
+}
+
+async function loadTicketEvents(ticketId) {
+  if (!ticketId) {
+    return [];
+  }
+  const events = await apiRequest(`/api/v0/tickets/${ticketId}/events`);
+  state.ticketEventsById.set(ticketId, Array.isArray(events) ? events : []);
+  return events;
+}
+
+async function loadCloneRepoPublication(sessionId) {
+  if (!sessionId) {
+    return null;
+  }
+  const response = await apiRequest(`/api/v0/sessions/${sessionId}/delivery/clone-repo`, { allow404: true });
+  if (response && !response.__notFound) {
+    state.cloneRepoBySession.set(sessionId, response);
+    return response;
+  }
+  state.cloneRepoBySession.delete(sessionId);
+  return null;
+}
+
+async function loadRuntimeConfig(resetEditor) {
+  const config = await apiRequest("/api/v0/runtime/llm-config");
+  state.runtimeConfig = config;
+  if (resetEditor || !state.runtimeEditor) {
+    state.runtimeEditor = buildRuntimeEditor(config);
+  }
+  return config;
+}
+
+async function loadWorkers() {
+  const workers = await apiRequest("/api/v0/workforce/workers?limit=256");
+  state.workers = workers;
+  return workers;
+}
+
+async function listTicketsRaw(sessionId) {
+  const data = await apiRequest(`/api/v0/sessions/${sessionId}/tickets`);
+  return Array.isArray(data) ? data : [];
+}
+
+async function ensureRequirementDoc(sessionId) {
+  const detail = state.sessionDetails.get(sessionId) || await loadSessionDetail(sessionId);
+  const currentDoc = getRequirementDoc(detail);
+  if (currentDoc) {
+    return getDocId(currentDoc);
+  }
+
+  const composer = getRequirementComposer(sessionId);
+  const created = await apiRequest(`/api/v0/sessions/${sessionId}/requirement-docs`, {
+    method: "POST",
+    body: {
+      title: composer.title.trim() || getSessionTitle(detail),
+    },
+  });
+  await loadSessionDetail(sessionId);
+  return getDocId(created);
+}
+
+function buildFallbackProgress(detail, tickets) {
+  const doc = getRequirementDoc(detail);
+  const waitingUser = tickets.filter((ticket) => read(ticket, "status") === "WAITING_USER").length;
+  const openTickets = tickets.filter((ticket) => !["DONE", "BLOCKED"].includes(read(ticket, "status"))).length;
+  const sessionStatus = read(detail, "status") || "ACTIVE";
+  const phase = deriveFallbackPhase(detail, tickets);
+  const blockers = [];
+
+  if (!doc) {
+    blockers.push("Session 还没有 requirement doc。");
+  } else if (read(doc, "status") !== "CONFIRMED") {
+    blockers.push("Requirement 尚未确认。");
+  }
+  if (waitingUser > 0) {
+    blockers.push(`当前有 ${waitingUser} 个 WAITING_USER ticket。`);
+  }
+  if (phase === "EXECUTING") {
+    blockers.push("当前容器未启用 progress read-model，无法读取完整 task/run 完成门禁。");
+  }
+
+  return {
+    sessionId: getSessionId(detail),
+    title: getSessionTitle(detail),
+    sessionStatus,
+    phase,
+    blockerSummary: blockers[0] || "当前 session 没有显式阻塞，但完整运行态仍需 read-model 支撑。",
+    primaryAction: deriveFallbackAction(doc, waitingUser),
+    requirement: doc ? {
+      docId: getDocId(doc),
+      currentVersion: read(doc, "currentVersion") || 0,
+      confirmedVersion: read(doc, "confirmedVersion"),
+      status: read(doc, "status"),
+      title: read(doc, "title"),
+      updatedAt: read(doc, "updatedAt"),
+    } : null,
+    taskCounts: { total: 0, planned: 0, waitingDependency: 0, waitingWorker: 0, readyForAssign: 0, assigned: 0, delivered: 0, done: 0 },
+    ticketCounts: { total: tickets.length, open: openTickets, inProgress: countStatus(tickets, "IN_PROGRESS"), waitingUser, done: countStatus(tickets, "DONE"), blocked: countStatus(tickets, "BLOCKED") },
+    runCounts: { total: 0, running: 0, waitingForeman: 0, succeeded: 0, failed: 0, cancelled: 0 },
+    latestRun: null,
+    delivery: { deliveryTagPresent: false, deliveredTaskCount: 0, doneTaskCount: 0, latestDeliveryTaskId: null, latestDeliveryCommit: null, latestVerifyRunId: null, latestVerifyStatus: null },
+    canCompleteSession: sessionStatus === "COMPLETED",
+    completionBlockers: sessionStatus === "COMPLETED" ? [] : blockers,
+    createdAt: read(detail, "createdAt"),
+    updatedAt: read(detail, "updatedAt"),
+    source: "fallback",
+  };
+}
+
+function seedRequirementState(sessionId, detail) {
+  const composer = getRequirementComposer(sessionId);
+  const doc = getRequirementDoc(detail);
+  if (!composer.title) {
+    composer.title = doc ? read(doc, "title") : getSessionTitle(detail);
+  }
+  if (!state.requirementContentBySession.has(sessionId)) {
+    state.requirementContentBySession.set(sessionId, doc ? read(doc, "content") || "" : "");
+  }
+}
+
+function buildRuntimeEditor(config) {
+  return {
+    outputLanguage: read(config, "outputLanguage") || "zh-CN",
+    requirementLlm: buildRuntimeProfile(read(config, "requirementLlm")),
+    workerRuntimeLlm: buildRuntimeProfile(read(config, "workerRuntimeLlm")),
+  };
+}
+
+function buildRuntimeProfile(profile) {
+  return {
+    provider: read(profile, "provider") || "",
+    framework: read(profile, "framework") || "",
+    baseUrl: read(profile, "baseUrl") || "",
+    model: read(profile, "model") || "",
+    timeoutMs: String(read(profile, "timeoutMs") || 120000),
+    apiKey: "",
+    apiKeyMasked: read(profile, "apiKeyMasked") || "",
+  };
+}
+
+function buildRuntimeRequest() {
+  return {
+    output_language: state.runtimeEditor.outputLanguage.trim() || "zh-CN",
+    requirement_llm: buildRuntimeRequestProfile(state.runtimeEditor.requirementLlm),
+    worker_runtime_llm: buildRuntimeRequestProfile(state.runtimeEditor.workerRuntimeLlm),
+  };
+}
+
+function buildRuntimeRequestProfile(profile) {
+  const payload = {
+    provider: profile.provider.trim(),
+    framework: profile.framework.trim(),
+    base_url: profile.baseUrl.trim(),
+    model: profile.model.trim(),
+    timeout_ms: Number(profile.timeoutMs || 120000),
+  };
+  if (profile.apiKey.trim()) {
+    payload.api_key = profile.apiKey.trim();
+  }
+  return payload;
+}
+
+function updateRuntimeEditor(model, value, profileKey) {
+  if (!state.runtimeEditor) {
     return;
   }
-  refs.advanceBtn.disabled = true;
-  try {
-    const confirmed = await confirmRequirement(true);
-    if (!confirmed) {
-      showToast("先在中间对话区生成并确认需求文档");
-      return;
-    }
-
-    await triggerArchitectAutoProcess();
-    await refreshTickets(false);
-    const waitingTicket = state.tickets.find((item) => item.status === "WAITING_USER");
-    if (waitingTicket) {
-      await loadTicketEvents(waitingTicket.ticket_id);
-      showToast("发现待处理架构提请，请在右侧提交你的决策或澄清。");
-      return;
-    }
-
-    await triggerAutoProvision();
-    await triggerAutoRun();
-    await refreshActiveSession(false);
-  } catch (error) {
-    showToast(String(error.message || error), true);
-  } finally {
-    refs.advanceBtn.disabled = false;
+  if (model === "output-language") {
+    state.runtimeEditor.outputLanguage = value;
+    return;
+  }
+  const profile = state.runtimeEditor[profileKey];
+  if (!profile) {
+    return;
+  }
+  const fieldMap = {
+    provider: "provider",
+    framework: "framework",
+    "base-url": "baseUrl",
+    "model-name": "model",
+    "timeout-ms": "timeoutMs",
+    "api-key": "apiKey",
+  };
+  const field = fieldMap[model];
+  if (field) {
+    profile[field] = value;
   }
 }
 
 function render() {
-  renderSessions();
-  renderChat();
-  renderTickets();
-  renderProgress();
-  renderWorkers();
+  renderWorkspaceSwitch();
+  renderSystemStatus();
+  renderSessionList();
+  renderHeader();
+  renderMainView();
+  renderDetailDrawer();
 }
 
-function renderSessions() {
-  refs.sessionList.innerHTML = "";
-  const total = state.sessions.length;
-  const visibleSessions = state.showAllSessions
-    ? state.sessions
-    : state.sessions.slice(0, SESSION_PREVIEW_LIMIT);
-  refs.toggleSessionBtn.classList.toggle("hidden", total <= SESSION_PREVIEW_LIMIT);
-  refs.toggleSessionBtn.textContent = state.showAllSessions ? "收起" : "显示全部";
-  refs.sessionCount.textContent =
-    total > SESSION_PREVIEW_LIMIT
-      ? `共 ${total} 个会话，当前显示 ${visibleSessions.length} 个`
-      : `共 ${total} 个会话`;
-
-  visibleSessions.forEach((session) => {
-    const li = document.createElement("li");
-    li.className = `session-item ${session.session_id === state.activeSessionId ? "active" : ""}`;
-    li.innerHTML = `
-      <p class="session-title">${escapeHtml(session.title || session.session_id)}</p>
-      <p class="session-meta">${escapeHtml(session.status || "-")} · ${formatDateTime(session.updated_at || session.created_at)}</p>
-    `;
-    li.addEventListener("click", () => void selectSession(session.session_id));
-    refs.sessionList.appendChild(li);
-  });
+function renderWorkspaceSwitch() {
+  refs.workspaceSwitch.innerHTML = [
+    renderWorkspaceButton("project", "Project"),
+    renderWorkspaceButton("ops", "Ops"),
+  ].join("");
 }
 
-function renderChat() {
-  const session = getActiveSession();
-  refs.activeSessionTitle.textContent = session ? session.title || session.session_id : "未选择会话";
-  const doc = session?.current_requirement_doc;
-  const docStatus = doc ? ` · 文档 ${doc.status} v${doc.current_version}` : "";
-  refs.activeSessionMeta.textContent = session ? `状态: ${session.status}${docStatus}` : "状态: -";
-  renderChatFeed();
+function renderSystemStatus() {
+  const progress = state.progressBySession.get(state.activeSessionId);
+  const workers = state.workers;
+  const lead = progress
+    ? `当前焦点：${read(progress, "phase") || "UNKNOWN"} / ${read(progress, "blockerSummary") || "无显式阻塞"}`
+    : "读取 Session 后会在这里显示当前阻塞与下一步动作。";
+
+  refs.systemLead.textContent = lead;
+  refs.systemSummary.innerHTML = [
+    renderMetricChip("Sessions", state.sessions.length),
+    renderMetricChip("Waiting User", read(read(progress, "ticketCounts"), "waitingUser") || 0),
+    renderMetricChip("Running", read(read(progress, "runCounts"), "running") || 0),
+    renderMetricChip("Ready Workers", workers ? read(workers, "readyWorkers") || 0 : 0),
+  ].join("");
 }
 
-function renderChatFeed() {
-  refs.chatFeed.innerHTML = "";
-  if (!state.activeSessionId) {
-    refs.chatFeed.innerHTML = `<div class="bubble system"><div class="bubble-head">系统</div>请先创建会话。</div>`;
+function renderSessionList() {
+  if (state.sessions.length === 0) {
+    refs.sessionList.innerHTML = renderEmptyState("没有 Session", "点击左上角“新建”开始一个新的工作流。");
     return;
   }
-  const messages = state.messagesBySession.get(state.activeSessionId) || [];
-  if (messages.length === 0) {
-    refs.chatFeed.innerHTML = `<div class="bubble system"><div class="bubble-head">系统</div>会话已准备好，输入需求开始对话。</div>`;
-  } else {
-    messages.forEach((msg) => {
-      const div = document.createElement("div");
-      div.className = `bubble ${msg.role}`;
-      const roleName = msg.role === "user" ? "你" : msg.role === "assistant" ? "AgentX" : "系统";
-      div.innerHTML = `
-        <div class="bubble-head">${roleName} · ${formatDateTime(msg.at)}</div>
-        ${escapeHtml(msg.text)}
-      `.replace(/\n/g, "<br>");
-      refs.chatFeed.appendChild(div);
-    });
-  }
-  refs.chatFeed.scrollTop = refs.chatFeed.scrollHeight;
-}
 
-function renderTickets() {
-  refs.ticketList.innerHTML = "";
-  if (!state.activeSessionId) {
-    refs.ticketList.innerHTML = `<p class="muted">请先创建会话。</p>`;
-    return;
-  }
-  const actionable = state.tickets.filter((ticket) => ticket.status === "WAITING_USER");
-  if (actionable.length === 0) {
-    syncTicketClientState([]);
-    refs.ticketList.innerHTML = `<p class="muted">当前没有需要你决策/澄清的提请。点击“推进一步”后会自动触发下一轮。</p>`;
-    return;
-  }
-  syncTicketClientState(actionable.map((ticket) => ticket.ticket_id));
-  actionable.forEach((ticket) => {
-    refs.ticketList.appendChild(buildTicketCard(ticket));
-  });
-}
-
-function buildTicketCard(ticket) {
-  const request = buildTicketRequestViewModel(ticket);
-  const requestKind = normalizeRequestKind(request.requestKind || "CLARIFICATION");
-  const kindLabel = requestKind === "DECISION" ? "决策请求" : "澄清请求";
-  const questionText = request.question || ticket.title || "请查看并回复该提请。";
-  const optionsHtml = requestKind === "DECISION"
-    ? renderDecisionOptions(ticket.ticket_id, request.options, request.recommendationOptionId)
-    : "";
-  const contextHtml = request.context.length > 0
-    ? `<ul class="request-context">${request.context.map((line) => `<li>${escapeHtml(line)}</li>`).join("")}</ul>`
-    : `<p class="muted">暂无补充上下文。</p>`;
-  const requestDetailHtml = request.hasDecisionEvent
-    ? `
-      <div class="request-block">
-        <div class="request-question">${escapeHtml(questionText)}</div>
-        <div class="request-meta">类型: ${escapeHtml(kindLabel)} · ticket: ${escapeHtml(ticket.ticket_id)}</div>
-      </div>
-      <div class="request-block">
-        <div class="input-label">上下文</div>
-        ${contextHtml}
-      </div>
-      ${request.recommendationText
-      ? `<p class="muted">架构建议: ${escapeHtml(request.recommendationText)}</p>`
-      : ""}
-    `
-    : `
-      <p class="muted">提请详情尚未加载，请点击下方“刷新详情”。</p>
-    `;
-
-  const details = document.createElement("details");
-  details.className = "card-item";
-  const events = request.events;
-  const eventTypeSummary = events.slice(-4).map((event) => event.event_type).join(" -> ");
-  details.innerHTML = `
-    <summary>
-      <span class="card-title">${escapeHtml(ticket.title || ticket.ticket_id)}</span>
-      <span class="badge">${escapeHtml(kindLabel)}</span>
-    </summary>
-    <div class="card-body">
-      <div class="request-block">
-        <div><strong>更新时间:</strong> ${formatDateTime(ticket.updated_at || ticket.created_at)}</div>
-        <div><strong>最近事件:</strong> ${escapeHtml(eventTypeSummary || "未加载")}</div>
-      </div>
-      ${requestDetailHtml}
-      <form class="ticket-response-form" data-ticket-id="${escapeHtml(ticket.ticket_id)}" data-request-kind="${escapeHtml(requestKind)}">
-        ${requestKind === "DECISION"
-      ? `
-        <div class="request-block">
-          <div class="input-label">候选方案（可不选，直接填写自定义）</div>
-          ${optionsHtml}
-        </div>`
-      : ""}
-        <label class="input-label" for="response-${escapeHtml(ticket.ticket_id)}">
-          ${requestKind === "DECISION" ? "你的决策说明（可选）" : "你的澄清回复"}
-        </label>
-        <textarea
-          id="response-${escapeHtml(ticket.ticket_id)}"
-          class="ticket-textarea"
-          data-field="response-text"
-          placeholder="${requestKind === "DECISION" ? "填写选择理由、约束、边界等（可不填）" : "请直接补充缺失信息，便于架构师继续推进"}"
-        ></textarea>
-        <label class="input-label">自定义${requestKind === "DECISION" ? "方案" : "处理建议"}（可选）</label>
-        <input
-          class="text-input"
-          type="text"
-          data-field="custom-option"
-          placeholder="${requestKind === "DECISION" ? "例如：OPT-C：分阶段改造" : "例如：先补充数据库约束，再继续拆解"}"
-        >
-        <label class="input-label">备注（可选）</label>
-        <textarea class="ticket-textarea ticket-textarea-small" data-field="note" placeholder="可填写时间、风险偏好、预算边界等"></textarea>
-        <div class="chat-actions ticket-actions">
-          <button type="button" class="ghost-btn small-btn" data-action="refresh-events" data-ticket-id="${escapeHtml(ticket.ticket_id)}">刷新详情</button>
-          <button type="submit" class="primary-btn small-btn">提交回应</button>
+  refs.sessionList.innerHTML = state.sessions.map((session) => {
+    const sessionId = getSessionId(session);
+    const progress = state.progressBySession.get(sessionId);
+    const requirement = getRequirementDoc(session);
+    return `
+      <button type="button" class="session-card ${sessionId === state.activeSessionId ? "is-active" : ""}" data-session-id="${escapeHtml(sessionId)}">
+        <div class="session-card__top">
+          <p class="session-card__title">${escapeHtml(getSessionTitle(session))}</p>
+          ${renderStatusPill(read(session, "status"), "status")}
         </div>
-      </form>
-      <details class="inline-details">
-        <summary class="muted">查看原始事件/载荷</summary>
-        <div class="request-block">
-          <div><strong>payload:</strong></div>
-          <pre>${escapeHtml(formatJson(ticket.payload_json))}</pre>
-          ${events.length > 0 ? `<pre>${escapeHtml(renderEventLines(events))}</pre>` : `<p class="muted">暂无事件详情</p>`}
+        <p class="session-card__blocker">${escapeHtml(read(progress, "blockerSummary") || fallbackSessionSummary(requirement))}</p>
+        <div class="session-card__metrics">
+          <div class="session-card__metric">
+            <strong>${escapeHtml(read(progress, "phase") || deriveFallbackPhase(session, []))}</strong>
+            <span>Phase</span>
+          </div>
+          <div class="session-card__metric">
+            <strong>${read(read(progress, "ticketCounts"), "waitingUser") || 0}</strong>
+            <span>Waiting User</span>
+          </div>
+          <div class="session-card__metric">
+            <strong>${read(read(progress, "runCounts"), "running") || 0}</strong>
+            <span>Running</span>
+          </div>
         </div>
-      </details>
-    </div>
-  `;
-  details.open = state.openTicketIds.has(ticket.ticket_id);
-
-  details.addEventListener("click", (event) => {
-    const target = event.target;
-    if (!(target instanceof HTMLElement)) {
-      return;
-    }
-    const action = target.getAttribute("data-action");
-    const ticketId = target.getAttribute("data-ticket-id");
-    if (action === "refresh-events" && ticketId) {
-      event.preventDefault();
-      void loadTicketEvents(ticketId);
-    }
-  });
-  details.addEventListener("toggle", () => {
-    if (details.open) {
-      state.openTicketIds.add(ticket.ticket_id);
-    } else {
-      state.openTicketIds.delete(ticket.ticket_id);
-    }
-  });
-
-  const formElement = details.querySelector("form.ticket-response-form");
-  if (formElement) {
-    restoreTicketDraft(ticket.ticket_id, formElement);
-    const draftEvents = ["input", "change"];
-    draftEvents.forEach((eventName) => {
-      formElement.addEventListener(eventName, () => {
-        saveTicketDraft(ticket.ticket_id, formElement);
-      });
-    });
-    formElement.addEventListener("submit", (event) => {
-      event.preventDefault();
-      void submitTicketResponse(ticket, request, formElement);
-    });
-  }
-  return details;
+      </button>
+    `;
+  }).join("");
 }
 
-function buildTicketRequestViewModel(ticket) {
-  const events = state.ticketEventsById.get(ticket.ticket_id) || [];
-  let decisionEvent = null;
-  for (let index = events.length - 1; index >= 0; index -= 1) {
-    if (events[index].event_type === "DECISION_REQUESTED") {
-      decisionEvent = events[index];
+function renderHeader() {
+  const detail = state.activeSessionId ? state.sessionDetails.get(state.activeSessionId) : null;
+  const progress = state.activeSessionId ? state.progressBySession.get(state.activeSessionId) : null;
+  refs.missionEyebrow.textContent = state.activeWorkspace === "ops" ? "Ops Console" : "Project Workspace";
+  refs.activeSessionTitle.textContent = detail ? getSessionTitle(detail) : (state.activeWorkspace === "ops" ? "运行时与 worker 运维" : "选择一个 Session");
+  refs.activeSessionMeta.textContent = detail
+    ? `${getSessionId(detail)} · ${read(detail, "status")} · 更新于 ${formatDateTime(read(detail, "updatedAt"))}`
+    : "当前没有活动 Session。";
+
+  refs.headerActions.innerHTML = renderHeaderActions(detail, progress);
+  refs.phaseRibbon.innerHTML = state.activeWorkspace === "project" ? renderPhaseRibbon(progress) : "";
+  refs.tabStrip.innerHTML = renderTabStrip();
+}
+
+function renderHeaderActions(detail, progress) {
+  const buttons = [
+    renderActionButton("刷新", "refresh-session", "ghost"),
+  ];
+
+  if (detail && state.activeWorkspace === "project") {
+    const status = read(detail, "status");
+    if (status === "ACTIVE") {
+      buttons.push(renderActionButton("暂停", "pause-session", "ghost"));
+    }
+    if (status === "PAUSED") {
+      buttons.push(renderActionButton("恢复", "resume-session", "primary"));
+    }
+    buttons.push(renderActionButton("完成 Session", "complete-session", "primary", !read(progress, "canCompleteSession")));
+  }
+
+  if (state.activeWorkspace === "project" && currentTab() === "delivery") {
+    buttons.push(renderActionButton("发布 Clone 地址", "publish-clone", "ghost"));
+  }
+
+  if (state.activeWorkspace === "ops") {
+    buttons.push(renderActionButton("刷新 Runtime", "refresh-runtime", "ghost"));
+    buttons.push(renderActionButton("刷新 Workers", "refresh-workers", "ghost"));
+  }
+
+  return buttons.join("");
+}
+
+function renderPhaseRibbon(progress) {
+  const current = read(progress, "phase") || "DRAFTING";
+  const currentIndex = Math.max(PHASE_STEPS.indexOf(current), 0);
+  return PHASE_STEPS.map((step, index) => {
+    const classes = ["phase-step"];
+    if (index < currentIndex) {
+      classes.push("is-complete");
+    }
+    if (step === current) {
+      classes.push("is-current");
+    }
+    return `<div class="${classes.join(" ")}">${escapeHtml(step.replace("_", " "))}</div>`;
+  }).join("");
+}
+
+function renderTabStrip() {
+  const tabs = state.activeWorkspace === "ops" ? OPS_TABS : PROJECT_TABS;
+  return tabs.map((tab) => `
+    <button type="button" class="tab-button ${currentTab() === tab.id ? "is-active" : ""}" data-tab="${tab.id}">
+      ${escapeHtml(tab.label)}
+    </button>
+  `).join("");
+}
+
+function renderMainView() {
+  if (state.activeWorkspace === "ops") {
+    refs.mainView.innerHTML = currentTab() === "workforce" ? renderWorkforceView() : renderRuntimeView();
+    return;
+  }
+
+  if (!state.activeSessionId) {
+    refs.mainView.innerHTML = renderEmptyState("没有选中的 Session", "从左侧选择一个 Session，或创建新的工作流。");
+    return;
+  }
+
+  switch (state.activeProjectTab) {
+    case "requirement":
+      refs.mainView.innerHTML = renderRequirementView();
       break;
-    }
+    case "tickets":
+      refs.mainView.innerHTML = renderTicketView();
+      break;
+    case "tasks":
+      refs.mainView.innerHTML = renderTaskBoardView();
+      break;
+    case "runs":
+      refs.mainView.innerHTML = renderRunTimelineView();
+      break;
+    case "delivery":
+      refs.mainView.innerHTML = renderDeliveryView();
+      break;
+    default:
+      refs.mainView.innerHTML = renderOverviewView();
+      break;
   }
-  if (!decisionEvent) {
+}
+
+function renderOverviewView() {
+  const progress = state.progressBySession.get(state.activeSessionId);
+  if (!progress) {
+    return renderEmptyState("正在读取 Progress", "后端返回 session 聚合视图后，这里会展示 blocker、任务、run 与交付摘要。");
+  }
+
+  const requirement = read(progress, "requirement");
+  const taskCounts = read(progress, "taskCounts") || {};
+  const ticketCounts = read(progress, "ticketCounts") || {};
+  const runCounts = read(progress, "runCounts") || {};
+  const latestRun = read(progress, "latestRun");
+
+  return `
+    <section class="overview-hero">
+      <div>
+        <p class="section-kicker">Current Blocker</p>
+        <h3>${escapeHtml(read(progress, "blockerSummary") || "当前没有显式阻塞")}</h3>
+        <p>${escapeHtml(read(progress, "primaryAction") || "继续查看会话进度。")}</p>
+        ${read(progress, "source") === "fallback" ? `<p class="field-hint">当前在兼容模式：backend 还没有热更新到新的 progress read-model。</p>` : ""}
+      </div>
+      <div class="metric-strip">
+        ${renderMetricTile(read(taskCounts, "total") || 0, "Tasks")}
+        ${renderMetricTile(read(ticketCounts, "waitingUser") || 0, "Waiting User")}
+        ${renderMetricTile(read(runCounts, "running") || 0, "Running")}
+        ${renderMetricTile(read(progress, "canCompleteSession") ? "YES" : "NO", "Can Complete")}
+      </div>
+    </section>
+    <section class="overview-grid">
+      <article class="span-4">
+        <p class="section-kicker">Requirement</p>
+        <h3 class="section-title">${escapeHtml(requirement ? read(requirement, "title") : "尚未创建")}</h3>
+        <div class="section-body">
+          <div class="detail-line"><span>状态</span>${renderStatusPill(requirement ? read(requirement, "status") : "MISSING", "phase")}</div>
+          <div class="detail-line"><span>当前版本</span><strong>${requirement ? read(requirement, "currentVersion") || 0 : 0}</strong></div>
+          <div class="detail-line"><span>确认版本</span><strong>${requirement ? read(requirement, "confirmedVersion") || "-" : "-"}</strong></div>
+        </div>
+      </article>
+      <article class="span-4">
+        <p class="section-kicker">Task Status</p>
+        <div class="stat-grid">
+          ${renderStatTile(read(taskCounts, "waitingWorker") || 0, "Waiting Worker")}
+          ${renderStatTile(read(taskCounts, "assigned") || 0, "Assigned")}
+          ${renderStatTile(read(taskCounts, "delivered") || 0, "Delivered")}
+          ${renderStatTile(read(taskCounts, "done") || 0, "Done")}
+          ${renderStatTile(read(taskCounts, "readyForAssign") || 0, "Ready")}
+          ${renderStatTile(read(taskCounts, "planned") || 0, "Planned")}
+        </div>
+      </article>
+      <article class="span-4">
+        <p class="section-kicker">Ticket & Run</p>
+        <div class="stat-grid">
+          ${renderStatTile(read(ticketCounts, "open") || 0, "Open Tickets")}
+          ${renderStatTile(read(ticketCounts, "waitingUser") || 0, "Waiting User")}
+          ${renderStatTile(read(runCounts, "waitingForeman") || 0, "Waiting Foreman")}
+          ${renderStatTile(read(runCounts, "succeeded") || 0, "Succeeded")}
+          ${renderStatTile(read(runCounts, "failed") || 0, "Failed")}
+          ${renderStatTile(read(runCounts, "cancelled") || 0, "Cancelled")}
+        </div>
+      </article>
+      <article class="span-7">
+        <p class="section-kicker">Latest Run</p>
+        ${latestRun ? `
+          <h3 class="section-title">${escapeHtml(read(latestRun, "taskTitle") || read(latestRun, "runId"))}</h3>
+          <p>${escapeHtml(read(latestRun, "eventBody") || read(latestRun, "status") || "暂无事件正文")}</p>
+          <div class="chip-row">
+            ${renderChip(read(latestRun, "status") || "UNKNOWN")}
+            ${renderChip(read(latestRun, "runKind") || "IMPL")}
+            ${renderChip(read(latestRun, "workerId") || "unassigned")}
+          </div>
+        ` : `<p class="muted">当前没有可展示的 run 摘要。</p>`}
+      </article>
+      <article class="span-5">
+        <p class="section-kicker">Completion Gate</p>
+        <ul class="list-plain">
+          ${arrayOf(progress, "completionBlockers").length > 0
+            ? arrayOf(progress, "completionBlockers").map((item) => `<li class="chip">${escapeHtml(item)}</li>`).join("")
+            : `<li class="chip">当前没有阻塞项</li>`}
+        </ul>
+      </article>
+    </section>
+  `;
+}
+
+function renderRequirementView() {
+  const detail = state.sessionDetails.get(state.activeSessionId);
+  const doc = getRequirementDoc(detail);
+  const composer = getRequirementComposer(state.activeSessionId);
+  const content = state.requirementContentBySession.get(state.activeSessionId) || "";
+  return `
+    <section class="studio-layout">
+      <article class="studio-panel span-3">
+        <p class="section-kicker">Requirement Ledger</p>
+        <h3>${escapeHtml(doc ? read(doc, "title") : "未创建文档")}</h3>
+        <div class="section-body">
+          <div class="detail-line"><span>状态</span>${renderStatusPill(doc ? read(doc, "status") : "DRAFTING", "phase")}</div>
+          <div class="detail-line"><span>当前版本</span><strong>${doc ? read(doc, "currentVersion") || 0 : 0}</strong></div>
+          <div class="detail-line"><span>确认版本</span><strong>${doc ? read(doc, "confirmedVersion") || "-" : "-"}</strong></div>
+          <div class="detail-line"><span>更新时间</span><strong>${formatDateTime(doc ? read(doc, "updatedAt") : null)}</strong></div>
+        </div>
+      </article>
+      <article class="input-shell span-6">
+        <label class="field-label">Requirement Title</label>
+        <input data-model="requirement-title" value="${escapeHtml(composer.title || "")}" placeholder="需求标题">
+        <label class="field-label">Markdown Content</label>
+        <textarea data-model="requirement-content" placeholder="在这里直接编辑 requirement markdown">${escapeHtml(content)}</textarea>
+        <div class="button-row">
+          ${renderActionButton("保存新版本", "save-requirement", "primary")}
+          ${renderActionButton("确认 Requirement", "confirm-requirement", "ghost", !doc)}
+        </div>
+      </article>
+      <article class="studio-panel span-3 assistant-panel">
+        <p class="section-kicker">Requirement Agent</p>
+        <label class="field-label">输入补充信息</label>
+        <textarea data-model="requirement-user-input" placeholder="描述增量、澄清点、范围与验收标准">${escapeHtml(composer.userInput || "")}</textarea>
+        <div class="button-row">
+          ${renderActionButton("生成草稿", "create-draft", "primary", false, { persist: "true" })}
+          ${renderActionButton("仅分析缺口", "create-draft", "ghost", false, { persist: "false" })}
+        </div>
+        ${composer.assistantMessage ? `<div class="assistant-message">${escapeHtml(composer.assistantMessage)}</div>` : `<p class="field-hint">这里会展示 LLM 的澄清结论与草稿提示。</p>`}
+        ${composer.missingInformation && composer.missingInformation.length > 0 ? `<div class="chip-row">${composer.missingInformation.map((item) => renderChip(item)).join("")}</div>` : ""}
+      </article>
+    </section>
+  `;
+}
+
+function renderTicketView() {
+  const inbox = state.ticketInboxBySession.get(state.activeSessionId);
+  if (!inbox) {
+    return renderEmptyState("正在读取 Ticket Inbox", "这里会聚合当前 Session 的 clarification / decision / arch review 提请。");
+  }
+  const tickets = arrayOf(inbox, "tickets");
+  const selected = getSelectedTicket(state.activeSessionId, tickets);
+  return `
+    <section class="ticket-grid">
+      <div class="ticket-list">
+        ${tickets.length > 0 ? tickets.map((ticket) => `
+          <button type="button" class="ticket-card" data-detail-kind="ticket" data-detail-id="${escapeHtml(getTicketId(ticket))}">
+            <p class="section-kicker">${escapeHtml(getRequestKind(ticket) || read(ticket, "type") || "Ticket")}</p>
+            <h3>${escapeHtml(read(ticket, "title") || getTicketId(ticket))}</h3>
+            <p>${escapeHtml(inferTicketQuestion(ticket))}</p>
+            <div class="ticket-card__footer">
+              ${renderStatusPill(read(ticket, "status"), "status")}
+              <span>${escapeHtml(formatDateTime(read(ticket, "updatedAt") || read(ticket, "latestEventAt")))}</span>
+            </div>
+          </button>
+        `).join("") : renderEmptyState("当前没有 Tickets", "没有待处理提请时，这里会保持空白。")}
+      </div>
+      <div class="drawer-stack">
+        ${selected ? `
+          <article class="drawer-card">
+            <p class="section-kicker">Selected Ticket</p>
+            <h4>${escapeHtml(read(selected, "title") || getTicketId(selected))}</h4>
+            <p>${escapeHtml(inferTicketQuestion(selected))}</p>
+            <div class="chip-row">
+              ${renderChip(read(selected, "type") || "UNKNOWN")}
+              ${renderChip(read(selected, "status") || "UNKNOWN")}
+              ${renderChip(read(selected, "sourceRunId") || "no-run")}
+            </div>
+          </article>
+          <article class="input-shell">
+            <label class="field-label">回复内容</label>
+            <textarea data-model="ticket-reply" data-ticket-id="${escapeHtml(getTicketId(selected))}" placeholder="直接回复系统的 clarification / decision 请求">${escapeHtml(state.ticketReplyById.get(getTicketId(selected)) || "")}</textarea>
+            <div class="button-row">
+              ${renderActionButton("提交响应", "reply-ticket", "primary", !read(selected, "needsUserAction"), { ticketId: getTicketId(selected) })}
+            </div>
+          </article>
+        ` : renderEmptyState("未选择 Ticket", "点击左侧 ticket 卡片查看详情并回复。")}
+      </div>
+    </section>
+  `;
+}
+
+function renderTaskBoardView() {
+  const board = state.taskBoardBySession.get(state.activeSessionId);
+  if (!board) {
+    return renderEmptyState("正在读取 Task Board", "这里会显示按模块组织的任务看板。");
+  }
+  if (board.unavailableReason) {
+    return renderEmptyState("Task Board 暂不可用", board.unavailableReason);
+  }
+
+  const tasks = flattenTasks(board);
+  const selected = getSelectedTask(state.activeSessionId, tasks);
+  return `
+    <section class="tasks-layout">
+      <div class="lane-stack">
+        ${arrayOf(board, "modules").map((module) => `
+          <section class="lane-shell">
+            <div class="lane-shell__header">
+              <div>
+                <p class="section-kicker">${escapeHtml(read(module, "moduleId") || "")}</p>
+                <h3>${escapeHtml(read(module, "moduleName") || "Unnamed Module")}</h3>
+              </div>
+              <span class="muted">${arrayOf(module, "tasks").length} tasks</span>
+            </div>
+            ${arrayOf(module, "tasks").map((task) => `
+              <button type="button" class="lane-card" data-detail-kind="task" data-detail-id="${escapeHtml(read(task, "taskId") || "")}">
+                <p class="section-kicker">${escapeHtml(read(task, "taskTemplateId") || "task")}</p>
+                <h3>${escapeHtml(read(task, "title") || read(task, "taskId") || "Untitled Task")}</h3>
+                <div class="lane-card__chips">
+                  ${renderChip(read(task, "status") || "UNKNOWN")}
+                  ${renderChip(read(task, "lastRunStatus") || "NO_RUN")}
+                  ${renderChip(read(task, "latestContextStatus") || "NO_CONTEXT")}
+                </div>
+                <div class="lane-card__meta">
+                  <span>${escapeHtml(read(task, "activeRunId") || read(task, "lastRunId") || "no-run")}</span>
+                  <span>${escapeHtml(formatDateTime(read(task, "lastRunUpdatedAt") || read(task, "latestContextCompiledAt")))}</span>
+                </div>
+              </button>
+            `).join("")}
+          </section>
+        `).join("")}
+      </div>
+      <div class="drawer-stack">
+        <article class="drawer-card">
+          <p class="section-kicker">Board Summary</p>
+          <div class="stat-grid">
+            ${renderStatTile(read(board, "totalTasks") || 0, "Tasks")}
+            ${renderStatTile(read(board, "activeRuns") || 0, "Active Runs")}
+            ${renderStatTile(arrayOf(board, "modules").length, "Modules")}
+          </div>
+        </article>
+        ${selected ? renderTaskPreviewCard(selected) : renderEmptyState("未选择 Task", "点击任务卡片在右侧查看详细上下文。")}
+      </div>
+    </section>
+  `;
+}
+
+function renderRunTimelineView() {
+  const timeline = state.runTimelineBySession.get(state.activeSessionId);
+  if (!timeline) {
+    return renderEmptyState("正在读取 Run Timeline", "这里会显示最近的 run 事件序列。");
+  }
+  if (timeline.unavailableReason) {
+    return renderEmptyState("Run Timeline 暂不可用", timeline.unavailableReason);
+  }
+
+  const items = arrayOf(timeline, "items");
+  const selected = getSelectedRun(state.activeSessionId, items);
+  return `
+    <section class="tasks-layout">
+      <div class="timeline-stack">
+        ${items.map((item) => `
+          <button type="button" class="timeline-card" data-detail-kind="run" data-detail-id="${escapeHtml(read(item, "runId") || "")}">
+            <p class="section-kicker">${escapeHtml(read(item, "eventType") || "RUN_EVENT")}</p>
+            <h3>${escapeHtml(read(item, "taskTitle") || read(item, "runId") || "Run")}</h3>
+            <p>${escapeHtml(read(item, "eventBody") || read(item, "runStatus") || "无正文")}</p>
+            <div class="ticket-card__footer">
+              <div class="chip-row">
+                ${renderChip(read(item, "runStatus") || "UNKNOWN")}
+                ${renderChip(read(item, "runKind") || "IMPL")}
+              </div>
+              <span>${escapeHtml(formatDateTime(read(item, "eventCreatedAt") || read(item, "startedAt")))}</span>
+            </div>
+          </button>
+        `).join("")}
+      </div>
+      <div class="drawer-stack">
+        <article class="drawer-card">
+          <p class="section-kicker">Timeline Summary</p>
+          <div class="stat-grid">
+            ${renderStatTile(read(timeline, "totalItems") || items.length, "Items")}
+            ${renderStatTile(items.filter((item) => read(item, "runStatus") === "RUNNING").length, "Running")}
+            ${renderStatTile(items.filter((item) => read(item, "eventType") === "RUN_FINISHED").length, "Finished")}
+          </div>
+        </article>
+        ${selected ? renderRunPreviewCard(selected) : renderEmptyState("未选择 Run", "点击左侧事件卡片查看原始执行信息。")}
+      </div>
+    </section>
+  `;
+}
+
+function renderDeliveryView() {
+  const progress = state.progressBySession.get(state.activeSessionId);
+  const delivery = read(progress, "delivery") || {};
+  const clone = state.cloneRepoBySession.get(state.activeSessionId);
+  return `
+    <section class="delivery-layout">
+      <article class="delivery-card span-7">
+        <p class="section-kicker">Completion Gate</p>
+        <h3>${read(progress, "canCompleteSession") ? "Session 可以完成" : "Session 还不能完成"}</h3>
+        <p>${escapeHtml(read(progress, "blockerSummary") || "暂无阻塞摘要")}</p>
+        <div class="chip-row">
+          ${renderChip(`delivery_tag=${read(delivery, "deliveryTagPresent") ? "yes" : "no"}`)}
+          ${renderChip(`done=${read(delivery, "doneTaskCount") || 0}`)}
+          ${renderChip(`delivered=${read(delivery, "deliveredTaskCount") || 0}`)}
+        </div>
+        <ul class="list-plain">
+          ${arrayOf(progress, "completionBlockers").length > 0
+            ? arrayOf(progress, "completionBlockers").map((item) => `<li class="chip">${escapeHtml(item)}</li>`).join("")
+            : `<li class="chip">当前没有 completion blocker</li>`}
+        </ul>
+      </article>
+      <article class="delivery-card span-5 clone-card">
+        <p class="section-kicker">Clone Repo</p>
+        ${clone ? `
+          <h3>${escapeHtml(read(clone, "repositoryName") || "delivery-repo")}</h3>
+          <div class="code-block">${escapeHtml(read(clone, "cloneCommand") || "")}</div>
+          <p>${escapeHtml(read(clone, "cloneUrl") || "")}</p>
+        ` : `<p class="muted">还没有可用的 clone 地址，后端会在交付条件满足后发布。</p>`}
+        <div class="button-row">
+          ${renderActionButton(clone ? "重新发布地址" : "发布 Clone 地址", "publish-clone", "primary")}
+        </div>
+      </article>
+    </section>
+  `;
+}
+
+function renderRuntimeView() {
+  if (!state.runtimeEditor) {
+    return renderEmptyState("正在读取 Runtime Config", "这里会展示当前 requirement / worker LLM profile。");
+  }
+  return `
+    <section class="ops-layout">
+      <article class="ops-card span-7">
+        <p class="section-kicker">Runtime Editor</p>
+        <div class="input-shell">
+          <label class="field-label">Output Language</label>
+          <input data-model="output-language" value="${escapeHtml(state.runtimeEditor.outputLanguage)}">
+          ${renderRuntimeProfileFields("requirementLlm", "Requirement LLM", state.runtimeEditor.requirementLlm)}
+          ${renderRuntimeProfileFields("workerRuntimeLlm", "Worker Runtime LLM", state.runtimeEditor.workerRuntimeLlm)}
+          <div class="button-row">
+            ${renderActionButton("读取配置", "refresh-runtime", "ghost")}
+            ${renderActionButton("探测连通性", "test-runtime", "ghost")}
+            ${renderActionButton("应用配置", "apply-runtime", "primary")}
+          </div>
+        </div>
+      </article>
+      <article class="ops-card span-5">
+        <p class="section-kicker">Current Runtime</p>
+        <h3>Version ${read(state.runtimeConfig, "version") || "-"}</h3>
+        <div class="drawer-stack">
+          ${renderRuntimeSummaryCard("Requirement", read(state.runtimeConfig, "requirementLlm"))}
+          ${renderRuntimeSummaryCard("Worker", read(state.runtimeConfig, "workerRuntimeLlm"))}
+          ${state.runtimeProbe ? `<div class="json-block">${escapeHtml(prettyJson(state.runtimeProbe))}</div>` : `<p class="muted">探测结果会显示在这里。</p>`}
+        </div>
+      </article>
+    </section>
+  `;
+}
+
+function renderWorkforceView() {
+  const workers = state.workers;
+  if (!workers) {
+    return renderEmptyState("正在读取 Worker Pool", "这里会展示 worker 状态、toolpacks 与自动化入口。");
+  }
+  return `
+    <section class="ops-layout">
+      <article class="ops-card span-4">
+        <p class="section-kicker">Pool Summary</p>
+        <div class="stat-grid">
+          ${renderStatTile(read(workers, "totalWorkers") || 0, "Total")}
+          ${renderStatTile(read(workers, "readyWorkers") || 0, "Ready")}
+          ${renderStatTile(read(workers, "disabledWorkers") || 0, "Disabled")}
+        </div>
+      </article>
+      <article class="ops-card span-8">
+        <p class="section-kicker">Automations</p>
+        <div class="button-row">
+          ${renderActionButton("刷新 Workers", "refresh-workers", "ghost")}
+          ${renderActionButton("Auto Provision", "auto-provision", "ghost")}
+          ${renderActionButton("Auto Run", "auto-run", "primary")}
+          ${renderActionButton("Lease Recovery", "lease-recovery", "ghost")}
+          ${renderActionButton("Cleanup", "cleanup-workers", "ghost")}
+        </div>
+        ${state.lastAutomationResult ? `<div class="json-block">${escapeHtml(prettyJson(state.lastAutomationResult))}</div>` : `<p class="muted">最近一次自动化执行结果会显示在这里。</p>`}
+      </article>
+      <article class="ops-card span-12">
+        <p class="section-kicker">Workers</p>
+        <div class="lane-stack">
+          ${arrayOf(workers, "workers").map((worker) => `
+            <div class="lane-card">
+              <p class="section-kicker">${escapeHtml(read(worker, "workerId") || "")}</p>
+              <h3>${escapeHtml(read(worker, "status") || "UNKNOWN")}</h3>
+              <div class="chip-row">${arrayOf(worker, "toolpackIds").map((item) => renderChip(item)).join("")}</div>
+              <div class="lane-card__meta">
+                <span>created ${escapeHtml(formatDateTime(read(worker, "createdAt")))}</span>
+                <span>updated ${escapeHtml(formatDateTime(read(worker, "updatedAt")))}</span>
+              </div>
+            </div>
+          `).join("")}
+        </div>
+      </article>
+    </section>
+  `;
+}
+
+function renderDetailDrawer() {
+  if (!state.detail) {
+    refs.detailDrawer.classList.add("is-empty");
+    refs.detailTitle.textContent = "未选择明细";
+    refs.detailContent.innerHTML = `<p>点击 ticket / task / run 卡片后，这里会显示更细的上下文。</p>`;
+    return;
+  }
+
+  refs.detailDrawer.classList.remove("is-empty");
+  const { title, body } = renderDetailBody(state.detail);
+  refs.detailTitle.textContent = title;
+  refs.detailContent.innerHTML = body;
+}
+
+function renderDetailBody(detail) {
+  if (detail.kind === "ticket") {
+    const ticket = findTicketById(state.activeSessionId, detail.id);
+    const events = state.ticketEventsById.get(detail.id) || [];
     return {
-      hasDecisionEvent: false,
-      requestKind: "CLARIFICATION",
-      question: "",
-      options: [],
-      recommendationOptionId: "",
-      recommendationText: "",
-      context: [],
-      events,
+      title: read(ticket, "title") || detail.id,
+      body: `
+        <div class="drawer-stack">
+          <article class="drawer-card">
+            <p class="section-kicker">Ticket Snapshot</p>
+            <div class="chip-row">
+              ${renderChip(read(ticket, "type") || "UNKNOWN")}
+              ${renderChip(read(ticket, "status") || "UNKNOWN")}
+              ${renderChip(read(ticket, "assigneeRole") || "unassigned")}
+            </div>
+            <p>${escapeHtml(inferTicketQuestion(ticket))}</p>
+          </article>
+          <article class="drawer-card">
+            <p class="section-kicker">Payload</p>
+            <div class="json-block">${escapeHtml(prettyJson(read(ticket, "payloadJson") || "{}"))}</div>
+          </article>
+          <article class="drawer-card">
+            <p class="section-kicker">Events</p>
+            ${events.length > 0 ? events.map((item) => `
+              <div class="code-block">${escapeHtml(`${read(item, "eventType")} · ${formatDateTime(read(item, "createdAt"))}\n${read(item, "body") || ""}`)}</div>
+            `).join("") : `<p class="muted">暂无已加载事件。</p>`}
+          </article>
+        </div>
+      `,
     };
   }
 
-  const data = parseJsonObject(decisionEvent.data_json);
-  const options = parseDecisionOptions(data.options);
-  const requestKind = normalizeRequestKind(data.request_kind || (options.length > 0 ? "DECISION" : "CLARIFICATION"));
-  const recommendationOptionId = toText(
-    data.recommendation?.option_id || data.recommendation?.optionId || data.recommendation?.id
-  );
-  const recommendationReason = toText(data.recommendation?.reason);
-  const recommendationText = recommendationOptionId
-    ? recommendationReason
-      ? `${recommendationOptionId} - ${recommendationReason}`
-      : recommendationOptionId
-    : recommendationReason;
-
-  const context = [];
-  if (Array.isArray(data.context)) {
-    data.context.forEach((line) => {
-      const text = toText(line);
-      if (text) {
-        context.push(text);
-      }
-    });
+  if (detail.kind === "task") {
+    const task = findTaskById(state.activeSessionId, detail.id);
+    return {
+      title: read(task, "title") || detail.id,
+      body: `
+        <div class="drawer-stack">
+          <article class="drawer-card">
+            <p class="section-kicker">Task Snapshot</p>
+            <div class="chip-row">
+              ${renderChip(read(task, "status") || "UNKNOWN")}
+              ${renderChip(read(task, "taskTemplateId") || "task")}
+              ${renderChip(read(task, "activeRunId") || "no-active-run")}
+            </div>
+          </article>
+          <article class="drawer-card">
+            <p class="section-kicker">Context & Dependency</p>
+            <div class="detail-line"><span>Context Snapshot</span><strong>${escapeHtml(read(task, "latestContextSnapshotId") || "-")}</strong></div>
+            <div class="detail-line"><span>Context Status</span><strong>${escapeHtml(read(task, "latestContextStatus") || "-")}</strong></div>
+            <div class="detail-line"><span>Dependency Count</span><strong>${arrayOf(task, "dependencyTaskIds").length}</strong></div>
+            <div class="chip-row">${arrayOf(task, "dependencyTaskIds").map((item) => renderChip(item)).join("") || renderChip("no-dependency")}</div>
+          </article>
+          <article class="drawer-card">
+            <p class="section-kicker">Delivery & Verify</p>
+            <div class="detail-line"><span>Latest Commit</span><strong>${escapeHtml(read(task, "latestDeliveryCommit") || "-")}</strong></div>
+            <div class="detail-line"><span>Verify Run</span><strong>${escapeHtml(read(task, "latestVerifyRunId") || "-")}</strong></div>
+            <div class="detail-line"><span>Verify Status</span><strong>${escapeHtml(read(task, "latestVerifyStatus") || "-")}</strong></div>
+          </article>
+        </div>
+      `,
+    };
   }
-  if (requestKind === "CLARIFICATION" && Array.isArray(data.missing_toolpacks) && data.missing_toolpacks.length > 0) {
-    context.push(`缺失工具包: ${data.missing_toolpacks.map((item) => toText(item)).filter(Boolean).join(", ")}`);
-  }
 
+  const run = findRunById(state.activeSessionId, detail.id);
   return {
-    hasDecisionEvent: true,
-    requestKind,
-    question: toText(data.question || decisionEvent.body || ticket.title),
-    options,
-    recommendationOptionId,
-    recommendationText,
-    context,
-    events,
+    title: read(run, "runId") || detail.id,
+    body: `
+      <div class="drawer-stack">
+        <article class="drawer-card">
+          <p class="section-kicker">Run Snapshot</p>
+          <div class="chip-row">
+            ${renderChip(read(run, "runStatus") || "UNKNOWN")}
+            ${renderChip(read(run, "runKind") || "IMPL")}
+            ${renderChip(read(run, "workerId") || "no-worker")}
+          </div>
+          <p>${escapeHtml(read(run, "eventBody") || "无事件正文")}</p>
+        </article>
+        <article class="drawer-card">
+          <p class="section-kicker">Raw Event Data</p>
+          <div class="json-block">${escapeHtml(prettyJson(read(run, "eventDataJson") || "{}"))}</div>
+        </article>
+        <article class="drawer-card">
+          <p class="section-kicker">Git Context</p>
+          <div class="detail-line"><span>Branch</span><strong>${escapeHtml(read(run, "branchName") || "-")}</strong></div>
+          <div class="detail-line"><span>Started</span><strong>${escapeHtml(formatDateTime(read(run, "startedAt")))}</strong></div>
+          <div class="detail-line"><span>Finished</span><strong>${escapeHtml(formatDateTime(read(run, "finishedAt")))}</strong></div>
+        </article>
+      </div>
+    `,
   };
 }
 
-function renderDecisionOptions(ticketId, options, recommendationOptionId) {
-  if (!Array.isArray(options) || options.length === 0) {
-    return `<p class="muted">当前没有预设方案，请直接填写“自定义方案”后提交。</p>`;
+async function openDetail(kind, id) {
+  if (!kind || !id) {
+    return;
   }
-  return `<div class="request-options">
-    ${options.map((option, index) => renderDecisionOptionCard(ticketId, option, index, recommendationOptionId)).join("")}
-  </div>`;
+  if (kind === "ticket") {
+    state.selectedTicketIdBySession.set(state.activeSessionId, id);
+    await loadTicketEvents(id);
+  }
+  if (kind === "task") {
+    state.selectedTaskIdBySession.set(state.activeSessionId, id);
+  }
+  if (kind === "run") {
+    state.selectedRunIdBySession.set(state.activeSessionId, id);
+  }
+  state.detail = { kind, id };
+  render();
 }
 
-function renderDecisionOptionCard(ticketId, option, index, recommendationOptionId) {
-  const optionId = option.optionId || `OPTION_${index + 1}`;
-  const optionTitle = option.title || optionId;
-  const tag = recommendationOptionId && recommendationOptionId === optionId
-    ? `<span class="badge">推荐</span>`
-    : "";
+async function apiRequest(path, options = {}) {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+  try {
+    const response = await fetch(path, {
+      method: options.method || "GET",
+      headers: options.body ? { "Content-Type": "application/json" } : undefined,
+      body: options.body ? JSON.stringify(options.body) : undefined,
+      signal: controller.signal,
+    });
+
+    if (options.allow404 && response.status === 404) {
+      return { __notFound: true };
+    }
+    if (response.status === 204) {
+      return null;
+    }
+
+    const text = await response.text();
+    const data = text ? safeParseJson(text) ?? text : null;
+    if (!response.ok) {
+      const message = typeof data === "object" && data ? read(data, "message") || read(data, "error") : text;
+      throw new Error(message || `${options.method || "GET"} ${path} failed with ${response.status}`);
+    }
+    return data;
+  } finally {
+    window.clearTimeout(timeout);
+  }
+}
+
+async function withErrorToast(work) {
+  try {
+    await work();
+  } catch (error) {
+    showToast(error.message || String(error), true);
+  }
+}
+
+function getRequirementComposer(sessionId) {
+  if (!state.requirementComposerBySession.has(sessionId)) {
+    state.requirementComposerBySession.set(sessionId, {
+      title: "",
+      userInput: "",
+      assistantMessage: "",
+      readyToDraft: false,
+      missingInformation: [],
+    });
+  }
+  return state.requirementComposerBySession.get(sessionId);
+}
+
+function getSelectedTicket(sessionId, tickets) {
+  ensureSelectedTicket(sessionId, tickets);
+  return tickets.find((ticket) => getTicketId(ticket) === state.selectedTicketIdBySession.get(sessionId)) || null;
+}
+
+function getSelectedTask(sessionId, tasks) {
+  ensureSelectedTask(sessionId, tasks);
+  return tasks.find((task) => read(task, "taskId") === state.selectedTaskIdBySession.get(sessionId)) || null;
+}
+
+function getSelectedRun(sessionId, items) {
+  ensureSelectedRun(sessionId, items);
+  return items.find((item) => read(item, "runId") === state.selectedRunIdBySession.get(sessionId)) || null;
+}
+
+function ensureSelectedTicket(sessionId, tickets) {
+  if (!state.selectedTicketIdBySession.get(sessionId) && tickets[0]) {
+    state.selectedTicketIdBySession.set(sessionId, getTicketId(tickets[0]));
+  }
+}
+
+function ensureSelectedTask(sessionId, tasks) {
+  if (!state.selectedTaskIdBySession.get(sessionId) && tasks[0]) {
+    state.selectedTaskIdBySession.set(sessionId, read(tasks[0], "taskId"));
+  }
+}
+
+function ensureSelectedRun(sessionId, items) {
+  if (!state.selectedRunIdBySession.get(sessionId) && items[0]) {
+    state.selectedRunIdBySession.set(sessionId, read(items[0], "runId"));
+  }
+}
+
+function flattenTasks(board) {
+  return arrayOf(board, "modules").flatMap((module) => arrayOf(module, "tasks"));
+}
+
+function findTicketById(sessionId, ticketId) {
+  return arrayOf(state.ticketInboxBySession.get(sessionId), "tickets").find((ticket) => getTicketId(ticket) === ticketId) || null;
+}
+
+function findTaskById(sessionId, taskId) {
+  return flattenTasks(state.taskBoardBySession.get(sessionId) || {}).find((task) => read(task, "taskId") === taskId) || null;
+}
+
+function findRunById(sessionId, runId) {
+  return arrayOf(state.runTimelineBySession.get(sessionId), "items").find((run) => read(run, "runId") === runId) || null;
+}
+
+function getRequirementDoc(source) {
+  return read(source, "currentRequirementDoc");
+}
+
+function getSessionId(session) {
+  return read(session, "sessionId") || "";
+}
+
+function getSessionTitle(session) {
+  return read(session, "title") || "Untitled Session";
+}
+
+function getDocId(doc) {
+  return read(doc, "docId") || "";
+}
+
+function getTicketId(ticket) {
+  return read(ticket, "ticketId") || "";
+}
+
+function deriveFallbackPhase(detail, tickets) {
+  const status = read(detail, "status");
+  const doc = getRequirementDoc(detail);
+  if (status === "COMPLETED") {
+    return "COMPLETED";
+  }
+  if (tickets.some((ticket) => read(ticket, "status") === "WAITING_USER")) {
+    return "WAITING_USER";
+  }
+  if (!doc) {
+    return "DRAFTING";
+  }
+  if (read(doc, "status") !== "CONFIRMED") {
+    return "REVIEWING";
+  }
+  return "EXECUTING";
+}
+
+function deriveFallbackAction(doc, waitingUser) {
+  if (waitingUser > 0) {
+    return "优先处理 WAITING_USER ticket。";
+  }
+  if (!doc) {
+    return "先生成 requirement 草稿。";
+  }
+  if (read(doc, "status") !== "CONFIRMED") {
+    return "审阅并确认 requirement。";
+  }
+  return "继续观察任务与运行状态。";
+}
+
+function countStatus(items, status) {
+  return items.filter((item) => read(item, "status") === status).length;
+}
+
+function inferRequestKind(ticket) {
+  const payload = safeParseJson(read(ticket, "payloadJson"));
+  return payload ? payload.request_kind || payload.requestKind || null : null;
+}
+
+function inferTicketQuestion(ticket) {
+  return read(ticket, "question") || read(ticket, "latestEventBody") || read(ticket, "title") || "需要用户进一步提供信息。";
+}
+
+function getRequestKind(ticket) {
+  return read(ticket, "requestKind") || inferRequestKind(ticket);
+}
+
+function fallbackSessionSummary(requirement) {
+  if (!requirement) {
+    return "还没有 requirement doc。";
+  }
+  return `Requirement ${read(requirement, "status") || "UNKNOWN"} / v${read(requirement, "currentVersion") || 0}`;
+}
+
+function renderWorkspaceButton(id, label) {
+  return `<button type="button" class="workspace-switch__button ${state.activeWorkspace === id ? "is-active" : ""}" data-workspace="${id}">${escapeHtml(label)}</button>`;
+}
+
+function renderMetricChip(label, value) {
+  return `<div class="metric-chip"><span class="metric-chip__label">${escapeHtml(label)}</span><div class="metric-chip__value">${escapeHtml(String(value))}</div></div>`;
+}
+
+function renderMetricTile(value, label) {
+  return `<div class="metric-tile"><strong>${escapeHtml(String(value))}</strong><span>${escapeHtml(label)}</span></div>`;
+}
+
+function renderStatTile(value, label) {
+  return `<div class="stat-tile"><strong>${escapeHtml(String(value))}</strong><span>${escapeHtml(label)}</span></div>`;
+}
+
+function renderActionButton(label, action, tone, disabled = false, dataset = {}) {
+  const className = tone === "primary" ? "primary-button" : tone === "danger" ? "danger-button" : "ghost-button";
+  const attributes = Object.entries(dataset)
+    .map(([key, value]) => `data-${escapeHtml(key)}="${escapeHtml(String(value))}"`)
+    .join(" ");
+  return `<button type="button" class="${className}" data-action="${action}" ${attributes} ${disabled ? "disabled" : ""}>${escapeHtml(label)}</button>`;
+}
+
+function renderStatusPill(value, kind) {
+  return `<span class="${kind === "phase" ? "phase-pill" : "status-pill"}" data-tone="${statusTone(value)}">${escapeHtml(value || "UNKNOWN")}</span>`;
+}
+
+function renderChip(value) {
+  return `<span class="chip">${escapeHtml(String(value))}</span>`;
+}
+
+function renderEmptyState(title, body) {
+  return `<div class="empty-state"><div><strong>${escapeHtml(title)}</strong><p>${escapeHtml(body)}</p></div></div>`;
+}
+
+function renderRuntimeProfileFields(profileKey, label, profile) {
   return `
-    <label class="option-card">
-      <input type="radio" name="decision-option-${escapeHtml(ticketId)}" value="${escapeHtml(optionId)}">
-      <div class="option-content">
-        <div class="option-title-row">
-          <span class="card-title">${escapeHtml(optionTitle)}</span>
-          ${tag}
-        </div>
-        <div class="muted option-id">${escapeHtml(optionId)}</div>
-        ${renderOptionList("优点", option.pros)}
-        ${renderOptionList("代价", option.costNotes)}
-        ${renderOptionList("风险", option.risks)}
-        ${renderOptionList("不足", option.cons)}
-      </div>
-    </label>
+    <label class="field-label">${escapeHtml(label)} Provider</label>
+    <input data-profile="${profileKey}" data-model="provider" value="${escapeHtml(profile.provider)}">
+    <label class="field-label">${escapeHtml(label)} Framework</label>
+    <input data-profile="${profileKey}" data-model="framework" value="${escapeHtml(profile.framework)}">
+    <label class="field-label">${escapeHtml(label)} Base URL</label>
+    <input data-profile="${profileKey}" data-model="base-url" value="${escapeHtml(profile.baseUrl)}">
+    <label class="field-label">${escapeHtml(label)} Model</label>
+    <input data-profile="${profileKey}" data-model="model-name" value="${escapeHtml(profile.model)}">
+    <label class="field-label">${escapeHtml(label)} Timeout</label>
+    <input data-profile="${profileKey}" data-model="timeout-ms" value="${escapeHtml(profile.timeoutMs)}">
+    <label class="field-label">${escapeHtml(label)} API Key</label>
+    <input data-profile="${profileKey}" data-model="api-key" value="" placeholder="${escapeHtml(profile.apiKeyMasked || "保持现状")}">
   `;
 }
 
-function renderOptionList(label, values) {
-  if (!Array.isArray(values) || values.length === 0) {
-    return "";
-  }
-  return `<div class="option-list"><strong>${escapeHtml(label)}:</strong> ${values.map((item) => escapeHtml(item)).join("；")}</div>`;
+function renderRuntimeSummaryCard(label, profile) {
+  return `
+    <div class="drawer-card">
+      <p class="section-kicker">${escapeHtml(label)}</p>
+      <div class="detail-line"><span>Provider</span><strong>${escapeHtml(read(profile, "provider") || "-")}</strong></div>
+      <div class="detail-line"><span>Model</span><strong>${escapeHtml(read(profile, "model") || "-")}</strong></div>
+      <div class="detail-line"><span>Base URL</span><strong>${escapeHtml(read(profile, "baseUrl") || "-")}</strong></div>
+      <div class="detail-line"><span>API Key</span><strong>${escapeHtml(read(profile, "apiKeyMasked") || "-")}</strong></div>
+    </div>
+  `;
 }
 
-function parseDecisionOptions(rawOptions) {
-  if (!Array.isArray(rawOptions)) {
-    return [];
-  }
-  return rawOptions
-    .map((item, index) => {
-      if (typeof item === "string") {
-        const text = item.trim();
-        if (!text) {
-          return null;
-        }
-        return {
-          optionId: text,
-          title: text,
-          pros: [],
-          cons: [],
-          risks: [],
-          costNotes: [],
-        };
-      }
-      if (!item || typeof item !== "object") {
-        return null;
-      }
-      const optionId = toText(item.option_id || item.optionId || item.id || item.key || `OPTION_${index + 1}`);
-      const title = toText(item.title || item.label || item.name || optionId);
-      return {
-        optionId,
-        title,
-        pros: toStringList(item.pros),
-        cons: toStringList(item.cons),
-        risks: toStringList(item.risks),
-        costNotes: toStringList(item.cost_notes || item.costNotes),
-      };
-    })
-    .filter(Boolean);
-}
-
-function parseJsonObject(value) {
-  if (!value || typeof value !== "string") {
-    return {};
-  }
-  try {
-    const parsed = JSON.parse(value);
-    return parsed && typeof parsed === "object" ? parsed : {};
-  } catch {
-    return {};
-  }
-}
-
-function toStringList(value) {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  return value.map((item) => toText(item)).filter(Boolean);
-}
-
-function toText(value) {
-  if (value === undefined || value === null) {
-    return "";
-  }
-  const text = String(value).trim();
-  return text;
-}
-
-function normalizeRequestKind(value) {
-  const normalized = String(value || "").trim().toUpperCase();
-  if (normalized === "DECISION") {
-    return "DECISION";
-  }
-  if (normalized === "CLARIFICATION") {
-    return "CLARIFICATION";
-  }
-  return "CLARIFICATION";
-}
-
-function compactObject(value) {
-  const result = {};
-  Object.entries(value || {}).forEach(([key, item]) => {
-    if (item !== undefined && item !== null && item !== "") {
-      result[key] = item;
-    }
-  });
-  return result;
-}
-
-function syncTicketClientState(activeTicketIds) {
-  const activeSet = new Set(activeTicketIds || []);
-  Array.from(state.openTicketIds).forEach((ticketId) => {
-    if (!activeSet.has(ticketId)) {
-      state.openTicketIds.delete(ticketId);
-    }
-  });
-  Array.from(state.ticketDraftsById.keys()).forEach((ticketId) => {
-    if (!activeSet.has(ticketId)) {
-      state.ticketDraftsById.delete(ticketId);
-    }
-  });
-}
-
-function saveTicketDraft(ticketId, formElement) {
-  const selectedRadio = formElement.querySelector("input[type='radio']:checked");
-  const customOptionInput = formElement.querySelector("[data-field='custom-option']");
-  const responseTextInput = formElement.querySelector("[data-field='response-text']");
-  const noteInput = formElement.querySelector("[data-field='note']");
-
-  state.ticketDraftsById.set(ticketId, {
-    selectedOptionId: selectedRadio ? selectedRadio.value : "",
-    customOption: customOptionInput ? customOptionInput.value : "",
-    responseText: responseTextInput ? responseTextInput.value : "",
-    note: noteInput ? noteInput.value : "",
-  });
-}
-
-function restoreTicketDraft(ticketId, formElement) {
-  const draft = state.ticketDraftsById.get(ticketId);
-  if (!draft) {
-    return;
-  }
-  const radios = Array.from(formElement.querySelectorAll("input[type='radio']"));
-  radios.forEach((radio) => {
-    radio.checked = Boolean(draft.selectedOptionId && radio.value === draft.selectedOptionId);
-  });
-  const customOptionInput = formElement.querySelector("[data-field='custom-option']");
-  const responseTextInput = formElement.querySelector("[data-field='response-text']");
-  const noteInput = formElement.querySelector("[data-field='note']");
-  if (customOptionInput) {
-    customOptionInput.value = draft.customOption || "";
-  }
-  if (responseTextInput) {
-    responseTextInput.value = draft.responseText || "";
-  }
-  if (noteInput) {
-    noteInput.value = draft.note || "";
-  }
-}
-
-function handleLanguageChange() {
-  const selected = normalizeLanguageCode(refs.languageSelect.value);
-  state.uiLanguage = selected;
-  refs.languageSelect.value = selected;
-  localStorage.setItem("agentx_ui_language", selected);
-  showToast(`语言已切换为 ${languageLabel(selected)}，后续请求将按该语言生成`);
-}
-
-function languageLabel(languageCode) {
-  if (languageCode === "zh-CN") {
-    return "中文";
-  }
-  if (languageCode === "en-US") {
-    return "English";
-  }
-  if (languageCode === "ja-JP") {
-    return "日本語";
-  }
-  return languageCode;
-}
-
-function normalizeLanguageCode(value) {
-  const normalized = String(value || "").trim();
-  if (normalized === "en-US") {
-    return "en-US";
-  }
-  if (normalized === "ja-JP") {
-    return "ja-JP";
-  }
-  return "zh-CN";
-}
-
-function renderWorkers() {
-  refs.workerList.innerHTML = "";
-  const workers = Array.from(state.workersById.values());
-  if (workers.length === 0) {
-    refs.workerList.innerHTML = `<p class="muted">后端当前未返回 worker。可点击“自动分配”或稍后刷新。</p>`;
-    return;
-  }
-  workers.forEach((worker) => {
-    const backendStatus = toText(worker.status || "UNKNOWN");
-    const canClaim = backendStatus === "READY";
-    const toolpacks = Array.isArray(worker.toolpackIds) ? worker.toolpackIds : [];
-    const details = document.createElement("details");
-    details.className = "card-item";
-    details.innerHTML = `
-      <summary>
-        <span class="card-title">${escapeHtml(worker.workerId)}</span>
-        <span class="badge">${escapeHtml(backendStatus)}</span>
-      </summary>
-      <div class="card-body">
-        <div><strong>后端状态:</strong> ${escapeHtml(backendStatus)}</div>
-        <div><strong>工具包:</strong> ${toolpacks.length > 0 ? escapeHtml(toolpacks.join(", ")) : "-"}</div>
-        <div><strong>最近认领:</strong> ${worker.lastClaim ? formatDateTime(worker.lastClaim.at) : "-"}</div>
-        <div><strong>任务状态:</strong> ${escapeHtml(worker.lastClaim?.note || "未拉取任务")}</div>
-        <div><strong>后端更新时间:</strong> ${formatDateTime(worker.updatedAt || worker.createdAt)}</div>
-        <div class="chat-actions" style="margin-top:8px;">
-          <button class="ghost-btn small-btn" data-action="claim-task" data-worker-id="${escapeHtml(worker.workerId)}" ${canClaim ? "" : "disabled"}>
-            ${canClaim ? "拉取任务与上下文" : "仅 READY 可拉取任务"}
-          </button>
-        </div>
-        ${
-          worker.lastClaim?.package
-            ? `<pre>${escapeHtml(formatJson(worker.lastClaim.package))}</pre>`
-            : ""
-        }
+function renderTaskPreviewCard(task) {
+  return `
+    <article class="drawer-card">
+      <p class="section-kicker">Selected Task</p>
+      <h4>${escapeHtml(read(task, "title") || read(task, "taskId") || "Task")}</h4>
+      <div class="chip-row">
+        ${renderChip(read(task, "status") || "UNKNOWN")}
+        ${renderChip(read(task, "lastRunStatus") || "NO_RUN")}
+        ${renderChip(read(task, "latestVerifyStatus") || "NO_VERIFY")}
       </div>
-    `;
-    details.addEventListener("click", (event) => {
-      const target = event.target;
-      if (!(target instanceof HTMLElement)) {
-        return;
-      }
-      const action = target.getAttribute("data-action");
-      const workerId = target.getAttribute("data-worker-id");
-      if (action === "claim-task" && workerId) {
-        event.preventDefault();
-        void claimWorkerTask(workerId);
-      }
-    });
-    refs.workerList.appendChild(details);
-  });
+      <div class="detail-line"><span>Last Run</span><strong>${escapeHtml(read(task, "lastRunId") || "-")}</strong></div>
+      <div class="detail-line"><span>Delivery Commit</span><strong>${escapeHtml(read(task, "latestDeliveryCommit") || "-")}</strong></div>
+    </article>
+  `;
 }
 
-function renderProgress() {
-  refs.progressList.innerHTML = "";
-  const session = getActiveSession();
-  const doc = session?.current_requirement_doc;
-  const hasMessages = (state.messagesBySession.get(state.activeSessionId || "") || []).length > 0;
-  const hasArchTickets = state.tickets.length > 0;
-  const waitingUser = state.tickets.some((ticket) => ticket.status === "WAITING_USER");
-  const archDone = state.tickets.some((ticket) => ticket.status === "DONE");
-  const hasWorkers = countWorkersByStatus("READY") > 0 || state.workersById.size > 0;
-  const codeReady = state.runtimeSummary.succeededRuns > 0;
+function renderRunPreviewCard(run) {
+  return `
+    <article class="drawer-card">
+      <p class="section-kicker">Selected Run</p>
+      <h4>${escapeHtml(read(run, "runId") || "Run")}</h4>
+      <p>${escapeHtml(read(run, "eventBody") || "无事件正文")}</p>
+      <div class="detail-line"><span>Task</span><strong>${escapeHtml(read(run, "taskTitle") || read(run, "taskId") || "-")}</strong></div>
+      <div class="detail-line"><span>Worker</span><strong>${escapeHtml(read(run, "workerId") || "-")}</strong></div>
+      <div class="detail-line"><span>Branch</span><strong>${escapeHtml(read(run, "branchName") || "-")}</strong></div>
+    </article>
+  `;
+}
 
-  const steps = [
-    { label: "会话已创建", done: Boolean(session) },
-    { label: "需求沟通进行中", done: hasMessages },
-    { label: "需求文档已确认", done: Boolean(doc?.confirmed_version) },
-    { label: "架构师提请已生成", done: hasArchTickets },
-    { label: "架构拆解已完成", done: archDone && !waitingUser },
-    { label: "Worker 已介入", done: hasWorkers },
-    { label: "代码产出可拉取", done: codeReady },
-  ];
-
-  steps.forEach((step) => {
-    const li = document.createElement("li");
-    li.className = `progress-step ${step.done ? "done" : ""}`;
-    li.textContent = `${step.done ? "✓" : "·"} ${step.label}`;
-    refs.progressList.appendChild(li);
-  });
-
-  if (codeReady && !state.modalShown) {
-    void openGitModalWithPublication();
+function read(source, name) {
+  if (!source) {
+    return null;
   }
-}
-
-function renderEventLines(events) {
-  return events
-    .slice()
-    .reverse()
-    .slice(0, 12)
-    .map((event) => {
-      const line = `[${formatDateTime(event.created_at)}] ${event.event_type} (${event.actor_role})`;
-      const body = event.body ? `  ${event.body}` : "";
-      return `${line}${body ? `\n${body}` : ""}`;
-    })
-    .join("\n");
-}
-
-function persistGitAddress() {
-  const value = refs.gitAddressInput.value.trim() || DEFAULT_GIT_URL;
-  localStorage.setItem("agentx_git_url", value);
-  syncCloneDisplay(value);
-  refs.gitCloneMeta.textContent = "当前为手动地址（自动发布地址不可用时使用）。";
-  showToast("Git 地址已更新");
-}
-
-function openGitModal() {
-  refs.gitModal.classList.remove("hidden");
-  state.modalShown = true;
-}
-
-async function openGitModalWithPublication() {
-  const sessionId = state.activeSessionId;
-  if (sessionId) {
-    try {
-      let publication = state.clonePublicationBySession.get(sessionId);
-      if (!isPublicationActive(publication)) {
-        publication = await publishDeliveryCloneRepo(sessionId);
-        if (publication) {
-          state.clonePublicationBySession.set(sessionId, publication);
-        }
-      }
-      if (publication) {
-        applyDeliveryClonePublication(publication);
-      } else {
-        refs.gitCloneMeta.textContent = "暂未生成自动克隆地址，已回退到手动地址。";
-      }
-    } catch (error) {
-      refs.gitCloneMeta.textContent = "自动生成克隆地址失败，已回退到手动地址。";
-      showToast(String(error.message || error), true);
-    }
+  if (source[name] !== undefined && source[name] !== null) {
+    return source[name];
   }
-  openGitModal();
+  const snake = name.replace(/[A-Z]/g, (part) => `_${part.toLowerCase()}`);
+  return source[snake] !== undefined ? source[snake] : null;
 }
 
-async function publishDeliveryCloneRepo(sessionId) {
-  const { data } = await apiRequest(`/api/v0/sessions/${sessionId}/delivery/clone-repo`, {
-    method: "POST",
-  });
-  return data || null;
+function arrayOf(source, name) {
+  const value = read(source, name);
+  return Array.isArray(value) ? value : [];
 }
 
-function applyDeliveryClonePublication(publication) {
-  if (!publication || !publication.clone_url) {
-    return;
+function safeParseJson(value) {
+  if (!value || typeof value !== "string") {
+    return typeof value === "object" ? value : null;
   }
-  refs.gitAddressInput.value = publication.clone_url;
-  localStorage.setItem("agentx_git_url", publication.clone_url);
-  syncCloneDisplay(publication.clone_url);
-  const expiresAt = publication.expires_at ? formatDateTime(publication.expires_at) : "-";
-  refs.gitCloneMeta.textContent = `临时仓库有效期至: ${expiresAt}`;
-}
-
-function isPublicationActive(publication) {
-  if (!publication || !publication.expires_at) {
-    return false;
-  }
-  const expiresAtMs = Date.parse(publication.expires_at);
-  if (Number.isNaN(expiresAtMs)) {
-    return false;
-  }
-  return expiresAtMs > Date.now();
-}
-
-function syncCloneDisplay(value) {
-  const cloneUrl = (value || "").trim() || DEFAULT_GIT_URL;
-  refs.gitAddress.textContent = cloneUrl;
-  refs.gitCloneCommand.textContent = `git clone ${cloneUrl}`;
-}
-
-function closeGitModal() {
-  refs.gitModal.classList.add("hidden");
-}
-
-async function copyGitUrl() {
   try {
-    await navigator.clipboard.writeText(refs.gitAddress.textContent);
-    showToast("Git 地址已复制");
+    return JSON.parse(value);
   } catch {
-    showToast("复制失败，请手动复制", true);
+    return null;
   }
 }
 
-function showToast(message, isError = false) {
-  refs.toast.textContent = message;
-  refs.toast.classList.remove("hidden");
-  refs.toast.classList.toggle("error", isError);
-  setTimeout(() => refs.toast.classList.add("hidden"), 3200);
+function prettyJson(value) {
+  const parsed = typeof value === "string" ? safeParseJson(value) : value;
+  if (parsed) {
+    return JSON.stringify(parsed, null, 2);
+  }
+  return String(value || "");
 }
 
 function formatDateTime(value) {
@@ -1610,40 +1769,46 @@ function formatDateTime(value) {
   if (Number.isNaN(date.getTime())) {
     return String(value);
   }
-  return date.toLocaleString("zh-CN", {
+  return new Intl.DateTimeFormat("zh-CN", {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
-  });
+  }).format(date);
 }
 
-function formatJson(value) {
-  if (value === null || value === undefined || value === "") {
-    return "-";
+function statusTone(value) {
+  const status = String(value || "").toUpperCase();
+  if (["RUNNING", "ACTIVE", "READY", "SUCCEEDED", "CONFIRMED"].includes(status)) {
+    return "active";
   }
-  if (typeof value === "string") {
-    try {
-      return JSON.stringify(JSON.parse(value), null, 2);
-    } catch {
-      return value;
-    }
+  if (["WAITING_USER", "WAITING_FOREMAN", "WAITING_WORKER", "DELIVERED", "REVIEWING", "DRAFTING"].includes(status)) {
+    return "waiting";
   }
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return String(value);
+  if (["FAILED", "BLOCKED", "CANCELLED", "DISABLED", "MISSING"].includes(status)) {
+    return "danger";
   }
+  if (["DONE", "COMPLETED"].includes(status)) {
+    return "done";
+  }
+  return "done";
 }
 
 function escapeHtml(value) {
-  return String(value || "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll("\"", "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function showToast(message, isError = false) {
+  refs.toast.textContent = message;
+  refs.toast.classList.remove("hidden");
+  refs.toast.classList.toggle("is-danger", Boolean(isError));
+  refs.toast.classList.toggle("is-success", !isError);
+  window.clearTimeout(showToast.timer);
+  showToast.timer = window.setTimeout(() => refs.toast.classList.add("hidden"), 2600);
 }

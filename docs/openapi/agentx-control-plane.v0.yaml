@@ -21,6 +21,7 @@ tags:
   - name: workers
   - name: runs
   - name: context
+  - name: query
 
 paths:
   /api/v0/sessions:
@@ -91,6 +92,87 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SessionHistory'
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v0/sessions/{sessionId}/progress:
+    get:
+      tags: [sessions, query]
+      operationId: getSessionProgress
+      summary: Get workspace overview read model for a session
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionProgressView'
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v0/sessions/{sessionId}/ticket-inbox:
+    get:
+      tags: [sessions, tickets, query]
+      operationId: getTicketInbox
+      summary: Get aggregated ticket inbox read model for a session
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [OPEN, IN_PROGRESS, WAITING_USER, DONE, BLOCKED]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TicketInboxView'
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v0/sessions/{sessionId}/task-board:
+    get:
+      tags: [sessions, tasks, query]
+      operationId: getTaskBoard
+      summary: Get module-grouped task board read model for a session
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskBoardView'
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v0/sessions/{sessionId}/run-timeline:
+    get:
+      tags: [sessions, runs, query]
+      operationId: getRunTimeline
+      summary: Get recent run event timeline read model for a session
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunTimelineView'
         '404': { $ref: '#/components/responses/NotFound' }
         '500': { $ref: '#/components/responses/InternalError' }
 
@@ -821,6 +903,362 @@ components:
           allOf:
             - $ref: '#/components/schemas/CurrentRequirementDocSnapshot'
           nullable: true
+
+    SessionProgressRequirementSummary:
+      type: object
+      required: [docId, currentVersion, status, title, updatedAt]
+      properties:
+        docId: { type: string }
+        currentVersion: { type: integer, minimum: 0 }
+        confirmedVersion:
+          type: integer
+          nullable: true
+          minimum: 1
+        status: { $ref: '#/components/schemas/RequirementDocStatus' }
+        title: { type: string }
+        updatedAt: { $ref: '#/components/schemas/Timestamp' }
+
+    SessionProgressTaskCounts:
+      type: object
+      required: [total, planned, waitingDependency, waitingWorker, readyForAssign, assigned, delivered, done]
+      properties:
+        total: { type: integer, minimum: 0 }
+        planned: { type: integer, minimum: 0 }
+        waitingDependency: { type: integer, minimum: 0 }
+        waitingWorker: { type: integer, minimum: 0 }
+        readyForAssign: { type: integer, minimum: 0 }
+        assigned: { type: integer, minimum: 0 }
+        delivered: { type: integer, minimum: 0 }
+        done: { type: integer, minimum: 0 }
+
+    SessionProgressTicketCounts:
+      type: object
+      required: [total, open, inProgress, waitingUser, done, blocked]
+      properties:
+        total: { type: integer, minimum: 0 }
+        open: { type: integer, minimum: 0 }
+        inProgress: { type: integer, minimum: 0 }
+        waitingUser: { type: integer, minimum: 0 }
+        done: { type: integer, minimum: 0 }
+        blocked: { type: integer, minimum: 0 }
+
+    SessionProgressRunCounts:
+      type: object
+      required: [total, running, waitingForeman, succeeded, failed, cancelled]
+      properties:
+        total: { type: integer, minimum: 0 }
+        running: { type: integer, minimum: 0 }
+        waitingForeman: { type: integer, minimum: 0 }
+        succeeded: { type: integer, minimum: 0 }
+        failed: { type: integer, minimum: 0 }
+        cancelled: { type: integer, minimum: 0 }
+
+    SessionProgressLatestRun:
+      type: object
+      required: [runId, taskId, taskTitle, moduleId, moduleName, workerId, runKind, status, eventType, eventBody, updatedAt]
+      properties:
+        runId: { type: string }
+        taskId: { type: string }
+        taskTitle: { type: string }
+        moduleId: { type: string }
+        moduleName: { type: string }
+        workerId: { type: string }
+        runKind: { $ref: '#/components/schemas/RunKind' }
+        status: { $ref: '#/components/schemas/RunStatus' }
+        eventType: { $ref: '#/components/schemas/TaskRunEventType' }
+        eventBody: { type: string }
+        eventAt:
+          allOf:
+            - $ref: '#/components/schemas/Timestamp'
+          nullable: true
+        startedAt: { $ref: '#/components/schemas/Timestamp' }
+        finishedAt:
+          allOf:
+            - $ref: '#/components/schemas/Timestamp'
+          nullable: true
+        updatedAt: { $ref: '#/components/schemas/Timestamp' }
+
+    SessionProgressDeliverySummary:
+      type: object
+      required: [deliveryTagPresent, deliveredTaskCount, doneTaskCount]
+      properties:
+        deliveryTagPresent: { type: boolean }
+        deliveredTaskCount: { type: integer, minimum: 0 }
+        doneTaskCount: { type: integer, minimum: 0 }
+        latestDeliveryTaskId:
+          type: string
+          nullable: true
+        latestDeliveryCommit:
+          type: string
+          nullable: true
+        latestVerifyRunId:
+          type: string
+          nullable: true
+        latestVerifyStatus:
+          allOf:
+            - $ref: '#/components/schemas/RunStatus'
+          nullable: true
+
+    SessionProgressView:
+      type: object
+      required:
+        - sessionId
+        - title
+        - sessionStatus
+        - phase
+        - blockerSummary
+        - primaryAction
+        - taskCounts
+        - ticketCounts
+        - runCounts
+        - delivery
+        - canCompleteSession
+        - completionBlockers
+        - createdAt
+        - updatedAt
+      properties:
+        sessionId: { type: string }
+        title: { type: string }
+        sessionStatus: { $ref: '#/components/schemas/SessionStatus' }
+        phase:
+          type: string
+          enum: [DRAFTING, REVIEWING, WAITING_USER, EXECUTING, DELIVERED, COMPLETED]
+        blockerSummary: { type: string }
+        primaryAction: { type: string }
+        requirement:
+          allOf:
+            - $ref: '#/components/schemas/SessionProgressRequirementSummary'
+          nullable: true
+        taskCounts: { $ref: '#/components/schemas/SessionProgressTaskCounts' }
+        ticketCounts: { $ref: '#/components/schemas/SessionProgressTicketCounts' }
+        runCounts: { $ref: '#/components/schemas/SessionProgressRunCounts' }
+        latestRun:
+          allOf:
+            - $ref: '#/components/schemas/SessionProgressLatestRun'
+          nullable: true
+        delivery: { $ref: '#/components/schemas/SessionProgressDeliverySummary' }
+        canCompleteSession: { type: boolean }
+        completionBlockers:
+          type: array
+          items: { type: string }
+        createdAt: { $ref: '#/components/schemas/Timestamp' }
+        updatedAt: { $ref: '#/components/schemas/Timestamp' }
+
+    TicketInboxItem:
+      type: object
+      required:
+        - ticketId
+        - type
+        - status
+        - title
+        - createdByRole
+        - assigneeRole
+        - payloadJson
+        - createdAt
+        - updatedAt
+        - needsUserAction
+      properties:
+        ticketId: { type: string }
+        type: { $ref: '#/components/schemas/TicketType' }
+        status: { $ref: '#/components/schemas/TicketStatus' }
+        title: { type: string }
+        createdByRole: { $ref: '#/components/schemas/TicketRole' }
+        assigneeRole: { $ref: '#/components/schemas/TicketAssigneeRole' }
+        requirementDocId:
+          type: string
+          nullable: true
+        requirementDocVer:
+          type: integer
+          nullable: true
+          minimum: 1
+        payloadJson: { $ref: '#/components/schemas/JsonText' }
+        claimedBy:
+          type: string
+          nullable: true
+        leaseUntil:
+          allOf:
+            - $ref: '#/components/schemas/Timestamp'
+          nullable: true
+        createdAt: { $ref: '#/components/schemas/Timestamp' }
+        updatedAt: { $ref: '#/components/schemas/Timestamp' }
+        latestEventType:
+          type: string
+          nullable: true
+        latestEventBody:
+          type: string
+          nullable: true
+        latestEventDataJson:
+          type: string
+          nullable: true
+        latestEventAt:
+          allOf:
+            - $ref: '#/components/schemas/Timestamp'
+          nullable: true
+        sourceRunId:
+          type: string
+          nullable: true
+        sourceTaskId:
+          type: string
+          nullable: true
+        requestKind:
+          type: string
+          nullable: true
+        question:
+          type: string
+          nullable: true
+        needsUserAction: { type: boolean }
+
+    TicketInboxView:
+      type: object
+      required: [sessionId, totalTickets, waitingUserTickets, tickets]
+      properties:
+        sessionId: { type: string }
+        appliedStatusFilter:
+          type: string
+          nullable: true
+        totalTickets: { type: integer, minimum: 0 }
+        waitingUserTickets: { type: integer, minimum: 0 }
+        tickets:
+          type: array
+          items:
+            $ref: '#/components/schemas/TicketInboxItem'
+
+    TaskBoardTaskCard:
+      type: object
+      required:
+        - taskId
+        - title
+        - taskTemplateId
+        - status
+        - requiredToolpacksJson
+        - dependencyTaskIds
+      properties:
+        taskId: { type: string }
+        title: { type: string }
+        taskTemplateId: { $ref: '#/components/schemas/TaskTemplateId' }
+        status: { $ref: '#/components/schemas/TaskStatus' }
+        activeRunId:
+          type: string
+          nullable: true
+        requiredToolpacksJson: { $ref: '#/components/schemas/JsonText' }
+        dependencyTaskIds:
+          type: array
+          items: { type: string }
+        latestContextSnapshotId:
+          type: string
+          nullable: true
+        latestContextStatus:
+          allOf:
+            - $ref: '#/components/schemas/ContextSnapshotState'
+          nullable: true
+        latestContextRunKind:
+          allOf:
+            - $ref: '#/components/schemas/RunKind'
+          nullable: true
+        latestContextCompiledAt:
+          allOf:
+            - $ref: '#/components/schemas/Timestamp'
+          nullable: true
+        lastRunId:
+          type: string
+          nullable: true
+        lastRunStatus:
+          allOf:
+            - $ref: '#/components/schemas/RunStatus'
+          nullable: true
+        lastRunKind:
+          allOf:
+            - $ref: '#/components/schemas/RunKind'
+          nullable: true
+        lastRunUpdatedAt:
+          allOf:
+            - $ref: '#/components/schemas/Timestamp'
+          nullable: true
+        latestDeliveryCommit:
+          type: string
+          nullable: true
+        latestVerifyRunId:
+          type: string
+          nullable: true
+        latestVerifyStatus:
+          allOf:
+            - $ref: '#/components/schemas/RunStatus'
+          nullable: true
+
+    TaskBoardModuleLane:
+      type: object
+      required: [moduleId, moduleName, tasks]
+      properties:
+        moduleId: { type: string }
+        moduleName: { type: string }
+        moduleDescription:
+          type: string
+          nullable: true
+        tasks:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskBoardTaskCard'
+
+    TaskBoardView:
+      type: object
+      required: [sessionId, totalTasks, activeRuns, modules]
+      properties:
+        sessionId: { type: string }
+        totalTasks: { type: integer, minimum: 0 }
+        activeRuns: { type: integer, minimum: 0 }
+        modules:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskBoardModuleLane'
+
+    RunTimelineItem:
+      type: object
+      required:
+        - runId
+        - taskId
+        - taskTitle
+        - moduleId
+        - moduleName
+        - workerId
+        - runKind
+        - runStatus
+        - eventType
+        - eventBody
+        - eventCreatedAt
+        - startedAt
+        - branchName
+      properties:
+        runId: { type: string }
+        taskId: { type: string }
+        taskTitle: { type: string }
+        moduleId: { type: string }
+        moduleName: { type: string }
+        workerId: { type: string }
+        runKind: { $ref: '#/components/schemas/RunKind' }
+        runStatus: { $ref: '#/components/schemas/RunStatus' }
+        eventType: { $ref: '#/components/schemas/TaskRunEventType' }
+        eventBody: { type: string }
+        eventDataJson:
+          type: string
+          nullable: true
+        eventCreatedAt: { $ref: '#/components/schemas/Timestamp' }
+        startedAt: { $ref: '#/components/schemas/Timestamp' }
+        finishedAt:
+          allOf:
+            - $ref: '#/components/schemas/Timestamp'
+          nullable: true
+        branchName: { type: string }
+
+    RunTimelineView:
+      type: object
+      required: [sessionId, totalItems, items]
+      properties:
+        sessionId: { type: string }
+        totalItems: { type: integer, minimum: 0 }
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/RunTimelineItem'
 
     CreateSessionRequest:
       type: object

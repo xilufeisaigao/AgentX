@@ -1,9 +1,7 @@
 package com.agentx.agentxbackend.process.application;
 
-import com.agentx.agentxbackend.contextpack.application.port.in.ContextCompileUseCase;
 import com.agentx.agentxbackend.planning.application.port.in.PlanningCommandUseCase;
 import com.agentx.agentxbackend.planning.domain.model.WorkModule;
-import com.agentx.agentxbackend.planning.domain.model.WorkTask;
 import com.agentx.agentxbackend.session.domain.event.SessionCreatedEvent;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -19,38 +17,29 @@ import java.util.Locale;
 public class SessionBootstrapInitProcessManager {
 
     private final PlanningCommandUseCase planningCommandUseCase;
-    private final ContextCompileUseCase contextCompileUseCase;
     private final ObjectMapper objectMapper;
     private final String initModuleName;
     private final String initModuleDescription;
     private final String initTaskTitle;
     private final String initTaskTemplateId;
     private final String initRequiredToolpacksJson;
-    private final String initContextTriggerType;
-    private final boolean compileVerifyContext;
 
     public SessionBootstrapInitProcessManager(
         PlanningCommandUseCase planningCommandUseCase,
-        ContextCompileUseCase contextCompileUseCase,
         ObjectMapper objectMapper,
         @Value("${agentx.session.bootstrap.init.module-name:bootstrap}") String initModuleName,
         @Value("${agentx.session.bootstrap.init.module-description:Session bootstrap module for initialization gate task.}") String initModuleDescription,
         @Value("${agentx.session.bootstrap.init.task-title:Initialize project baseline and runtime workspace}") String initTaskTitle,
         @Value("${agentx.session.bootstrap.init.task-template-id:tmpl.init.v0}") String initTaskTemplateId,
-        @Value("${agentx.session.bootstrap.init.required-toolpacks-json:[\"TP-GIT-2\",\"TP-JAVA-21\",\"TP-MAVEN-3\"]}") String initRequiredToolpacksJson,
-        @Value("${agentx.session.bootstrap.init.context-trigger-type:MANUAL_REFRESH}") String initContextTriggerType,
-        @Value("${agentx.session.bootstrap.init.compile-verify-context:true}") boolean compileVerifyContext
+        @Value("${agentx.session.bootstrap.init.required-toolpacks-json:[\"TP-GIT-2\",\"TP-JAVA-21\",\"TP-MAVEN-3\"]}") String initRequiredToolpacksJson
     ) {
         this.planningCommandUseCase = planningCommandUseCase;
-        this.contextCompileUseCase = contextCompileUseCase;
         this.objectMapper = objectMapper;
         this.initModuleName = requireNotBlank(initModuleName, "initModuleName");
         this.initModuleDescription = normalizeNullable(initModuleDescription);
         this.initTaskTitle = requireNotBlank(initTaskTitle, "initTaskTitle");
         this.initTaskTemplateId = normalizeInitTemplate(initTaskTemplateId);
         this.initRequiredToolpacksJson = normalizeRequiredToolpacksJson(initRequiredToolpacksJson);
-        this.initContextTriggerType = requireNotBlank(initContextTriggerType, "initContextTriggerType");
-        this.compileVerifyContext = compileVerifyContext;
     }
 
     public void handle(SessionCreatedEvent event) {
@@ -63,25 +52,13 @@ public class SessionBootstrapInitProcessManager {
             initModuleName,
             initModuleDescription
         );
-        WorkTask initTask = planningCommandUseCase.createTask(
+        planningCommandUseCase.createTask(
             module.moduleId(),
             initTaskTitle,
             initTaskTemplateId,
             initRequiredToolpacksJson,
             List.of()
         );
-        contextCompileUseCase.compileTaskContextPack(
-            initTask.taskId(),
-            "IMPL",
-            initContextTriggerType
-        );
-        if (compileVerifyContext) {
-            contextCompileUseCase.compileTaskContextPack(
-                initTask.taskId(),
-                "VERIFY",
-                initContextTriggerType
-            );
-        }
     }
 
     private String normalizeRequiredToolpacksJson(String jsonText) {

@@ -41,9 +41,10 @@ class MergeGateServiceTest {
             integrationLaneLockPort
         );
         when(integrationLaneLockPort.tryAcquire("integration-lane")).thenReturn(true);
-        when(gitClientPort.readMainHead()).thenReturn("main-head-1");
-        when(gitClientPort.rebaseTaskBranch("TASK-1", "main-head-1"))
-            .thenReturn(new MergeCandidate("TASK-1", "main-head-1", "merge-candidate-1"));
+        when(taskStateMutationPort.resolveSessionIdByTaskId("TASK-1")).thenReturn("SES-1");
+        when(gitClientPort.readMainHead("SES-1")).thenReturn("main-head-1");
+        when(gitClientPort.rebaseTaskBranch("SES-1", "TASK-1", "main-head-1"))
+            .thenReturn(new MergeCandidate("TASK-1", "main-head-1", "merge-candidate-1", "refs/agentx/candidate/task-1/1"));
         when(runCreationPort.createVerifyRun("TASK-1", "merge-candidate-1")).thenReturn("RUN-VERIFY-1");
 
         MergeGateResult result = service.start("TASK-1");
@@ -53,8 +54,8 @@ class MergeGateServiceTest {
         assertEquals("RUN-VERIFY-1", result.verifyRunId());
         InOrder inOrder = inOrder(integrationLaneLockPort, gitClientPort, runCreationPort);
         inOrder.verify(integrationLaneLockPort).tryAcquire("integration-lane");
-        inOrder.verify(gitClientPort).readMainHead();
-        inOrder.verify(gitClientPort).rebaseTaskBranch("TASK-1", "main-head-1");
+        inOrder.verify(gitClientPort).readMainHead("SES-1");
+        inOrder.verify(gitClientPort).rebaseTaskBranch("SES-1", "TASK-1", "main-head-1");
         inOrder.verify(runCreationPort).createVerifyRun("TASK-1", "merge-candidate-1");
         inOrder.verify(integrationLaneLockPort).release("integration-lane");
     }
@@ -73,7 +74,7 @@ class MergeGateServiceTest {
 
         assertFalse(result.accepted());
         assertEquals("TASK-2", result.taskId());
-        verify(gitClientPort, never()).readMainHead();
+        verify(gitClientPort, never()).readMainHead("SES-1");
         verify(runCreationPort, never()).createVerifyRun("TASK-2", "anything");
     }
 }

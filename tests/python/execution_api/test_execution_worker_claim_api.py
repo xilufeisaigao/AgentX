@@ -267,6 +267,30 @@ class ExecutionWorkerClaimApiTest(unittest.TestCase):
         self.assertEqual(200, status)
         self.assertEqual(dependent_task_id, claimed["task_id"])
 
+    def test_open_ticket_should_not_block_worker_claim_for_ready_task(self):
+        task = self._create_task([self.tp_java, self.tp_maven])
+        self.assertEqual("READY_FOR_ASSIGN", task["status"])
+        task_id = task["task_id"]
+        snapshot_id = self._insert_ready_snapshot(task_id, "IMPL")
+
+        status, ticket = post_json(
+            f"/api/v0/sessions/{self.session_id}/tickets",
+            {
+                "type": "HANDOFF",
+                "title": "non-blocking open ticket",
+                "created_by_role": "requirement_agent",
+                "assignee_role": "architect_agent",
+                "payload_json": "{\"kind\":\"handoff_packet\"}",
+            },
+        )
+        self.assertEqual(200, status)
+        self.assertEqual("OPEN", ticket["status"])
+
+        status, claimed = post_json(f"/api/v0/workers/{self.worker_id}/claim")
+        self.assertEqual(200, status)
+        self.assertEqual(task_id, claimed["task_id"])
+        self.assertEqual(snapshot_id, claimed["context_snapshot_id"])
+
     def _create_task(self, required_toolpacks):
         status, module = post_json(
             f"/api/v0/sessions/{self.session_id}/modules",

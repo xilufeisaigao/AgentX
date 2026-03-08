@@ -22,6 +22,9 @@ import java.util.UUID;
 @Service
 public class WorkerCapabilityService implements WorkerCapabilityUseCase {
 
+    private static final String TP_JAVA_17 = "TP-JAVA-17";
+    private static final String TP_JAVA_21 = "TP-JAVA-21";
+    private static final int READY_WORKER_SCAN_LIMIT = 1000;
     private static final Set<String> ALLOWED_TOOLPACK_KINDS = Set.of(
         "language",
         "build",
@@ -153,7 +156,16 @@ public class WorkerCapabilityService implements WorkerCapabilityUseCase {
         if (normalizedRequired.isEmpty()) {
             return workerRepository.existsByStatus(WorkerStatus.READY);
         }
-        return workerToolpackRepository.existsReadyWorkerCoveringAll(normalizedRequired);
+        if (workerToolpackRepository.existsReadyWorkerCoveringAll(normalizedRequired)) {
+            return true;
+        }
+        List<Worker> readyWorkers = workerRepository.findByStatus(WorkerStatus.READY, READY_WORKER_SCAN_LIMIT);
+        for (Worker worker : readyWorkers) {
+            if (worker != null && workerHasRequiredToolpacks(worker.workerId(), normalizedRequired)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     @Override
@@ -167,9 +179,7 @@ public class WorkerCapabilityService implements WorkerCapabilityUseCase {
         if (normalizedRequired.isEmpty()) {
             return true;
         }
-        List<String> workerToolpackIds = workerToolpackRepository.findToolpackIdsByWorkerId(normalizedWorkerId);
-        Set<String> bound = new LinkedHashSet<>(workerToolpackIds);
-        return bound.containsAll(normalizedRequired);
+        return workerHasRequiredToolpacks(normalizedWorkerId, normalizedRequired);
     }
 
     @Override
@@ -224,6 +234,9 @@ public class WorkerCapabilityService implements WorkerCapabilityUseCase {
         if (from == WorkerStatus.READY) {
             return to == WorkerStatus.DISABLED;
         }
+        if (from == WorkerStatus.DISABLED) {
+            return to == WorkerStatus.READY;
+        }
         return false;
     }
 
@@ -250,6 +263,20 @@ public class WorkerCapabilityService implements WorkerCapabilityUseCase {
             }
         }
         return new ArrayList<>(ids);
+    }
+
+    private boolean workerHasRequiredToolpacks(String workerId, List<String> normalizedRequired) {
+        List<String> workerToolpackIds = workerToolpackRepository.findToolpackIdsByWorkerId(workerId);
+        Set<String> satisfied = expandSatisfiedToolpacks(normalizeToolpackIds(workerToolpackIds));
+        return satisfied.containsAll(normalizedRequired);
+    }
+
+    private static Set<String> expandSatisfiedToolpacks(List<String> toolpackIds) {
+        LinkedHashSet<String> expanded = new LinkedHashSet<>(toolpackIds);
+        if (expanded.contains(TP_JAVA_21)) {
+            expanded.add(TP_JAVA_17);
+        }
+        return expanded;
     }
 
     private static String normalizeNullable(String raw) {

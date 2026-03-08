@@ -28,6 +28,8 @@ import java.util.Locale;
 import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Service
 public class ContextCompileService implements ContextCompileUseCase {
@@ -35,7 +37,13 @@ public class ContextCompileService implements ContextCompileUseCase {
     private static final int MAX_ARCHITECTURE_REFS = 12;
     private static final int MAX_DECISION_REFS = 12;
     private static final int MAX_DECISION_SUMMARIES = 6;
-    private static final int MAX_REQUIREMENT_HIGHLIGHTS = 6;
+    private static final int MAX_REQUIREMENT_HIGHLIGHTS = 12;
+    private static final Pattern ROOT_CAUSE_PATTERN = Pattern.compile(
+        "(?i)caused by:\\s*([\\w.$]+(?:Exception|Error):\\s*.+?)(?:\\s+at\\s+[\\w.$]+\\(|$)"
+    );
+    private static final Pattern EXCEPTION_PATTERN = Pattern.compile(
+        "([\\w.$]+(?:Exception|Error):\\s*.+?)(?:\\s+at\\s+[\\w.$]+\\(|$)"
+    );
 
     private final ContextFactsQueryPort contextFactsQueryPort;
     private final ArtifactStorePort artifactStorePort;
@@ -309,12 +317,12 @@ public class ContextCompileService implements ContextCompileUseCase {
                 requiredToolpackIds,
                 normalizedRunKind
             ),
-            TaskSkillTemplateSupport.buildPitfalls(normalizedRunKind),
+            TaskSkillTemplateSupport.buildPitfalls(normalizedRunKind, taskPlanning.taskTemplateId()),
             List.of(
                 "Missing required facts must be raised via NEED_CLARIFICATION.",
                 "Architecture tradeoffs or governance choices must be raised via NEED_DECISION."
             ),
-            TaskSkillTemplateSupport.buildExpectedOutputs(normalizedRunKind)
+            TaskSkillTemplateSupport.buildExpectedOutputs(normalizedRunKind, taskPlanning.taskTemplateId())
         );
 
         String sourceFingerprint = computeFingerprint(
@@ -609,9 +617,152 @@ public class ContextCompileService implements ContextCompileUseCase {
         }
         List<String> refs = new ArrayList<>();
         for (ContextFactsQueryPort.RunFact run : runs) {
-            refs.add("run:" + run.runId() + "|" + run.status());
+            if (run == null || run.runId() == null || run.runId().isBlank()) {
+                continue;
+            }
+            StringBuilder ref = new StringBuilder("run:");
+            ref.append(run.runId().trim());
+            appendRunRefPart(ref, normalizeNullable(run.status()));
+            appendRunRefPart(ref, normalizeNullable(run.runKind()));
+            String baseCommit = normalizeNullable(run.baseCommit());
+            if (baseCommit != null) {
+                appendRunRefKeyValue(ref, "base", abbreviate(baseCommit, 40));
+            }
+            String latestEventType = normalizeNullable(run.latestEventType());
+            if (latestEventType != null) {
+                appendRunRefKeyValue(ref, "event", latestEventType.toUpperCase(Locale.ROOT));
+            }
+            String summary = summarizeRunFact(run);
+            if (summary != null) {
+                appendRunRefKeyValue(ref, "summary", summary);
+            }
+            refs.add(ref.toString());
         }
         return refs;
+    }
+
+    private String summarizeRunFact(ContextFactsQueryPort.RunFact run) {
+        if (run == null) {
+            return null;
+        }
+        LinkedHashSet<String> parts = new LinkedHashSet<>();
+        String latestEventBody = abbreviate(normalizeFreeText(run.latestEventBody()), 220);
+        if (latestEventBody != null && !latestEventBody.isBlank()) {
+            parts.add(latestEventBody);
+        }
+        JsonNode latestEventData = parseJson(run.latestEventDataJson());
+        if (latestEventData != null && latestEventData.isObject()) {
+            String resultStatus = abbreviate(normalizeFreeText(readJsonText(latestEventData, "result_status")), 40);
+            if (resultStatus != null && !resultStatus.isBlank()) {
+                parts.add("result=" + resultStatus);
+            }
+            String workReport = abbreviate(
+                summarizeWorkReport(readJsonText(latestEventData, "work_report")),
+                260
+            );
+            if (workReport != null && !workReport.isBlank()) {
+                parts.add(workReport);
+            }
+            String deliveryCommit = normalizeDeliveryCommit(readJsonText(latestEventData, "delivery_commit"));
+            if (deliveryCommit != null) {
+                parts.add("delivery_commit=" + deliveryCommit);
+            }
+        }
+        if (parts.isEmpty()) {
+            return null;
+        }
+        return abbreviate(String.join("; ", parts), 360);
+    }
+
+    private String summarizeWorkReport(String rawWorkReport) {
+        String normalized = normalizeFreeText(rawWorkReport);
+        if (normalized == null || normalized.isBlank()) {
+            return null;
+        }
+        String rootCause = extractRootCause(normalized);
+        if (rootCause != null && !rootCause.isBlank()) {
+            return rootCause;
+        }
+        return normalized;
+    }
+
+    private String extractRootCause(String normalizedWorkReport) {
+        if (normalizedWorkReport == null || normalizedWorkReport.isBlank()) {
+            return null;
+        }
+        Matcher rootCauseMatcher = ROOT_CAUSE_PATTERN.matcher(normalizedWorkReport);
+        if (rootCauseMatcher.find()) {
+            String candidate = normalizeFreeText(rootCauseMatcher.group(1));
+            if (candidate != null && !candidate.isBlank()) {
+                return candidate;
+            }
+        }
+        Matcher exceptionMatcher = EXCEPTION_PATTERN.matcher(normalizedWorkReport);
+        while (exceptionMatcher.find()) {
+            String candidate = normalizeFreeText(exceptionMatcher.group(1));
+            if (candidate == null || candidate.isBlank()) {
+                continue;
+            }
+            if (candidate.toLowerCase(Locale.ROOT).contains("command failed (exit")) {
+                continue;
+            }
+            return candidate;
+        }
+        return null;
+    }
+
+    private JsonNode parseJson(String rawValue) {
+        if (rawValue == null || rawValue.isBlank()) {
+            return null;
+        }
+        try {
+            return objectMapper.readTree(rawValue);
+        } catch (Exception ex) {
+            return null;
+        }
+    }
+
+    private static String readJsonText(JsonNode root, String fieldName) {
+        if (root == null || fieldName == null || fieldName.isBlank()) {
+            return null;
+        }
+        JsonNode fieldNode = root.path(fieldName);
+        if (fieldNode.isMissingNode() || fieldNode.isNull()) {
+            return null;
+        }
+        if (fieldNode.isTextual()) {
+            return fieldNode.asText();
+        }
+        return fieldNode.toString();
+    }
+
+    private static String normalizeDeliveryCommit(String rawValue) {
+        String normalized = normalizeNullable(rawValue);
+        if (normalized == null) {
+            return null;
+        }
+        String candidate = normalized.startsWith("git:") ? normalized.substring("git:".length()) : normalized;
+        candidate = candidate.trim();
+        if (candidate.isBlank()) {
+            return null;
+        }
+        return abbreviate(candidate, 40);
+    }
+
+    private static void appendRunRefPart(StringBuilder ref, String rawValue) {
+        String normalized = normalizeNullable(rawValue);
+        if (normalized == null) {
+            return;
+        }
+        ref.append('|').append(normalized.toUpperCase(Locale.ROOT));
+    }
+
+    private static void appendRunRefKeyValue(StringBuilder ref, String key, String rawValue) {
+        String normalized = normalizeNullable(rawValue);
+        if (normalized == null) {
+            return;
+        }
+        ref.append('|').append(key).append('=').append(normalized);
     }
 
     private static String resolveRepoBaselineRef(List<ContextFactsQueryPort.RunFact> runs) {
@@ -637,6 +788,10 @@ public class ContextCompileService implements ContextCompileUseCase {
         fragments.add("template:" + nullSafe(taskTemplateId));
         if (taskTitle != null && !taskTitle.isBlank()) {
             fragments.add("task_title:" + abbreviate(normalizeFreeText(taskTitle), 220));
+        }
+        if ("tmpl.init.v0".equalsIgnoreCase(nullSafe(taskTemplateId))) {
+            fragments.add("init_scope:bootstrap scaffold only; no business endpoints, controllers, or feature tests");
+            fragments.add("init_outputs:build file, runtime entrypoint, minimal config, and project-level docs only");
         }
         fragments.addAll(buildRequirementHighlights(requirementOptional));
         if (toolpacks != null) {
@@ -667,8 +822,23 @@ public class ContextCompileService implements ContextCompileUseCase {
         if (!summary.isBlank()) {
             highlights.add("requirement_summary:" + abbreviate(normalizeFreeText(summary), 220));
         }
-        appendRequirementBullets(highlights, "goal", extractSectionList(requirement.content(), "## 2."), 3);
-        appendRequirementBullets(highlights, "acceptance", extractSectionList(requirement.content(), "## 5."), 3);
+        appendRequirementBullets(
+            highlights,
+            "scope",
+            extractSectionSubsectionList(requirement.content(), "## 4.", "### 包含", "### In"),
+            5,
+            true
+        );
+        appendRequirementBullets(
+            highlights,
+            "scope_out",
+            extractSectionSubsectionList(requirement.content(), "## 4.", "### 不包含", "### Out"),
+            3,
+            true
+        );
+        appendRequirementBullets(highlights, "goal", extractSectionList(requirement.content(), "## 2."), 2);
+        appendRequirementBullets(highlights, "constraint", extractSectionList(requirement.content(), "## 6."), 4, true);
+        appendRequirementBullets(highlights, "acceptance", extractSectionList(requirement.content(), "## 5."), 2);
         if (highlights.size() > MAX_REQUIREMENT_HIGHLIGHTS) {
             return List.copyOf(new ArrayList<>(highlights).subList(0, MAX_REQUIREMENT_HIGHLIGHTS));
         }
@@ -681,6 +851,16 @@ public class ContextCompileService implements ContextCompileUseCase {
         List<String> bullets,
         int maxItems
     ) {
+        appendRequirementBullets(highlights, prefix, bullets, maxItems, false);
+    }
+
+    private static void appendRequirementBullets(
+        LinkedHashSet<String> highlights,
+        String prefix,
+        List<String> bullets,
+        int maxItems,
+        boolean preserveCase
+    ) {
         if (bullets == null || bullets.isEmpty() || maxItems <= 0) {
             return;
         }
@@ -689,7 +869,10 @@ public class ContextCompileService implements ContextCompileUseCase {
             if (bullet == null || bullet.isBlank()) {
                 continue;
             }
-            highlights.add("requirement_" + prefix + ":" + abbreviate(normalizeFreeText(bullet), 220));
+            String normalized = preserveCase
+                ? normalizeRequirementTextPreserveCase(bullet)
+                : normalizeFreeText(bullet);
+            highlights.add("requirement_" + prefix + ":" + abbreviate(normalized, 260));
             appended++;
             if (appended >= maxItems || highlights.size() >= MAX_REQUIREMENT_HIGHLIGHTS) {
                 break;
@@ -753,6 +936,54 @@ public class ContextCompileService implements ContextCompileUseCase {
         return result;
     }
 
+    private static List<String> extractSectionSubsectionList(
+        String markdown,
+        String sectionPrefix,
+        String... subsectionPrefixes
+    ) {
+        if (markdown == null || markdown.isBlank() || subsectionPrefixes == null || subsectionPrefixes.length == 0) {
+            return List.of();
+        }
+        String[] lines = markdown.split("\\R");
+        List<String> result = new ArrayList<>();
+        boolean inTargetSection = false;
+        boolean inTargetSubsection = false;
+        for (String line : lines) {
+            if (line == null) {
+                continue;
+            }
+            String trimmed = line.trim();
+            if (trimmed.startsWith("## ")) {
+                inTargetSection = trimmed.startsWith(sectionPrefix);
+                inTargetSubsection = false;
+                continue;
+            }
+            if (!inTargetSection) {
+                continue;
+            }
+            if (trimmed.startsWith("### ")) {
+                inTargetSubsection = matchesAnyHeadingPrefix(trimmed, subsectionPrefixes);
+                continue;
+            }
+            if (inTargetSubsection && trimmed.startsWith("- ")) {
+                result.add(trimmed.substring(2).trim());
+            }
+        }
+        return result;
+    }
+
+    private static boolean matchesAnyHeadingPrefix(String value, String... prefixes) {
+        if (value == null || prefixes == null || prefixes.length == 0) {
+            return false;
+        }
+        for (String prefix : prefixes) {
+            if (prefix != null && !prefix.isBlank() && value.startsWith(prefix)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private static String extractSectionFirstLine(String markdown, String sectionPrefix) {
         if (markdown == null || markdown.isBlank()) {
             return "";
@@ -777,6 +1008,13 @@ public class ContextCompileService implements ContextCompileUseCase {
             return trimmed;
         }
         return "";
+    }
+
+    private static String normalizeRequirementTextPreserveCase(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value.replaceAll("\\s+", " ").trim();
     }
 
     private List<String> parseStringArray(String jsonText) {
@@ -876,6 +1114,13 @@ public class ContextCompileService implements ContextCompileUseCase {
 
     private static String nullSafe(String value) {
         return value == null ? "" : value;
+    }
+
+    private static String normalizeNullable(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        return value.trim();
     }
 
     private static String normalizeFreeText(String value) {

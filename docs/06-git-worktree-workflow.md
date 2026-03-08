@@ -160,12 +160,13 @@
 3. run 工作分支：`run/<run_id>`（run 维度，便于重试与回收）
 
 目录建议：
-1. 仓库缓存根目录：`repo-cache/<repo_id>/`（包含共享对象库）
-2. worktree 目录：`worktrees/<session_id>/<run_id>/`
+1. 会话仓库根目录：`sessions/<session_id>/repo/`（每个 session 一个独立 git 仓库）
+2. worktree 目录：`worktrees/<session_id>/<run_id>/`（相对于该 session 仓库根目录）
 
 说明：
-1. 用 `run_id` 做 worktree 目录名，避免重试时目录冲突
-2. 任务分支用于“人类/总工视角的任务追溯”，run 分支用于“执行尝试的隔离”
+1. 会话仓库隔离是硬约束：不同 session 不共享同一个 `main` 分支历史
+2. 用 `run_id` 做 worktree 目录名，避免重试时目录冲突
+3. 任务分支用于“人类/总工视角的任务追溯”，run 分支用于“执行尝试的隔离”
 
 ### 5.2 分配步骤（语义序列）
 
@@ -350,18 +351,20 @@ create table git_workspaces (
 2. `work_tasks.status` 推进为 `DELIVERED`
 3. 总工将任务交付候选分支 `task/<task_id>` 创建或快进到 `delivery_commit`（把候选固定在可追溯分支上）
 4. 把 `delivery_commit` 与 Work Report 作为证据引用挂接到任务（可通过事件链 `ARTIFACT_LINKED` 实现，不强制加字段）
-5. 将该任务放入“集成车道队列”（实现上可按 `DELIVERED` 的创建时间排序即可）
+5. 服务端在 `DELIVERED` 后立即尝试触发 merge gate（若车道繁忙则保留 `DELIVERED`，由下一轮调度/GC 兜底重试）
 
 ### C9：合并门禁（rebase -> VERIFY merge candidate -> fast-forward merge）
 
 触发：总工从 `DELIVERED` 队列中取出一个任务进入串行集成车道  
 动作：
 1. 读取 `main` HEAD（记为 `main_head_before`）
-2. 对交付分支执行 rebase 到 `main_head_before`，得到 `merge_candidate_commit`
+2. 对交付分支执行 rebase 到 `main_head_before`，得到 `merge_candidate_commit`，并写入候选证据 ref：`refs/agentx/candidate/<task>/<attempt>`
 3. 创建 VERIFY run：`run_kind=VERIFY`，`base_commit=merge_candidate_commit`，`context_snapshot_id=latest READY`，只读验证
-4. VERIFY 通过：`main` 快进到 `merge_candidate_commit`，任务 `DELIVERED -> DONE`
-5. VERIFY 失败：任务保持 `DELIVERED`，总工创建修复任务（BUGFIX/IMPL/补测试），修复后重新进入 C9
+4. VERIFY 通过：`main` 快进到 `merge_candidate_commit`，并确保 `main` 上存在至少一个注释 `delivery/<YYYYMMDD-HHmm>` tag；任务 `DELIVERED -> DONE`
+5. VERIFY 失败：
+   - 若判定为基础设施失败：允许对同一 `merge_candidate_commit` 自动重试（最多 2 次）
+   - 若为业务失败：将原任务从 `DELIVERED` 回退到可调度状态，进入同任务 debug 流程（不自动拆分新 bugfix 任务）
 
 异常（最小）：
-1. rebase 冲突：按 C6 处理（冲突修复任务或提请）
+1. rebase 冲突：创建“冲突修复任务”（`tmpl.bugfix.v0`），把原任务回退并挂上 `depends_on=冲突修复任务(DONE)`，完成后再回到 C9
 2. fast-forward 失败（`main` HEAD 已变化）：必须重新执行 C9（产生新的 merge candidate 并重新 VERIFY）

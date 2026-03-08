@@ -8,5 +8,5 @@ public interface TaskAllocationUseCase {
 
     Optional<WorkTask> claimReadyTaskForWorker(String workerId, String runId);
 
-    boolean isInitGateActive();
+    boolean isInitGateActive(String sessionId);
 }

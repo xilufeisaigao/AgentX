@@ -200,6 +200,15 @@ public class ArchitectTicketAutoProcessorService {
                 proposal.requestKind() + " request: " + proposal.question(),
                 requestData
             );
+            if (shouldAutoAdoptRecommendation(ticket, proposal)) {
+                ticketCommandUseCase.appendEvent(
+                    ticket.ticketId(),
+                    "architect_agent",
+                    "USER_RESPONDED",
+                    buildAutoResponseBody(proposal),
+                    buildAutoResponseDataJson(ticket, proposal)
+                );
+            }
             return true;
         } catch (RuntimeException ex) {
             log.error("Architect request-stage processing failed, ticketId={}", ticket.ticketId(), ex);
@@ -261,9 +270,6 @@ public class ArchitectTicketAutoProcessorService {
         RequirementCurrentDoc currentDoc
     ) {
         if (ticket == null || ticket.status() == null) {
-            return ProcessingStage.NONE;
-        }
-        if (!hasConfirmedRequirementBaseline(ticket, currentDoc)) {
             return ProcessingStage.NONE;
         }
         if (ticket.status() == TicketStatus.OPEN) {
@@ -532,6 +538,94 @@ public class ArchitectTicketAutoProcessorService {
         } catch (Exception ex) {
             throw new IllegalStateException("Failed to build decision requested data json", ex);
         }
+    }
+
+    private boolean shouldAutoAdoptRecommendation(
+        Ticket ticket,
+        ArchitectTicketProposalGeneratorPort.Proposal proposal
+    ) {
+        if (proposal == null || !"DECISION".equalsIgnoreCase(nullSafe(proposal.requestKind()))) {
+            return false;
+        }
+        ArchitectTicketProposalGeneratorPort.Recommendation recommendation = proposal.recommendation();
+        if (recommendation == null || recommendation.optionId() == null || recommendation.optionId().isBlank()) {
+            return false;
+        }
+        // Requirement-confirmation architecture review should converge automatically when
+        // the architect has already produced a recommended path.
+        if (ticket != null && ticket.type() == TicketType.ARCH_REVIEW) {
+            return true;
+        }
+        List<ArchitectTicketProposalGeneratorPort.DecisionOption> options = proposal.options();
+        if (options == null || options.size() != 1) {
+            return false;
+        }
+        ArchitectTicketProposalGeneratorPort.DecisionOption onlyOption = options.get(0);
+        if (onlyOption == null || onlyOption.optionId() == null || onlyOption.optionId().isBlank()) {
+            return false;
+        }
+        return recommendation.optionId().trim().equalsIgnoreCase(onlyOption.optionId().trim());
+    }
+
+    private String buildAutoResponseBody(ArchitectTicketProposalGeneratorPort.Proposal proposal) {
+        ArchitectTicketProposalGeneratorPort.Recommendation recommendation = proposal.recommendation();
+        String optionId = recommendation == null ? "" : nullSafe(recommendation.optionId());
+        String optionTitle = findRecommendedOptionTitle(proposal);
+        if (!optionTitle.isBlank() && !optionId.isBlank()) {
+            return "Auto-adopted recommendation " + optionId + ": " + optionTitle;
+        }
+        if (!optionTitle.isBlank()) {
+            return "Auto-adopted recommendation: " + optionTitle;
+        }
+        if (!optionId.isBlank()) {
+            return "Auto-adopted recommendation " + optionId + ".";
+        }
+        return "Auto-adopted the sole recommended option.";
+    }
+
+    private String buildAutoResponseDataJson(Ticket ticket, ArchitectTicketProposalGeneratorPort.Proposal proposal) {
+        try {
+            ObjectNode data = objectMapper.createObjectNode();
+            data.put("source", "architect_auto_processor");
+            data.put("source_ticket_id", ticket.ticketId());
+            data.put("request_kind", nullSafe(proposal.requestKind()));
+            data.put("auto_selected", true);
+            data.put("provider", nullSafe(proposal.provider()));
+            data.put("model", nullSafe(proposal.model()));
+            ArchitectTicketProposalGeneratorPort.Recommendation recommendation = proposal.recommendation();
+            if (recommendation != null) {
+                data.put("selected_option_id", nullSafe(recommendation.optionId()));
+                data.put("reason", nullSafe(recommendation.reason()));
+            }
+            String optionTitle = findRecommendedOptionTitle(proposal);
+            if (!optionTitle.isBlank()) {
+                data.put("selected_option_title", optionTitle);
+            }
+            data.put("question", nullSafe(proposal.question()));
+            data.put("analysis_summary", nullSafe(proposal.analysisSummary()));
+            return objectMapper.writeValueAsString(data);
+        } catch (Exception ex) {
+            throw new IllegalStateException("Failed to build auto response data json", ex);
+        }
+    }
+
+    private String findRecommendedOptionTitle(ArchitectTicketProposalGeneratorPort.Proposal proposal) {
+        if (proposal == null || proposal.recommendation() == null) {
+            return "";
+        }
+        String optionId = nullSafe(proposal.recommendation().optionId());
+        if (optionId.isBlank() || proposal.options() == null) {
+            return "";
+        }
+        for (ArchitectTicketProposalGeneratorPort.DecisionOption option : proposal.options()) {
+            if (option == null || option.optionId() == null) {
+                continue;
+            }
+            if (optionId.equalsIgnoreCase(option.optionId().trim())) {
+                return nullSafe(option.title());
+            }
+        }
+        return "";
     }
 
     private String buildPlanningCommentDataJson(

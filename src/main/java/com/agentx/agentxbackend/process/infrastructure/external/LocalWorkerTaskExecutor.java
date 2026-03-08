@@ -16,17 +16,24 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ObjectNode;
 
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.Reader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Stream;
 
 @Component
 public class LocalWorkerTaskExecutor implements WorkerTaskExecutorPort {
@@ -34,11 +41,14 @@ public class LocalWorkerTaskExecutor implements WorkerTaskExecutorPort {
     private static final String MOCK_PROVIDER = "mock";
     private static final String BAILIAN_PROVIDER = "bailian";
     private static final String LANGCHAIN4J_FRAMEWORK = "langchain4j";
+    private static final String WORKTREES_PREFIX = "worktrees/";
+    private static final int MAX_CAPTURED_PROCESS_OUTPUT_CHARS = 256_000;
 
     private final ObjectMapper objectMapper;
     private final RuntimeLlmConfigUseCase runtimeLlmConfigUseCase;
     private final String gitExecutable;
     private final Path repoRoot;
+    private final String sessionRepoPrefix;
     private final int commandTimeoutMs;
     private final int maxEditsPerRun;
     private final Set<String> verifyCommandPrefixAllowlist;
@@ -54,7 +64,8 @@ public class LocalWorkerTaskExecutor implements WorkerTaskExecutorPort {
         ObjectMapper objectMapper,
         @Value("${agentx.worker-runtime.git.executable:git}") String gitExecutable,
         @Value("${agentx.worker-runtime.repo-root:.}") String repoRoot,
-        @Value("${agentx.worker-runtime.command-timeout-ms:120000}") int commandTimeoutMs,
+        @Value("${agentx.workspace.git.session-repo-prefix:sessions}") String sessionRepoPrefix,
+        @Value("${agentx.worker-runtime.execution.command-timeout-ms:${agentx.worker-runtime.command-timeout-ms:600000}}") int commandTimeoutMs,
         @Value("${agentx.worker-runtime.max-edits-per-run:20}") int maxEditsPerRun,
         @Value("${agentx.worker-runtime.verify.allowed-command-prefixes:mvn,./mvnw,gradle,./gradlew,python,pytest,git}") String verifyAllowedCommandPrefixes,
         @Value("${agentx.worker-runtime.verify.use-docker:false}") boolean verifyUseDocker,
@@ -70,6 +81,7 @@ public class LocalWorkerTaskExecutor implements WorkerTaskExecutorPort {
         this.repoRoot = Path.of(repoRoot == null || repoRoot.isBlank() ? "." : repoRoot.trim())
             .toAbsolutePath()
             .normalize();
+        this.sessionRepoPrefix = normalizeRelativePrefix(sessionRepoPrefix, "sessions");
         this.commandTimeoutMs = Math.max(5_000, commandTimeoutMs);
         this.maxEditsPerRun = Math.max(1, maxEditsPerRun);
         this.verifyCommandPrefixAllowlist = parseVerifyCommandAllowlist(verifyAllowedCommandPrefixes);
@@ -138,9 +150,12 @@ public class LocalWorkerTaskExecutor implements WorkerTaskExecutorPort {
                 report.append(trimForReport(result.stdout())).append('\n');
             }
         }
-        ProcessResult dirtyCheck = runGit(List.of("status", "--porcelain"), worktree, Set.of(0));
-        if (!dirtyCheck.stdout().isBlank()) {
-            return ExecutionResult.failed("VERIFY run must be read-only, but worktree became dirty.");
+        List<String> unexpectedChanges = findUnexpectedVerifyChanges(worktree);
+        if (!unexpectedChanges.isEmpty()) {
+            return ExecutionResult.failed(
+                "VERIFY run must be read-only, but worktree became dirty: "
+                    + summarizeVerifyChanges(unexpectedChanges)
+            );
         }
         String workReport = report.isEmpty()
             ? "VERIFY completed successfully."
@@ -149,10 +164,15 @@ public class LocalWorkerTaskExecutor implements WorkerTaskExecutorPort {
     }
 
     private ProcessResult runVerifyCommand(String command, Path worktree, int timeoutMs) {
-        if (!verifyUseDocker) {
-            return runShell(command, worktree, timeoutMs);
+        PreparedVerifyCommand preparedCommand = prepareVerifyCommand(command);
+        try {
+            if (!verifyUseDocker) {
+                return runShell(preparedCommand.command(), worktree, timeoutMs);
+            }
+            return runVerifyInDocker(preparedCommand.command(), worktree, timeoutMs);
+        } finally {
+            preparedCommand.cleanup();
         }
-        return runVerifyInDocker(command, worktree, timeoutMs);
     }
 
     private ProcessResult runVerifyInDocker(String command, Path worktree, int timeoutMs) {
@@ -182,10 +202,12 @@ public class LocalWorkerTaskExecutor implements WorkerTaskExecutorPort {
     private ExecutionResult executeImpl(TaskPackage taskPackage, Path worktree) {
         String outputLanguage = resolveOutputLanguage();
         String taskSkillText = readTaskSkill(taskPackage.taskSkillRef());
+        String workspaceSnapshot = buildWorkspaceSnapshot(worktree, taskPackage.readScope(), taskPackage.writeScope());
         PlannerResult plannerResult = proposePlan(
             taskPackage,
             taskSkillText,
             outputLanguage,
+            workspaceSnapshot,
             false,
             null
         );
@@ -194,8 +216,22 @@ public class LocalWorkerTaskExecutor implements WorkerTaskExecutorPort {
                 taskPackage,
                 taskSkillText,
                 outputLanguage,
+                workspaceSnapshot,
                 true,
                 plannerResult.message()
+            );
+        }
+        if ("SUCCEEDED".equals(plannerResult.outcome()) && plannerResult.edits().isEmpty()) {
+            plannerResult = retryPlannerWithForcedExecution(
+                taskPackage,
+                taskSkillText,
+                outputLanguage,
+                workspaceSnapshot,
+                localize(
+                    outputLanguage,
+                    "上一个规划结果没有返回任何可执行 edits。请直接检查现有脚手架与需求约束的冲突，并输出至少一组真实文件改动。",
+                    "The previous plan returned no executable edits. Inspect the current scaffold against the requirement constraints and return at least one real file change."
+                )
             );
         }
         if ("NEED_CLARIFICATION".equals(plannerResult.outcome())) {
@@ -250,10 +286,108 @@ public class LocalWorkerTaskExecutor implements WorkerTaskExecutorPort {
         if (edits.size() > maxEditsPerRun) {
             return ExecutionResult.failed("Planner returned too many edits: " + edits.size());
         }
-        for (FileEdit edit : edits) {
-            if (!isWriteScopeAllowed(edit.path(), taskPackage.writeScope())) {
-                return ExecutionResult.failed("Edit path is outside write_scope: " + edit.path());
+        List<String> rejectedEditPaths = new ArrayList<>();
+        List<FileEdit> applicableEdits = filterApplicableEdits(edits, taskPackage.writeScope(), rejectedEditPaths);
+        if (applicableEdits.isEmpty()) {
+            Optional<ExecutionResult> alreadySatisfied = tryCompleteAlreadySatisfiedTask(
+                taskPackage,
+                worktree,
+                outputLanguage
+            );
+            if (alreadySatisfied.isPresent()) {
+                return alreadySatisfied.get();
             }
+            return ExecutionResult.failed(
+                "Planner returned only out-of-scope edits: " + String.join(", ", rejectedEditPaths)
+            );
+        }
+        List<FileEdit> effectiveEdits = filterEffectiveEdits(applicableEdits, worktree);
+        if (effectiveEdits.isEmpty()) {
+            plannerResult = retryPlannerWithForcedExecution(
+                taskPackage,
+                taskSkillText,
+                outputLanguage,
+                workspaceSnapshot,
+                localize(
+                    outputLanguage,
+                    "上一个规划结果写回后没有产生任何文件差异。请直接修正当前仓库中不符合需求的文件，返回会真正改变内容的 edits。",
+                    "The previous plan produced no file diff after application. Correct the files that still violate the requirement and return edits that will actually change content."
+                )
+            );
+            if ("NEED_CLARIFICATION".equals(plannerResult.outcome())) {
+                return ExecutionResult.needInput(
+                    "NEED_CLARIFICATION",
+                    defaultText(
+                        plannerResult.message(),
+                        localize(
+                            outputLanguage,
+                            "Worker 需要更多澄清信息才能继续执行。",
+                            "Worker needs clarification before continuing."
+                        )
+                    ),
+                    plannerResult.dataJson()
+                );
+            }
+            if ("NEED_DECISION".equals(plannerResult.outcome())) {
+                return ExecutionResult.needInput(
+                    "NEED_DECISION",
+                    defaultText(
+                        plannerResult.message(),
+                        localize(
+                            outputLanguage,
+                            "Worker 需要明确决策才能继续执行。",
+                            "Worker needs a decision before continuing."
+                        )
+                    ),
+                    plannerResult.dataJson()
+                );
+            }
+            if ("FAILED".equals(plannerResult.outcome())) {
+                return ExecutionResult.failed(
+                    defaultText(
+                        plannerResult.message(),
+                        localize(outputLanguage, "Worker 规划失败。", "Worker planner failed.")
+                    )
+                );
+            }
+            rejectedEditPaths = new ArrayList<>();
+            applicableEdits = filterApplicableEdits(plannerResult.edits(), taskPackage.writeScope(), rejectedEditPaths);
+            if (applicableEdits.isEmpty()) {
+                Optional<ExecutionResult> alreadySatisfied = tryCompleteAlreadySatisfiedTask(
+                    taskPackage,
+                    worktree,
+                    outputLanguage
+                );
+                if (alreadySatisfied.isPresent()) {
+                    return alreadySatisfied.get();
+                }
+                return ExecutionResult.failed(
+                    "Planner returned only out-of-scope edits after forced retry: "
+                        + String.join(", ", rejectedEditPaths)
+                );
+            }
+            effectiveEdits = filterEffectiveEdits(applicableEdits, worktree);
+            if (effectiveEdits.isEmpty()) {
+                Optional<ExecutionResult> alreadySatisfied = tryCompleteAlreadySatisfiedTask(
+                    taskPackage,
+                    worktree,
+                    outputLanguage
+                );
+                if (alreadySatisfied.isPresent()) {
+                    return alreadySatisfied.get();
+                }
+                return ExecutionResult.needInput(
+                    "NEED_CLARIFICATION",
+                    localize(
+                        outputLanguage,
+                        "规划器连续两次都没有返回会产生实际代码变更的 edits，请检查任务拆分或约束是否过宽。",
+                        "Planner failed twice to return edits that change the worktree."
+                    ),
+                    plannerResult.dataJson()
+                );
+            }
+        }
+        for (FileEdit edit : effectiveEdits) {
             Path targetPath = resolveEditPath(worktree, edit.path());
             try {
                 if (targetPath.getParent() != null) {
@@ -281,17 +415,66 @@ public class LocalWorkerTaskExecutor implements WorkerTaskExecutorPort {
             plannerResult.message(),
             "Implementation completed and commit created by worker runtime."
         );
+        if (!rejectedEditPaths.isEmpty()) {
+            workReport = workReport
+                + "\nIgnored out-of-scope edits: "
+                + String.join(", ", rejectedEditPaths);
+        }
         return ExecutionResult.succeeded(workReport, deliveryCommit, null);
     }
 
+    private Optional<ExecutionResult> tryCompleteAlreadySatisfiedTask(
+        TaskPackage taskPackage,
+        Path worktree,
+        String outputLanguage
+    ) {
+        if (taskPackage == null || worktree == null) {
+            return Optional.empty();
+        }
+        if (!"tmpl.test.v0".equals(normalizeTemplate(taskPackage.taskTemplateId()))) {
+            return Optional.empty();
+        }
+        if (!hasExistingFileInScope(worktree, taskPackage.writeScope())) {
+            return Optional.empty();
+        }
+        List<String> validationCommands = detectAlreadySatisfiedValidationCommands(taskPackage, worktree);
+        if (validationCommands.isEmpty()) {
+            return Optional.empty();
+        }
+        for (String validationCommand : validationCommands) {
+            try {
+                ProcessResult result = runVerifyCommand(validationCommand, worktree, commandTimeoutMs);
+                if (result.exitCode() != 0) {
+                    return Optional.empty();
+                }
+            } catch (RuntimeException ex) {
+                return Optional.empty();
+            }
+        }
+        String headCommit = resolveHeadCommit(worktree);
+        if (headCommit == null || headCommit.isBlank()) {
+            return Optional.empty();
+        }
+        return Optional.of(ExecutionResult.succeeded(
+            localize(
+                outputLanguage,
+                "仓库中的现有测试已满足当前任务要求，无需额外代码改动。",
+                "Existing tests in the repository already satisfy this task, so no additional code change was required."
+            ),
+            headCommit,
+            null
+        ));
+    }
+
     private PlannerResult proposePlan(TaskPackage taskPackage, String taskSkillText, String outputLanguage) {
-        return proposePlan(taskPackage, taskSkillText, outputLanguage, false, null);
+        return proposePlan(taskPackage, taskSkillText, outputLanguage, "", false, null);
     }
 
     private PlannerResult proposePlan(
         TaskPackage taskPackage,
         String taskSkillText,
         String outputLanguage,
+        String workspaceSnapshot,
         boolean forceExecutionMode,
         String previousClarificationQuestion
     ) {
@@ -340,6 +523,7 @@ public class LocalWorkerTaskExecutor implements WorkerTaskExecutorPort {
                         taskPackage,
                         taskSkillText,
                         llmConfig.outputLanguage(),
+                        workspaceSnapshot,
                         forceExecutionMode,
                         previousClarificationQuestion
                     ))
@@ -381,26 +565,35 @@ public class LocalWorkerTaskExecutor implements WorkerTaskExecutorPort {
         if (root == null || !root.isObject()) {
             return null;
         }
-        String outcome = root.path("outcome").asText("SUCCEEDED").trim().toUpperCase(Locale.ROOT);
-        String message = root.path("message").asText("").trim();
-        String dataJson = root.path("data_json").isMissingNode() ? null : root.path("data_json").toString();
-
-        List<FileEdit> edits = new ArrayList<>();
-        JsonNode editsNode = root.path("edits");
-        if (editsNode.isArray()) {
-            for (JsonNode editNode : editsNode) {
-                if (!editNode.isObject()) {
-                    continue;
-                }
-                String path = editNode.path("path").asText("").trim();
-                String content = editNode.path("content").asText("");
-                if (!path.isBlank()) {
-                    edits.add(new FileEdit(path, content));
-                }
-            }
+        String outcome = readPlannerText(root, "outcome", "status", "result");
+        if (outcome.isBlank()) {
+            outcome = "SUCCEEDED";
         }
+        outcome = outcome.trim().toUpperCase(Locale.ROOT);
+        String message = readPlannerText(root, "message", "summary", "reason", "analysis").trim();
+        JsonNode dataNode = firstPlannerNode(root, "data_json", "data", "details");
+        String dataJson = dataNode == null ? null : dataNode.toString();
+
+        List<FileEdit> edits = readPlannerEdits(root);
 
         return new PlannerResult(outcome, message, edits, dataJson);
+    }
+
+    private PlannerResult retryPlannerWithForcedExecution(
+        TaskPackage taskPackage,
+        String taskSkillText,
+        String outputLanguage,
+        String workspaceSnapshot,
+        String reason
+    ) {
+        return proposePlan(
+            taskPackage,
+            taskSkillText,
+            outputLanguage,
+            workspaceSnapshot,
+            true,
+            reason
+        );
     }
 
     private PlannerResult mockPlan(TaskPackage taskPackage, String outputLanguage) {
@@ -455,11 +648,68 @@ public class LocalWorkerTaskExecutor implements WorkerTaskExecutorPort {
         if (worktreePath == null || worktreePath.isBlank()) {
             throw new IllegalArgumentException("worktreePath must not be blank");
         }
-        Path resolved = repoRoot.resolve(worktreePath.trim()).toAbsolutePath().normalize();
-        if (!resolved.startsWith(repoRoot)) {
+        String normalized = normalizeWorktreePath(worktreePath);
+        Path sessionScoped = tryResolveSessionScopedWorktree(normalized, worktreePath);
+        if (sessionScoped != null) {
+            return sessionScoped;
+        }
+        Path legacy = repoRoot.resolve(normalized).toAbsolutePath().normalize();
+        if (!legacy.startsWith(repoRoot)) {
             throw new IllegalArgumentException("worktreePath escapes repo root: " + worktreePath);
         }
+        return legacy;
+    }
+
+    private Path tryResolveSessionScopedWorktree(String normalizedWorktreePath, String rawWorktreePath) {
+        if (!normalizedWorktreePath.startsWith(WORKTREES_PREFIX)) {
+            return null;
+        }
+        String sessionId = extractSessionIdFromWorktreePath(normalizedWorktreePath, rawWorktreePath);
+        Path sessionRepoRoot = resolveSessionRepoPath(sessionId);
+        Path resolved = sessionRepoRoot.resolve(normalizedWorktreePath).toAbsolutePath().normalize();
+        if (!resolved.startsWith(sessionRepoRoot)) {
+            throw new IllegalArgumentException("worktreePath escapes session repo root: " + rawWorktreePath);
+        }
+        if (Files.exists(resolved)) {
+            return resolved;
+        }
+        Path legacy = repoRoot.resolve(normalizedWorktreePath).toAbsolutePath().normalize();
+        if (!legacy.startsWith(repoRoot)) {
+            throw new IllegalArgumentException("worktreePath escapes repo root: " + rawWorktreePath);
+        }
+        if (Files.exists(legacy)) {
+            return legacy;
+        }
         return resolved;
+    }
+
+    private String extractSessionIdFromWorktreePath(String normalizedWorktreePath, String rawWorktreePath) {
+        String suffix = normalizedWorktreePath.substring(WORKTREES_PREFIX.length());
+        int separatorIndex = suffix.indexOf('/');
+        if (separatorIndex <= 0) {
+            throw new IllegalArgumentException("worktreePath must include sessionId and runId: " + rawWorktreePath);
+        }
+        return suffix.substring(0, separatorIndex);
+    }
+
+    private Path resolveSessionRepoPath(String sessionId) {
+        String safeSessionId = sessionId
+            .toLowerCase(Locale.ROOT)
+            .replaceAll("[^a-z0-9._\\-]+", "-")
+            .replaceAll("^-+|-+$", "");
+        if (safeSessionId.isBlank()) {
+            throw new IllegalArgumentException("sessionId has no safe characters: " + sessionId);
+        }
+        Path sessionRepoPath = repoRoot
+            .resolve(sessionRepoPrefix)
+            .resolve(safeSessionId)
+            .resolve("repo")
+            .toAbsolutePath()
+            .normalize();
+        if (!sessionRepoPath.startsWith(repoRoot)) {
+            throw new IllegalArgumentException("session repo path escapes repo root: " + sessionId);
+        }
+        return sessionRepoPath;
     }
 
     private Path resolveEditPath(Path worktree, String relativePath) {
@@ -508,6 +758,14 @@ public class LocalWorkerTaskExecutor implements WorkerTaskExecutorPort {
         return runGit(List.of("rev-parse", "HEAD"), worktree, Set.of(0)).stdout().trim();
     }
 
+    private String resolveHeadCommit(Path worktree) {
+        try {
+            return runGit(List.of("rev-parse", "HEAD"), worktree, Set.of(0)).stdout().trim();
+        } catch (RuntimeException ex) {
+            return null;
+        }
+    }
+
     private ProcessResult runGit(List<String> args, Path worktree, Set<Integer> allowedExitCodes) {
         List<String> command = new ArrayList<>();
         command.add(gitExecutable);
@@ -548,6 +806,69 @@ public class LocalWorkerTaskExecutor implements WorkerTaskExecutorPort {
         return null;
     }
 
+    private PreparedVerifyCommand prepareVerifyCommand(String command) {
+        String normalized = command == null ? "" : command.trim();
+        if (!isMavenCommand(normalized) || normalized.contains("-Dproject.build.directory=")) {
+            return PreparedVerifyCommand.noop(normalized);
+        }
+        if (verifyUseDocker) {
+            String dockerBuildDir = "/tmp/agentx-verify-maven-" + UUID.randomUUID();
+            return PreparedVerifyCommand.noop(
+                injectMavenBuildDirectory(normalized, quoteShellArgument(dockerBuildDir))
+            );
+        }
+        try {
+            Path tempBuildDir = Files.createTempDirectory("agentx-verify-maven-");
+            String rewritten = injectMavenBuildDirectory(normalized, quoteShellArgument(tempBuildDir.toString()));
+            return new PreparedVerifyCommand(rewritten, tempBuildDir);
+        } catch (IOException ex) {
+            throw new IllegalStateException("Failed to prepare isolated Maven build directory", ex);
+        }
+    }
+
+    private static boolean isMavenCommand(String command) {
+        if (command == null || command.isBlank()) {
+            return false;
+        }
+        String prefix = command.split("\\s+")[0].toLowerCase(Locale.ROOT);
+        return "mvn".equals(prefix) || "./mvnw".equals(prefix);
+    }
+
+    private static String injectMavenBuildDirectory(String command, String quotedBuildDirectory) {
+        int firstWhitespace = command.indexOf(' ');
+        if (firstWhitespace < 0) {
+            return command + " -Dproject.build.directory=" + quotedBuildDirectory;
+        }
+        return command.substring(0, firstWhitespace)
+            + " -Dproject.build.directory=" + quotedBuildDirectory
+            + command.substring(firstWhitespace);
+    }
+
+    private static String quoteShellArgument(String value) {
+        String safeValue = value == null ? "" : value;
+        if (isWindows()) {
+            return "'" + safeValue.replace("'", "''") + "'";
+        }
+        return "'" + safeValue.replace("'", "'\"'\"'") + "'";
+    }
+
+    private static void deletePathRecursively(Path path) {
+        if (path == null || !Files.exists(path)) {
+            return;
+        }
+        try (Stream<Path> stream = Files.walk(path)) {
+            stream.sorted(Comparator.reverseOrder()).forEach(current -> {
+                try {
+                    Files.deleteIfExists(current);
+                } catch (IOException ex) {
+                    throw new IllegalStateException("Failed to delete path: " + current, ex);
+                }
+            });
+        } catch (IOException ex) {
+            throw new IllegalStateException("Failed to cleanup path: " + path, ex);
+        }
+    }
+
     private static boolean containsForbiddenShellToken(String command) {
         return command.contains("&&")
             || command.contains("||")
@@ -559,6 +880,79 @@ public class LocalWorkerTaskExecutor implements WorkerTaskExecutorPort {
             || command.contains(">")
             || command.contains("\n")
             || command.contains("\r");
+    }
+
+    private List<String> findUnexpectedVerifyChanges(Path worktree) {
+        ProcessResult dirtyCheck = runGit(List.of("status", "--porcelain"), worktree, Set.of(0));
+        if (dirtyCheck.stdout().isBlank()) {
+            return List.of();
+        }
+        List<String> unexpectedPaths = new ArrayList<>();
+        for (String line : dirtyCheck.stdout().split("\\R")) {
+            if (line == null || line.isBlank()) {
+                continue;
+            }
+            VerifyStatusEntry entry = parseVerifyStatusEntry(line);
+            if (entry == null) {
+                unexpectedPaths.add(line.trim());
+                continue;
+            }
+            if (entry.untracked() && isIgnorableVerifyDirtyPath(entry.path())) {
+                continue;
+            }
+            unexpectedPaths.add(entry.path());
+        }
+        return List.copyOf(unexpectedPaths);
+    }
+
+    private static VerifyStatusEntry parseVerifyStatusEntry(String line) {
+        if (line == null) {
+            return null;
+        }
+        String rawLine = line.stripTrailing();
+        if (rawLine.length() < 4) {
+            return null;
+        }
+        String status = rawLine.substring(0, 2);
+        String rawPath = rawLine.substring(3).trim();
+        if (rawPath.isBlank()) {
+            return null;
+        }
+        int renameArrow = rawPath.indexOf(" -> ");
+        String path = renameArrow >= 0 ? rawPath.substring(renameArrow + 4).trim() : rawPath;
+        if (path.startsWith("\"") && path.endsWith("\"") && path.length() > 1) {
+            path = path.substring(1, path.length() - 1);
+        }
+        String normalizedPath = normalizePath(path);
+        if (normalizedPath.isBlank()) {
+            return null;
+        }
+        return new VerifyStatusEntry("??".equals(status), normalizedPath);
+    }
+
+    private static boolean isIgnorableVerifyDirtyPath(String relativePath) {
+        String normalizedPath = normalizePath(relativePath);
+        return isPromptIgnoredPath(normalizedPath)
+            || normalizedPath.startsWith(".gradle/")
+            || normalizedPath.startsWith(".pytest_cache/")
+            || normalizedPath.startsWith("__pycache__/")
+            || normalizedPath.startsWith(".ruff_cache/")
+            || normalizedPath.startsWith(".tox/")
+            || normalizedPath.startsWith("coverage/")
+            || ".coverage".equals(normalizedPath)
+            || ".mvn/wrapper/maven-wrapper.jar".equals(normalizedPath);
+    }
+
+    private static String summarizeVerifyChanges(List<String> changes) {
+        if (changes == null || changes.isEmpty()) {
+            return "n/a";
+        }
+        int limit = Math.min(5, changes.size());
+        String summary = String.join(", ", changes.subList(0, limit));
+        if (changes.size() > limit) {
+            summary = summary + " (+" + (changes.size() - limit) + " more)";
+        }
+        return summary;
     }
 
     private static Set<String> parseVerifyCommandAllowlist(String raw) {
@@ -576,6 +970,40 @@ public class LocalWorkerTaskExecutor implements WorkerTaskExecutorPort {
             return Set.of("mvn", "./mvnw", "gradle", "./gradlew", "python", "pytest", "git");
         }
         return Collections.unmodifiableSet(parsed);
+    }
+
+    private List<String> detectAlreadySatisfiedValidationCommands(TaskPackage taskPackage, Path worktree) {
+        LinkedHashSet<String> commands = new LinkedHashSet<>();
+        if (Files.exists(worktree.resolve("pom.xml"))) {
+            if (Files.exists(worktree.resolve("mvnw"))) {
+                commands.add("./mvnw -q test");
+            }
+            commands.add("mvn -q test");
+        }
+        if (Files.exists(worktree.resolve("build.gradle")) || Files.exists(worktree.resolve("build.gradle.kts"))) {
+            if (Files.exists(worktree.resolve("gradlew"))) {
+                commands.add("./gradlew test");
+            }
+            commands.add("gradle test");
+        }
+        boolean hasPythonTests = Files.isDirectory(worktree.resolve("tests"));
+        if (hasPythonTests && (
+            Files.exists(worktree.resolve("pyproject.toml"))
+                || Files.exists(worktree.resolve("requirements.txt"))
+                || Files.exists(worktree.resolve("setup.py"))
+        )) {
+            commands.add("python -m pytest -q");
+        }
+        if (commands.isEmpty() && taskPackage != null && taskPackage.requiredToolpacks() != null) {
+            if (hasToolpack(taskPackage.requiredToolpacks(), "TP-MAVEN-3")) {
+                commands.add("mvn -q test");
+            } else if (taskPackage.requiredToolpacks().stream().anyMatch(
+                id -> id != null && id.toUpperCase(Locale.ROOT).startsWith("TP-PYTHON")
+            )) {
+                commands.add("python -m pytest -q");
+            }
+        }
+        return List.copyOf(commands);
     }
 
     private static String toDockerMountPath(Path worktree) {
@@ -597,17 +1025,30 @@ public class LocalWorkerTaskExecutor implements WorkerTaskExecutorPort {
         processBuilder.redirectErrorStream(true);
         try {
             Process process = processBuilder.start();
+            ProcessOutputCollector outputCollector = new ProcessOutputCollector(process.getInputStream());
+            Thread outputThread = new Thread(
+                outputCollector,
+                "agentx-process-output-" + UUID.randomUUID().toString().substring(0, 8)
+            );
+            outputThread.setDaemon(true);
+            outputThread.start();
             boolean finished = process.waitFor(timeoutMs, TimeUnit.MILLISECONDS);
             if (!finished) {
                 process.destroyForcibly();
-                throw new IllegalStateException("Command timeout: " + String.join(" ", command));
+                process.waitFor(5, TimeUnit.SECONDS);
+                String output = awaitCollectedOutput(outputThread, outputCollector);
+                String message = "Command timeout: " + String.join(" ", command);
+                if (!output.isBlank()) {
+                    message = message + ", output=" + trimForReport(output);
+                }
+                throw new IllegalStateException(message);
             }
-            String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+            String output = awaitCollectedOutput(outputThread, outputCollector);
             int exitCode = process.exitValue();
             if (!allowedExitCodes.contains(exitCode)) {
                 throw new IllegalStateException(
                     "Command failed (exit " + exitCode + "): "
-                        + String.join(" ", command) + ", output=" + output
+                        + String.join(" ", command) + ", output=" + trimForReport(output)
                 );
             }
             return new ProcessResult(exitCode, output);
@@ -617,6 +1058,22 @@ public class LocalWorkerTaskExecutor implements WorkerTaskExecutorPort {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("Command interrupted: " + String.join(" ", command), ex);
         }
+    }
+
+    private static String awaitCollectedOutput(Thread outputThread, ProcessOutputCollector collector)
+        throws InterruptedException {
+        if (outputThread != null) {
+            outputThread.join(5_000L);
+            if (outputThread.isAlive()) {
+                outputThread.interrupt();
+                outputThread.join(1_000L);
+            }
+        }
+        IOException failure = collector == null ? null : collector.failure();
+        if (failure != null) {
+            throw new IllegalStateException("Failed to capture command output", failure);
+        }
+        return collector == null ? "" : collector.output();
     }
 
     private String readTaskSkill(String taskSkillRef) {
@@ -668,7 +1125,27 @@ public class LocalWorkerTaskExecutor implements WorkerTaskExecutorPort {
             - If facts are missing use NEED_CLARIFICATION.
             - If tradeoff decision is required use NEED_DECISION.
             - For SUCCEEDED, provide concrete file edits within write_scope.
-            - For tmpl.init.v0, avoid generic requirement questions and produce a minimal bootstrap baseline directly.
+            - Never return SUCCEEDED with an empty edits array.
+            - Each SUCCEEDED edit must change current file contents or create a missing file.
+            - Use workspace_snapshot as the authoritative source for existing project structure, package names, and build setup.
+            - If workspace_snapshot already shows the answer, do not ask clarification about project structure or dependencies again.
+            - If task_context.prior_run_refs mentions a failed VERIFY or FAILED run, treat that failure summary as authoritative evidence of what must be fixed next.
+            - If a prior run already has a delivery_commit, do not claim the task is complete unless this run also returns the concrete edits required to resolve the latest blocker.
+            - Never emit edits outside write_scope. If requirements mention out-of-scope files, leave them to other tasks instead of failing the current task.
+            - When the current scaffold conflicts with explicit requirement values such as groupId, artifactId, package name, class name, endpoint contract, or runtime version, correct the conflicting scaffold in place.
+            - Preserve explicit API literals exactly. If the requirement says /api/greeting and plain-text Hello responses, do not rename it to /api/hello and do not switch it to JSON.
+            - Treat user-provided sample values in acceptance criteria as fixed literals too. Do not replace names like 张三 with Alice, 李四, or other substitutes unless the user explicitly broadens the examples.
+            - For Spring Boot plain-text endpoints, treat framework-added charset suffixes such as text/plain;charset=UTF-8 as compatible with text/plain unless the requirement explicitly pins the exact raw header bytes.
+            - When the requirement explicitly names a Spring query parameter and default value, preserve the literal annotation form such as @RequestParam("name") with defaultValue instead of switching to looser equivalents like required=false plus manual fallback.
+            - If only part of the task can be completed within write_scope, return the in-scope edits now and explain the remaining out-of-scope work in message.
+            - For tmpl.init.v0, avoid generic requirement questions and produce only a minimal bootstrap baseline directly.
+            - For tmpl.init.v0, do not implement business endpoints, controllers, feature services, repositories, or feature tests.
+            - For tmpl.init.v0, acceptable outputs are limited to scaffold files such as build config, app entrypoint, minimal runtime config, and project docs.
+            - For tmpl.init.v0, the bootstrap baseline MUST honor any explicit framework, runtime, package, or build-stack requirements already present in task_context, resolved_clarifications, or task_skill_excerpt.
+            - For tmpl.init.v0, if the confirmed requirement explicitly requires Spring Boot or another named framework, treat that framework as already approved baseline scope and do not ask permission to adopt it.
+            - For Spring Boot tests, if a test autowires MockMvc, use @AutoConfigureMockMvc (or an equivalent test slice) rather than @AutoConfigureWebMvc.
+            - For Spring Boot MockMvc assertions on plain-text String responses, use .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_PLAIN)) rather than exact MediaType.TEXT_PLAIN_VALUE because the framework often appends charset automatically.
+            - Do not statically import or call a standalone contentType() matcher from MockMvcResultMatchers for this case; the correct matcher hangs off content().
             - If resolved_clarifications contains answered Q/A, treat those answers as authoritative requirements.
             - Do not ask clarification already answered in resolved_clarifications.
             - Keep edits minimal and executable.
@@ -692,6 +1169,7 @@ public class LocalWorkerTaskExecutor implements WorkerTaskExecutorPort {
         TaskPackage taskPackage,
         String taskSkillText,
         String outputLanguage,
+        String workspaceSnapshot,
         boolean forceExecutionMode,
         String previousClarificationQuestion
     ) {
@@ -719,7 +1197,67 @@ public class LocalWorkerTaskExecutor implements WorkerTaskExecutorPort {
             previousClarificationQuestion == null ? "" : previousClarificationQuestion
         );
         root.put("task_skill_excerpt", taskSkillText == null ? "" : taskSkillText);
+        root.put("workspace_snapshot", workspaceSnapshot == null ? "" : workspaceSnapshot);
         return root.toString();
+    }
+
+    static String buildWorkspaceSnapshot(Path worktree, List<String> readScope, List<String> writeScope) {
+        if (worktree == null || !Files.exists(worktree)) {
+            return "";
+        }
+        List<String> candidatePaths = new ArrayList<>();
+        try (Stream<Path> stream = Files.walk(worktree)) {
+            candidatePaths = stream
+                .filter(Files::isRegularFile)
+                .map(path -> normalizePath(worktree.relativize(path).toString()))
+                .filter(path -> !path.isBlank())
+                .filter(path -> !isPromptIgnoredPath(path))
+                .filter(path -> isPathVisibleInSnapshot(path, readScope, writeScope))
+                .sorted((left, right) -> {
+                    int score = Integer.compare(snapshotPriority(left, writeScope), snapshotPriority(right, writeScope));
+                    return score != 0 ? score : left.compareTo(right);
+                })
+                .limit(40)
+                .toList();
+        } catch (IOException ex) {
+            return "workspace_snapshot_unavailable:" + ex.getMessage();
+        }
+        if (candidatePaths.isEmpty()) {
+            return "workspace_snapshot_empty";
+        }
+
+        StringBuilder builder = new StringBuilder();
+        builder.append("files:\n");
+        for (String path : candidatePaths) {
+            builder.append("- ").append(path).append('\n');
+        }
+        builder.append("\nfile_excerpts:\n");
+
+        int excerptCount = 0;
+        int remainingChars = 12_000;
+        for (String relativePath : candidatePaths) {
+            if (excerptCount >= 8 || remainingChars <= 0 || !isTextFileForPrompt(relativePath)) {
+                continue;
+            }
+            Path file = worktree.resolve(relativePath);
+            try {
+                String content = Files.readString(file, StandardCharsets.UTF_8).trim();
+                if (content.isEmpty()) {
+                    continue;
+                }
+                String trimmed = content.length() > 1_500 ? content.substring(0, 1_500) : content;
+                if (trimmed.length() > remainingChars) {
+                    trimmed = trimmed.substring(0, remainingChars);
+                }
+                builder.append("[FILE ").append(relativePath).append("]\n");
+                builder.append(trimmed).append("\n\n");
+                remainingChars -= trimmed.length();
+                excerptCount++;
+            } catch (IOException ex) {
+                // best effort snapshot, unreadable files can be skipped
+            }
+        }
+        return builder.toString().trim();
     }
 
     private String resolveOutputLanguage() {
@@ -751,6 +1289,160 @@ public class LocalWorkerTaskExecutor implements WorkerTaskExecutorPort {
         com.agentx.agentxbackend.execution.domain.model.TaskContext taskContext
     ) {
         return !extractResolvedClarifications(taskContext).isEmpty();
+    }
+
+    private List<FileEdit> filterApplicableEdits(
+        List<FileEdit> edits,
+        List<String> writeScope,
+        List<String> rejectedEditPaths
+    ) {
+        List<FileEdit> applicableEdits = new ArrayList<>();
+        if (edits == null || edits.isEmpty()) {
+            return applicableEdits;
+        }
+        for (FileEdit edit : edits) {
+            if (!isWriteScopeAllowed(edit.path(), writeScope)) {
+                if (rejectedEditPaths != null) {
+                    rejectedEditPaths.add(edit.path());
+                }
+                continue;
+            }
+            applicableEdits.add(edit);
+        }
+        return applicableEdits;
+    }
+
+    private List<FileEdit> filterEffectiveEdits(List<FileEdit> edits, Path worktree) {
+        List<FileEdit> effectiveEdits = new ArrayList<>();
+        if (edits == null || edits.isEmpty()) {
+            return effectiveEdits;
+        }
+        for (FileEdit edit : edits) {
+            if (edit == null || edit.path() == null || edit.path().isBlank()) {
+                continue;
+            }
+            Path targetPath = resolveEditPath(worktree, edit.path());
+            try {
+                if (Files.exists(targetPath)) {
+                    String current = Files.readString(targetPath, StandardCharsets.UTF_8);
+                    if (current.equals(edit.content())) {
+                        continue;
+                    }
+                }
+                effectiveEdits.add(edit);
+            } catch (IOException ex) {
+                effectiveEdits.add(edit);
+            }
+        }
+        return effectiveEdits;
+    }
+
+    private boolean hasExistingFileInScope(Path worktree, List<String> writeScope) {
+        if (worktree == null || writeScope == null || writeScope.isEmpty()) {
+            return false;
+        }
+        for (String scope : writeScope) {
+            String normalizedScope = normalizeScope(scope);
+            if (normalizedScope.isEmpty() || ".".equals(normalizedScope)) {
+                return hasAnyRegularFile(worktree);
+            }
+            Path candidate = resolveEditPath(worktree, normalizedScope);
+            if (Files.isRegularFile(candidate)) {
+                return true;
+            }
+            if (Files.isDirectory(candidate) && hasAnyRegularFile(candidate)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean hasAnyRegularFile(Path path) {
+        if (path == null || !Files.exists(path)) {
+            return false;
+        }
+        if (Files.isRegularFile(path)) {
+            return true;
+        }
+        try (Stream<Path> stream = Files.walk(path)) {
+            return stream.anyMatch(Files::isRegularFile);
+        } catch (IOException ex) {
+            return false;
+        }
+    }
+
+    private static boolean isPathVisibleInSnapshot(String relativePath, List<String> readScope, List<String> writeScope) {
+        return isScopeAllowed(relativePath, writeScope)
+            || isScopeAllowed(relativePath, readScope)
+            || isImportantWorkspaceFile(relativePath);
+    }
+
+    private static boolean isScopeAllowed(String relativePath, List<String> scopes) {
+        if (scopes == null || scopes.isEmpty()) {
+            return false;
+        }
+        String normalizedPath = normalizePath(relativePath);
+        for (String scope : scopes) {
+            String normalizedScope = normalizeScope(scope);
+            if (normalizedScope.isEmpty() || ".".equals(normalizedScope)) {
+                return true;
+            }
+            if (normalizedPath.equals(normalizedScope)) {
+                return true;
+            }
+            String prefix = normalizedScope.endsWith("/") ? normalizedScope : normalizedScope + "/";
+            if (normalizedPath.startsWith(prefix)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static int snapshotPriority(String relativePath, List<String> writeScope) {
+        String normalizedPath = normalizePath(relativePath);
+        if (isImportantWorkspaceFile(normalizedPath)) {
+            return 0;
+        }
+        if (isScopeAllowed(normalizedPath, writeScope)) {
+            return 1;
+        }
+        return 2;
+    }
+
+    private static boolean isImportantWorkspaceFile(String relativePath) {
+        String normalizedPath = normalizePath(relativePath);
+        return "pom.xml".equals(normalizedPath)
+            || "build.gradle".equals(normalizedPath)
+            || "settings.gradle".equals(normalizedPath)
+            || "package.json".equals(normalizedPath)
+            || "README.md".equalsIgnoreCase(normalizedPath)
+            || normalizedPath.startsWith("src/main/")
+            || normalizedPath.startsWith("src/test/");
+    }
+
+    private static boolean isPromptIgnoredPath(String relativePath) {
+        String normalizedPath = normalizePath(relativePath);
+        return normalizedPath.startsWith(".git/")
+            || normalizedPath.startsWith("target/")
+            || normalizedPath.startsWith("node_modules/")
+            || normalizedPath.startsWith("dist/")
+            || normalizedPath.startsWith("build/")
+            || normalizedPath.startsWith("worktrees/")
+            || normalizedPath.startsWith(".idea/")
+            || normalizedPath.startsWith(".vscode/");
+    }
+
+    private static boolean isTextFileForPrompt(String relativePath) {
+        String normalizedPath = normalizePath(relativePath).toLowerCase(Locale.ROOT);
+        return normalizedPath.endsWith(".java")
+            || normalizedPath.endsWith(".kt")
+            || normalizedPath.endsWith(".xml")
+            || normalizedPath.endsWith(".yml")
+            || normalizedPath.endsWith(".yaml")
+            || normalizedPath.endsWith(".properties")
+            || normalizedPath.endsWith(".md")
+            || normalizedPath.endsWith(".txt")
+            || normalizedPath.endsWith(".json");
     }
 
     private static List<ResolvedClarification> extractResolvedClarifications(
@@ -817,22 +1509,69 @@ public class LocalWorkerTaskExecutor implements WorkerTaskExecutorPort {
         int architectureCount = taskContext.architectureRefs() == null ? 0 : taskContext.architectureRefs().size();
         int priorRunCount = taskContext.priorRunRefs() == null ? 0 : taskContext.priorRunRefs().size();
         List<String> decisionRefs = extractDecisionRefs(taskContext);
+        String priorRunHint = extractPriorRunHint(taskContext.priorRunRefs());
         if (isChinese(outputLanguage)) {
-            return "requirement_ref=%s；architecture_refs=%d；prior_run_refs=%d；decision_refs=%d"
+            String summary = "requirement_ref=%s；architecture_refs=%d；prior_run_refs=%d；decision_refs=%d"
                 .formatted(
                     defaultText(taskContext.requirementRef(), "N/A"),
                     architectureCount,
                     priorRunCount,
                     decisionRefs.size()
                 );
+            if (priorRunHint != null) {
+                return summary + "；latest_run_hint=" + priorRunHint;
+            }
+            return summary;
         }
-        return "requirement_ref=%s; architecture_refs=%d; prior_run_refs=%d; decision_refs=%d"
+        String summary = "requirement_ref=%s; architecture_refs=%d; prior_run_refs=%d; decision_refs=%d"
             .formatted(
                 defaultText(taskContext.requirementRef(), "N/A"),
                 architectureCount,
                 priorRunCount,
                 decisionRefs.size()
             );
+        if (priorRunHint != null) {
+            return summary + "; latest_run_hint=" + priorRunHint;
+        }
+        return summary;
+    }
+
+    private static String extractPriorRunHint(List<String> priorRunRefs) {
+        if (priorRunRefs == null || priorRunRefs.isEmpty()) {
+            return null;
+        }
+        for (String ref : priorRunRefs) {
+            String normalized = ref == null ? "" : ref.trim();
+            if (normalized.contains("|FAILED|VERIFY|") && normalized.contains("|summary=")) {
+                return abbreviatePriorRunHint(readPriorRunSummary(normalized));
+            }
+        }
+        for (String ref : priorRunRefs) {
+            String summary = abbreviatePriorRunHint(readPriorRunSummary(ref));
+            if (summary != null) {
+                return summary;
+            }
+        }
+        return null;
+    }
+
+    private static String readPriorRunSummary(String priorRunRef) {
+        if (priorRunRef == null || priorRunRef.isBlank()) {
+            return null;
+        }
+        int summaryIndex = priorRunRef.indexOf("|summary=");
+        if (summaryIndex < 0) {
+            return null;
+        }
+        String summary = priorRunRef.substring(summaryIndex + "|summary=".length()).trim();
+        return summary.isBlank() ? null : summary;
+    }
+
+    private static String abbreviatePriorRunHint(String summary) {
+        if (summary == null || summary.isBlank()) {
+            return null;
+        }
+        return summary.length() <= 220 ? summary : summary.substring(0, 220);
     }
 
     private static String stripMarkdownFence(String raw) {
@@ -848,6 +1587,78 @@ public class LocalWorkerTaskExecutor implements WorkerTaskExecutorPort {
             value = value.substring(0, value.length() - 3);
         }
         return value.trim();
+    }
+
+    private static List<FileEdit> readPlannerEdits(JsonNode root) {
+        LinkedHashSet<FileEdit> edits = new LinkedHashSet<>();
+        readPlannerEditContainer(firstPlannerNode(root, "edits", "file_edits", "files", "changes"), edits);
+        if (edits.isEmpty()) {
+            JsonNode singlePathNode = firstPlannerNode(root, "path", "file", "file_path", "relative_path", "target_path");
+            String singlePath = singlePathNode == null ? "" : singlePathNode.asText("").trim();
+            if (!singlePath.isBlank()) {
+                String content = readPlannerText(root, "content", "new_content", "full_content", "body", "text");
+                edits.add(new FileEdit(singlePath, content));
+            }
+        }
+        return List.copyOf(edits);
+    }
+
+    private static void readPlannerEditContainer(JsonNode node, Set<FileEdit> sink) {
+        if (node == null || sink == null) {
+            return;
+        }
+        if (node.isArray()) {
+            for (JsonNode element : node) {
+                readPlannerEditContainer(element, sink);
+            }
+            return;
+        }
+        if (node.isObject()) {
+            String path = readPlannerText(node, "path", "file", "file_path", "relative_path", "target_path").trim();
+            if (!path.isBlank()) {
+                String content = readPlannerText(node, "content", "new_content", "full_content", "body", "text");
+                sink.add(new FileEdit(path, content));
+                return;
+            }
+            if (node instanceof ObjectNode objectNode) {
+                objectNode.properties().forEach(entry -> {
+                    JsonNode value = entry.getValue();
+                    if (value != null && value.isTextual() && entry.getKey() != null && !entry.getKey().isBlank()) {
+                        sink.add(new FileEdit(entry.getKey().trim(), value.asText("")));
+                    }
+                });
+            }
+        }
+    }
+
+    private static JsonNode firstPlannerNode(JsonNode root, String... fieldNames) {
+        if (root == null || !root.isObject() || fieldNames == null) {
+            return null;
+        }
+        for (String fieldName : fieldNames) {
+            if (fieldName == null || fieldName.isBlank()) {
+                continue;
+            }
+            JsonNode node = root.path(fieldName);
+            if (!node.isMissingNode() && !node.isNull()) {
+                return node;
+            }
+        }
+        return null;
+    }
+
+    private static String readPlannerText(JsonNode root, String... fieldNames) {
+        JsonNode node = firstPlannerNode(root, fieldNames);
+        if (node == null || node.isNull()) {
+            return "";
+        }
+        if (node.isTextual()) {
+            return node.asText("");
+        }
+        if (node.isNumber() || node.isBoolean()) {
+            return node.asText("");
+        }
+        return node.toString();
     }
 
     private ActiveWorkerLlmConfig resolveActiveWorkerLlm(String outputLanguage) {
@@ -941,6 +1752,25 @@ public class LocalWorkerTaskExecutor implements WorkerTaskExecutorPort {
         return normalized;
     }
 
+    private static String normalizeTemplate(String taskTemplateId) {
+        if (taskTemplateId == null) {
+            return "";
+        }
+        return taskTemplateId.trim().toLowerCase(Locale.ROOT);
+    }
+
+    private static boolean hasToolpack(List<String> toolpacks, String toolpackId) {
+        if (toolpacks == null || toolpacks.isEmpty() || toolpackId == null) {
+            return false;
+        }
+        for (String toolpack : toolpacks) {
+            if (toolpackId.equalsIgnoreCase(toolpack)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private static String normalizeScope(String scope) {
         if (scope == null) {
             return "";
@@ -954,6 +1784,32 @@ public class LocalWorkerTaskExecutor implements WorkerTaskExecutorPort {
         }
         if (normalized.endsWith("/") && normalized.length() > 1) {
             return normalized;
+        }
+        return normalized;
+    }
+
+    private static String normalizeWorktreePath(String worktreePath) {
+        String normalized = worktreePath.trim().replace("\\", "/");
+        while (normalized.startsWith("./")) {
+            normalized = normalized.substring(2);
+        }
+        return normalized;
+    }
+
+    private static String normalizeRelativePrefix(String prefix, String fallback) {
+        String normalized = prefix == null || prefix.isBlank() ? fallback : prefix.trim();
+        normalized = normalized.replace("\\", "/");
+        while (normalized.startsWith("./")) {
+            normalized = normalized.substring(2);
+        }
+        while (normalized.startsWith("/")) {
+            normalized = normalized.substring(1);
+        }
+        while (normalized.endsWith("/")) {
+            normalized = normalized.substring(0, normalized.length() - 1);
+        }
+        if (normalized.isBlank() || normalized.contains("..")) {
+            return fallback;
         }
         return normalized;
     }
@@ -984,7 +1840,15 @@ public class LocalWorkerTaskExecutor implements WorkerTaskExecutorPort {
         if (compact.length() <= 2_000) {
             return compact;
         }
-        return compact.substring(0, 2_000);
+        String marker = "\n...[output truncated]...\n";
+        int headLength = 1_000;
+        int tailLength = 2_000 - headLength - marker.length();
+        if (tailLength <= 0 || compact.length() <= headLength + marker.length()) {
+            return compact.substring(0, 2_000);
+        }
+        return compact.substring(0, headLength)
+            + marker
+            + compact.substring(compact.length() - tailLength);
     }
 
     private static boolean isWindows() {
@@ -992,6 +1856,71 @@ public class LocalWorkerTaskExecutor implements WorkerTaskExecutorPort {
     }
 
     private record ProcessResult(int exitCode, String stdout) {
+    }
+
+    private static final class ProcessOutputCollector implements Runnable {
+
+        private final InputStream inputStream;
+        private final StringBuilder output = new StringBuilder();
+        private volatile boolean truncated;
+        private volatile IOException failure;
+
+        private ProcessOutputCollector(InputStream inputStream) {
+            this.inputStream = inputStream;
+        }
+
+        @Override
+        public void run() {
+            char[] buffer = new char[4096];
+            try (Reader reader = new InputStreamReader(inputStream, StandardCharsets.UTF_8)) {
+                int read;
+                while ((read = reader.read(buffer)) >= 0) {
+                    append(buffer, read);
+                }
+            } catch (IOException ex) {
+                failure = ex;
+            }
+        }
+
+        private synchronized void append(char[] buffer, int read) {
+            if (read <= 0) {
+                return;
+            }
+            int remaining = MAX_CAPTURED_PROCESS_OUTPUT_CHARS - output.length();
+            if (remaining > 0) {
+                output.append(buffer, 0, Math.min(read, remaining));
+            }
+            if (read > remaining) {
+                truncated = true;
+            }
+        }
+
+        private IOException failure() {
+            return failure;
+        }
+
+        private synchronized String output() {
+            if (!truncated) {
+                return output.toString();
+            }
+            return output + "\n[output truncated]";
+        }
+    }
+
+    private record VerifyStatusEntry(boolean untracked, String path) {
+    }
+
+    private record PreparedVerifyCommand(String command, Path cleanupPath) {
+
+        private static PreparedVerifyCommand noop(String command) {
+            return new PreparedVerifyCommand(command, null);
+        }
+
+        private void cleanup() {
+            if (cleanupPath != null) {
+                deletePathRecursively(cleanupPath);
+            }
+        }
     }
 
     private record FileEdit(String path, String content) {

@@ -80,6 +80,29 @@ $sessionId = "<SES-...>"
 Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:18082/api/v0/sessions/$sessionId/delivery/clone-repo"
 ```
 
+## Start Docker Runtime With Isolated Artifact Directory
+
+Use this script when you want every runtime startup to use a fresh project artifact directory.
+
+```powershell
+pwsh -NoLogo -NoProfile -File tests/e2e/start_isolated_runtime.ps1 -EnvFile .env.docker -DownFirst
+```
+
+What it does:
+1. Creates a new folder under `runtime-projects/<timestamp-random>/`.
+2. Temporarily overrides `AGENTX_HOST_REPO_ROOT` for this startup only.
+3. Starts docker compose with that isolated host mount path.
+
+Useful flags:
+
+```powershell
+# inspect generated compose command/path without starting containers
+pwsh -NoLogo -NoProfile -File tests/e2e/start_isolated_runtime.ps1 -EnvFile .env.docker -DryRun
+
+# skip image rebuild and just bring stack up
+pwsh -NoLogo -NoProfile -File tests/e2e/start_isolated_runtime.ps1 -EnvFile .env.docker -NoBuild
+```
+
 ## Reset Docker Test Data (AgentX only)
 
 When docker stack has accumulated test data/workers/tickets/runtime cache, run:

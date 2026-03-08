@@ -26,11 +26,12 @@ class GitBareCloneRepositoryAdapterTest {
     @Test
     void publishShouldCreateCloneableRepository() throws Exception {
         assumeTrue(canRunGit(), "git executable is required");
-        Path sourceRepo = tempDir.resolve("repo");
+        Path sourceRepo = tempDir.resolve("repo/sessions/ses-1/repo");
         Files.createDirectories(sourceRepo);
         runGit(sourceRepo, List.of("init"));
         runGit(sourceRepo, List.of("config", "user.email", "agentx@test.local"));
         runGit(sourceRepo, List.of("config", "user.name", "AgentX Test"));
+        runGit(sourceRepo, List.of("checkout", "-B", "main"));
         Files.writeString(sourceRepo.resolve("README.md"), "# demo", StandardCharsets.UTF_8);
         runGit(sourceRepo, List.of("add", "README.md"));
         runGit(sourceRepo, List.of("commit", "-m", "init"));
@@ -38,7 +39,8 @@ class GitBareCloneRepositoryAdapterTest {
         Path remotesRoot = tempDir.resolve("remotes");
         GitBareCloneRepositoryAdapter adapter = new GitBareCloneRepositoryAdapter(
             "git",
-            sourceRepo.toString(),
+            tempDir.resolve("repo").toString(),
+            "sessions",
             remotesRoot.toString(),
             "",
             "agentx-session-",

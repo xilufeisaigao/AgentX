@@ -19,6 +19,7 @@ import java.util.NoSuchElementException;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -147,6 +148,29 @@ class WorkerCapabilityServiceTest {
     }
 
     @Test
+    void updateWorkerStatusShouldAllowDisabledToReady() {
+        Worker current = new Worker(
+            "WRK-BOOT-JAVA-CORE",
+            WorkerStatus.DISABLED,
+            Instant.parse("2026-02-22T00:00:00Z"),
+            Instant.parse("2026-02-22T00:00:00Z")
+        );
+        Worker updated = new Worker(
+            "WRK-BOOT-JAVA-CORE",
+            WorkerStatus.READY,
+            current.createdAt(),
+            Instant.parse("2026-02-22T00:05:00Z")
+        );
+        when(workerRepository.findById("WRK-BOOT-JAVA-CORE")).thenReturn(Optional.of(current));
+        when(workerRepository.updateStatus(eq("WRK-BOOT-JAVA-CORE"), eq(WorkerStatus.READY), any())).thenReturn(updated);
+
+        Worker result = service.updateWorkerStatus("WRK-BOOT-JAVA-CORE", WorkerStatus.READY);
+
+        assertEquals(WorkerStatus.READY, result.status());
+        verify(workerRepository).updateStatus(eq("WRK-BOOT-JAVA-CORE"), eq(WorkerStatus.READY), any());
+    }
+
+    @Test
     void bindToolpacksShouldValidateWorkerAndToolpacks() {
         Worker worker = new Worker(
             "WRK-4",
@@ -191,6 +215,61 @@ class WorkerCapabilityServiceTest {
 
         assertTrue(eligible);
         verify(workerToolpackRepository).existsReadyWorkerCoveringAll(required);
+    }
+
+    @Test
+    void hasEligibleWorkerShouldFallbackToJava21CompatibilityForJava17Requirement() {
+        List<String> required = List.of("TP-JAVA-17", "TP-MAVEN-3", "TP-GIT-2");
+        Worker readyWorker = new Worker(
+            "WRK-JAVA21",
+            WorkerStatus.READY,
+            Instant.parse("2026-02-22T00:00:00Z"),
+            Instant.parse("2026-02-22T00:00:00Z")
+        );
+        when(workerToolpackRepository.existsReadyWorkerCoveringAll(required)).thenReturn(false);
+        when(workerRepository.findByStatus(WorkerStatus.READY, 1000)).thenReturn(List.of(readyWorker));
+        when(workerToolpackRepository.findToolpackIdsByWorkerId("WRK-JAVA21"))
+            .thenReturn(List.of("TP-JAVA-21", "TP-MAVEN-3", "TP-GIT-2"));
+
+        boolean eligible = service.hasEligibleWorker(required);
+
+        assertTrue(eligible);
+        verify(workerToolpackRepository).existsReadyWorkerCoveringAll(required);
+        verify(workerRepository).findByStatus(WorkerStatus.READY, 1000);
+    }
+
+    @Test
+    void isWorkerEligibleShouldTreatJava21AsCoveringJava17() {
+        Worker readyWorker = new Worker(
+            "WRK-JAVA21",
+            WorkerStatus.READY,
+            Instant.parse("2026-02-22T00:00:00Z"),
+            Instant.parse("2026-02-22T00:00:00Z")
+        );
+        when(workerRepository.findById("WRK-JAVA21")).thenReturn(Optional.of(readyWorker));
+        when(workerToolpackRepository.findToolpackIdsByWorkerId("WRK-JAVA21"))
+            .thenReturn(List.of("TP-JAVA-21", "TP-MAVEN-3", "TP-GIT-2"));
+
+        boolean eligible = service.isWorkerEligible("WRK-JAVA21", List.of("TP-JAVA-17", "TP-MAVEN-3", "TP-GIT-2"));
+
+        assertTrue(eligible);
+    }
+
+    @Test
+    void isWorkerEligibleShouldNotTreatJava17AsCoveringJava21() {
+        Worker readyWorker = new Worker(
+            "WRK-JAVA17",
+            WorkerStatus.READY,
+            Instant.parse("2026-02-22T00:00:00Z"),
+            Instant.parse("2026-02-22T00:00:00Z")
+        );
+        when(workerRepository.findById("WRK-JAVA17")).thenReturn(Optional.of(readyWorker));
+        when(workerToolpackRepository.findToolpackIdsByWorkerId("WRK-JAVA17"))
+            .thenReturn(List.of("TP-JAVA-17", "TP-MAVEN-3", "TP-GIT-2"));
+
+        boolean eligible = service.isWorkerEligible("WRK-JAVA17", List.of("TP-JAVA-21", "TP-MAVEN-3", "TP-GIT-2"));
+
+        assertFalse(eligible);
     }
 
     @Test

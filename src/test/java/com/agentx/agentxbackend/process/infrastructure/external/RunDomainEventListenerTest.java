@@ -5,6 +5,7 @@ import com.agentx.agentxbackend.execution.domain.event.RunNeedsClarificationEven
 import com.agentx.agentxbackend.execution.domain.event.RunNeedsDecisionEvent;
 import com.agentx.agentxbackend.execution.domain.model.RunFinishedPayload;
 import com.agentx.agentxbackend.execution.domain.model.RunKind;
+import com.agentx.agentxbackend.process.application.DeliveredTaskMergeGateProcessManager;
 import com.agentx.agentxbackend.process.application.MergeGateCompletionProcessManager;
 import com.agentx.agentxbackend.process.application.RunFinishedProcessManager;
 import com.agentx.agentxbackend.process.application.RunNeedsInputProcessManager;
@@ -21,11 +22,13 @@ class RunDomainEventListenerTest {
     void shouldDelegateNeedDecision() {
         RunNeedsInputProcessManager needsManager = mock(RunNeedsInputProcessManager.class);
         RunFinishedProcessManager finishedManager = mock(RunFinishedProcessManager.class);
+        DeliveredTaskMergeGateProcessManager deliveredTaskMergeGateProcessManager = mock(DeliveredTaskMergeGateProcessManager.class);
         MergeGateCompletionProcessManager completionManager = mock(MergeGateCompletionProcessManager.class);
         VerifyFailureRecoveryProcessManager recoveryManager = mock(VerifyFailureRecoveryProcessManager.class);
         RunDomainEventListener listener = new RunDomainEventListener(
             needsManager,
             finishedManager,
+            deliveredTaskMergeGateProcessManager,
             completionManager,
             recoveryManager
         );
@@ -40,11 +43,13 @@ class RunDomainEventListenerTest {
     void shouldDelegateNeedClarification() {
         RunNeedsInputProcessManager needsManager = mock(RunNeedsInputProcessManager.class);
         RunFinishedProcessManager finishedManager = mock(RunFinishedProcessManager.class);
+        DeliveredTaskMergeGateProcessManager deliveredTaskMergeGateProcessManager = mock(DeliveredTaskMergeGateProcessManager.class);
         MergeGateCompletionProcessManager completionManager = mock(MergeGateCompletionProcessManager.class);
         VerifyFailureRecoveryProcessManager recoveryManager = mock(VerifyFailureRecoveryProcessManager.class);
         RunDomainEventListener listener = new RunDomainEventListener(
             needsManager,
             finishedManager,
+            deliveredTaskMergeGateProcessManager,
             completionManager,
             recoveryManager
         );
@@ -59,11 +64,13 @@ class RunDomainEventListenerTest {
     void shouldMarkDoneWhenVerifyRunSucceeded() {
         RunNeedsInputProcessManager needsManager = mock(RunNeedsInputProcessManager.class);
         RunFinishedProcessManager finishedManager = mock(RunFinishedProcessManager.class);
+        DeliveredTaskMergeGateProcessManager deliveredTaskMergeGateProcessManager = mock(DeliveredTaskMergeGateProcessManager.class);
         MergeGateCompletionProcessManager completionManager = mock(MergeGateCompletionProcessManager.class);
         VerifyFailureRecoveryProcessManager recoveryManager = mock(VerifyFailureRecoveryProcessManager.class);
         RunDomainEventListener listener = new RunDomainEventListener(
             needsManager,
             finishedManager,
+            deliveredTaskMergeGateProcessManager,
             completionManager,
             recoveryManager
         );
@@ -78,6 +85,7 @@ class RunDomainEventListenerTest {
         listener.onRunFinished(event);
 
         verify(finishedManager).handle(event);
+        verifyNoInteractions(deliveredTaskMergeGateProcessManager);
         verify(completionManager).onVerifySucceeded("TASK-3", "RUN-3", "merge-candidate-3");
         verifyNoInteractions(recoveryManager);
     }
@@ -86,11 +94,13 @@ class RunDomainEventListenerTest {
     void shouldNotMarkDoneWhenVerifyRunFailed() {
         RunNeedsInputProcessManager needsManager = mock(RunNeedsInputProcessManager.class);
         RunFinishedProcessManager finishedManager = mock(RunFinishedProcessManager.class);
+        DeliveredTaskMergeGateProcessManager deliveredTaskMergeGateProcessManager = mock(DeliveredTaskMergeGateProcessManager.class);
         MergeGateCompletionProcessManager completionManager = mock(MergeGateCompletionProcessManager.class);
         VerifyFailureRecoveryProcessManager recoveryManager = mock(VerifyFailureRecoveryProcessManager.class);
         RunDomainEventListener listener = new RunDomainEventListener(
             needsManager,
             finishedManager,
+            deliveredTaskMergeGateProcessManager,
             completionManager,
             recoveryManager
         );
@@ -105,6 +115,7 @@ class RunDomainEventListenerTest {
         listener.onRunFinished(event);
 
         verify(finishedManager).handle(event);
+        verifyNoInteractions(deliveredTaskMergeGateProcessManager);
         verify(recoveryManager).onVerifyFailed(event);
         verifyNoInteractions(completionManager);
     }
@@ -113,11 +124,13 @@ class RunDomainEventListenerTest {
     void shouldNotMarkDoneWhenVerifyRunSucceededButMergeCandidateMissing() {
         RunNeedsInputProcessManager needsManager = mock(RunNeedsInputProcessManager.class);
         RunFinishedProcessManager finishedManager = mock(RunFinishedProcessManager.class);
+        DeliveredTaskMergeGateProcessManager deliveredTaskMergeGateProcessManager = mock(DeliveredTaskMergeGateProcessManager.class);
         MergeGateCompletionProcessManager completionManager = mock(MergeGateCompletionProcessManager.class);
         VerifyFailureRecoveryProcessManager recoveryManager = mock(VerifyFailureRecoveryProcessManager.class);
         RunDomainEventListener listener = new RunDomainEventListener(
             needsManager,
             finishedManager,
+            deliveredTaskMergeGateProcessManager,
             completionManager,
             recoveryManager
         );
@@ -132,7 +145,38 @@ class RunDomainEventListenerTest {
         listener.onRunFinished(event);
 
         verify(finishedManager).handle(event);
+        verifyNoInteractions(deliveredTaskMergeGateProcessManager);
         verifyNoInteractions(recoveryManager);
         verifyNoInteractions(completionManager);
+    }
+
+    @Test
+    void shouldKickMergeGateWhenImplRunSucceeded() {
+        RunNeedsInputProcessManager needsManager = mock(RunNeedsInputProcessManager.class);
+        RunFinishedProcessManager finishedManager = mock(RunFinishedProcessManager.class);
+        DeliveredTaskMergeGateProcessManager deliveredTaskMergeGateProcessManager = mock(DeliveredTaskMergeGateProcessManager.class);
+        MergeGateCompletionProcessManager completionManager = mock(MergeGateCompletionProcessManager.class);
+        VerifyFailureRecoveryProcessManager recoveryManager = mock(VerifyFailureRecoveryProcessManager.class);
+        RunDomainEventListener listener = new RunDomainEventListener(
+            needsManager,
+            finishedManager,
+            deliveredTaskMergeGateProcessManager,
+            completionManager,
+            recoveryManager
+        );
+        RunFinishedEvent event = new RunFinishedEvent(
+            "RUN-6",
+            "TASK-6",
+            RunKind.IMPL,
+            "candidate-6",
+            new RunFinishedPayload("SUCCEEDED", "ok", "candidate-6", null)
+        );
+
+        listener.onRunFinished(event);
+
+        verify(finishedManager).handle(event);
+        verify(deliveredTaskMergeGateProcessManager).onTaskDelivered("TASK-6");
+        verifyNoInteractions(completionManager);
+        verifyNoInteractions(recoveryManager);
     }
 }

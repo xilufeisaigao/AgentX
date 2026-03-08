@@ -175,6 +175,18 @@ public interface TaskRunMapper {
     );
 
     @Select("""
+        select count(1)
+        from task_runs
+        where task_id = #{taskId}
+          and run_kind = 'VERIFY'
+          and base_commit = #{baseCommit}
+        """)
+    int countVerifyRunsByTaskAndBaseCommit(
+        @Param("taskId") String taskId,
+        @Param("baseCommit") String baseCommit
+    );
+
+    @Select("""
         select
             run_id,
             task_id,
@@ -216,7 +228,19 @@ public interface TaskRunMapper {
         @Param("runKind") String runKind
     );
 
+    
+
     @Select("""
+        select count(1)
+        from task_runs r
+        join work_tasks t on t.task_id = r.task_id
+        join work_modules m on m.module_id = t.module_id
+        where m.session_id = #{sessionId}
+          and r.status in ('RUNNING', 'WAITING_FOREMAN')
+        """)
+    int countActiveRunsBySessionId(@Param("sessionId") String sessionId);
+
+@Select("""
         select
             run_id,
             task_id,

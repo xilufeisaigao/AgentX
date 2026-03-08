@@ -159,7 +159,10 @@ public class MybatisContextFactsQueryAdapter implements ContextFactsQueryPort {
                     row.getContextSnapshotId(),
                     row.getTaskSkillRef(),
                     row.getBaseCommit(),
-                    row.getCreatedAt() == null ? "" : row.getCreatedAt().toInstant().toString()
+                    row.getCreatedAt() == null ? "" : row.getCreatedAt().toInstant().toString(),
+                    row.getLatestEventType(),
+                    row.getLatestEventBody(),
+                    row.getLatestEventDataJson()
                 )
             );
         }

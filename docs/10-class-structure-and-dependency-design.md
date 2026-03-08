@@ -302,13 +302,16 @@
 1. `RequirementConfirmedProcessManager`（创建 ARCH_REVIEW ticket）
 2. `RunNeedsInputProcessManager`（NEED_* -> DECISION/CLARIFICATION ticket）
 3. `RunFinishedProcessManager`（IMPL SUCCEEDED -> task DELIVERED）
-4. `MergeGateCompletionProcessManager`（VERIFY SUCCEEDED -> DONE）
-5. `ContextRefreshProcessManager`（触发快照 `READY -> STALE -> 重新编译`）
-6. `WorkerAutoProvisionService`（`WAITING_WORKER` 自动补员与缺失 toolpack 提请）
-7. `WorkerRuntimeAutoRunService`（READY Worker 自动 claim + 执行 + 回写 run）
-8. `port.out.WorkerTaskExecutorPort`（Worker Runtime 执行器）
-9. `port.out.RuntimeEnvironmentPort`（创建前准备运行环境）
-10. `port.out.RuntimeEnvironmentMaintenancePort`（运行环境清理维护）
+4. `DeliveredTaskMergeGateProcessManager`（IMPL DELIVERED 后立即尝试 merge gate）
+5. `MergeConflictRecoveryProcessManager`（rebase 冲突时创建冲突修复任务并回退原任务）
+6. `VerifyFailureRecoveryProcessManager`（VERIFY 失败分流：基础设施重试 / 业务失败回退原任务）
+7. `MergeGateCompletionProcessManager`（VERIFY SUCCEEDED -> DONE + delivery tag 证明）
+8. `ContextRefreshProcessManager`（触发快照 `READY -> STALE -> 重新编译`）
+9. `WorkerAutoProvisionService`（`WAITING_WORKER` 自动补员与缺失 toolpack 提请）
+10. `WorkerRuntimeAutoRunService`（READY Worker 自动 claim + 执行 + 回写 run）
+11. `port.out.WorkerTaskExecutorPort`（Worker Runtime 执行器）
+12. `port.out.RuntimeEnvironmentPort`（创建前准备运行环境）
+13. `port.out.RuntimeEnvironmentMaintenancePort`（运行环境清理维护）
 
 `infrastructure`
 1. `external.LocalRuntimeEnvironmentAdapter`（`local | docker` 双模式运行环境准备与维护，默认 docker）
@@ -350,7 +353,7 @@
 
 1. `requirement` 发布 `RequirementConfirmedEvent` -> `process` 调用 `ticket` 创建 `ARCH_REVIEW`。
 2. `execution` 处理 `NEED_*` 事件并发布领域事件 -> `process` 调用 `ticket` 创建 `DECISION/CLARIFICATION`。
-3. `execution` 处理 `finish`，写 `RUN_FINISHED` 事件 -> `process` 调用 `planning` 推进 `ASSIGNED -> DELIVERED`（IMPL 成功时）。
+3. `execution` 处理 `finish`，写 `RUN_FINISHED` 事件 -> `process` 调用 `planning` 推进 `ASSIGNED -> DELIVERED`（IMPL 成功时），并立即尝试 merge gate。
 4. `mergegate` 调用 `execution` 创建 VERIFY run；VERIFY 成功后由 `mergegate/process` 调 `planning` 推进 `DELIVERED -> DONE`。
 5. `session.complete` 调 `delivery` 校验主线 `delivery/<timestamp>` tag 再进入 `COMPLETED`。
 6. `process` 周期性触发 `WorkerRuntimeAutoRunService`，让 READY worker 自动执行 claim/run/finish 主链路。

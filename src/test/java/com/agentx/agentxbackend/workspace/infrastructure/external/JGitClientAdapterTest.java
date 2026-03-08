@@ -19,28 +19,124 @@ class JGitClientAdapterTest {
     Path tempDir;
 
     @Test
-    void shouldCreateAndRemoveWorktree() throws Exception {
+    void shouldCreateAndRemoveWorktreeInSessionRepo() throws Exception {
         assumeTrue(canRunGit(), "git executable is required");
-        Path repo = tempDir.resolve("repo");
-        Files.createDirectories(repo);
-        runGit(repo, List.of("init"));
-        runGit(repo, List.of("config", "user.email", "agentx@test.local"));
-        runGit(repo, List.of("config", "user.name", "AgentX Test"));
-        Files.writeString(repo.resolve("README.md"), "# test", StandardCharsets.UTF_8);
-        runGit(repo, List.of("add", "README.md"));
-        runGit(repo, List.of("commit", "-m", "init"));
-        String baseCommit = runGit(repo, List.of("rev-parse", "HEAD")).trim();
+        Path repoRoot = tempDir.resolve("repo-root");
+        Files.createDirectories(repoRoot);
+        runGit(repoRoot, List.of("init"));
+        runGit(repoRoot, List.of("config", "user.email", "agentx@test.local"));
+        runGit(repoRoot, List.of("config", "user.name", "AgentX Test"));
+        runGit(repoRoot, List.of("checkout", "-B", "main"));
+        Files.writeString(repoRoot.resolve("README.md"), "# template", StandardCharsets.UTF_8);
+        runGit(repoRoot, List.of("add", "README.md"));
+        runGit(repoRoot, List.of("commit", "-m", "init"));
+        String baseCommit = runGit(repoRoot, List.of("rev-parse", "HEAD")).trim();
 
-        JGitClientAdapter adapter = new JGitClientAdapter("git", repo.toString(), "task/", 120000);
-        String worktreePath = "worktrees/TASK-1/RUN-1";
-        adapter.createRunBranchAndWorktree("RUN-1", baseCommit, "run/RUN-1", worktreePath);
+        JGitClientAdapter adapter = new JGitClientAdapter(
+            "git",
+            repoRoot.toString(),
+            "sessions",
+            "main",
+            "task/",
+            "agentx@test.local",
+            "AgentX Test",
+            120000
+        );
+        String worktreePath = "worktrees/SES-1/RUN-1";
+        adapter.createRunBranchAndWorktree("RUN-1", "SES-1", baseCommit, "run/RUN-1", worktreePath);
 
-        assertTrue(Files.exists(repo.resolve(worktreePath)));
-        adapter.updateTaskBranch("TASK-1", baseCommit);
-        String taskBranchHead = runGit(repo, List.of("rev-parse", "task/TASK-1")).trim();
+        Path sessionRepo = repoRoot.resolve("sessions/ses-1/repo");
+        assertTrue(Files.exists(sessionRepo.resolve(worktreePath)));
+        adapter.updateTaskBranch("SES-1", "TASK-1", baseCommit);
+        String taskBranchHead = runGit(sessionRepo, List.of("rev-parse", "task/TASK-1")).trim();
         assertTrue(taskBranchHead.equals(baseCommit));
         adapter.removeWorktree(worktreePath);
-        assertFalse(Files.exists(repo.resolve(worktreePath)));
+        assertFalse(Files.exists(sessionRepo.resolve(worktreePath)));
+    }
+
+    @Test
+    void updateTaskBranchShouldAdvanceCheckedOutTaskBranch() throws Exception {
+        assumeTrue(canRunGit(), "git executable is required");
+        Path repoRoot = tempDir.resolve("repo-root-checked-out-task");
+        Files.createDirectories(repoRoot);
+        runGit(repoRoot, List.of("init"));
+        runGit(repoRoot, List.of("config", "user.email", "agentx@test.local"));
+        runGit(repoRoot, List.of("config", "user.name", "AgentX Test"));
+        runGit(repoRoot, List.of("checkout", "-B", "main"));
+        Files.writeString(repoRoot.resolve("README.md"), "# template", StandardCharsets.UTF_8);
+        runGit(repoRoot, List.of("add", "README.md"));
+        runGit(repoRoot, List.of("commit", "-m", "init"));
+        String baseCommit = runGit(repoRoot, List.of("rev-parse", "HEAD")).trim();
+
+        JGitClientAdapter adapter = new JGitClientAdapter(
+            "git",
+            repoRoot.toString(),
+            "sessions",
+            "main",
+            "task/",
+            "agentx@test.local",
+            "AgentX Test",
+            120000
+        );
+
+        String worktreePath = "worktrees/SES-2/RUN-1";
+        adapter.createRunBranchAndWorktree("RUN-1", "SES-2", baseCommit, "run/RUN-1", worktreePath);
+        adapter.updateTaskBranch("SES-2", "TASK-2", baseCommit);
+
+        Path sessionRepo = repoRoot.resolve("sessions/ses-2/repo");
+        runGit(sessionRepo, List.of("checkout", "main"));
+        Files.writeString(sessionRepo.resolve("README.md"), "# updated\n", StandardCharsets.UTF_8);
+        runGit(sessionRepo, List.of("add", "README.md"));
+        runGit(sessionRepo, List.of("commit", "-m", "delivery"));
+        String deliveryCommit = runGit(sessionRepo, List.of("rev-parse", "HEAD")).trim();
+
+        runGit(sessionRepo, List.of("checkout", "task/TASK-2"));
+        adapter.updateTaskBranch("SES-2", "TASK-2", deliveryCommit);
+
+        String taskBranchHead = runGit(sessionRepo, List.of("rev-parse", "task/TASK-2")).trim();
+        String checkedOutHead = runGit(sessionRepo, List.of("rev-parse", "HEAD")).trim();
+        assertTrue(taskBranchHead.equals(deliveryCommit));
+        assertTrue(checkedOutHead.equals(deliveryCommit));
+    }
+
+    @Test
+    void createRunBranchAndWorktreeShouldFallbackToMainWhenBaseCommitUnavailable() throws Exception {
+        assumeTrue(canRunGit(), "git executable is required");
+        Path repoRoot = tempDir.resolve("repo-root-baseline-fallback");
+        Files.createDirectories(repoRoot);
+        runGit(repoRoot, List.of("init"));
+        runGit(repoRoot, List.of("config", "user.email", "agentx@test.local"));
+        runGit(repoRoot, List.of("config", "user.name", "AgentX Test"));
+        runGit(repoRoot, List.of("checkout", "-B", "main"));
+        Files.writeString(repoRoot.resolve("README.md"), "# template", StandardCharsets.UTF_8);
+        runGit(repoRoot, List.of("add", "README.md"));
+        runGit(repoRoot, List.of("commit", "-m", "init"));
+        String mainCommit = runGit(repoRoot, List.of("rev-parse", "HEAD")).trim();
+
+        JGitClientAdapter adapter = new JGitClientAdapter(
+            "git",
+            repoRoot.toString(),
+            "sessions",
+            "main",
+            "task/",
+            "agentx@test.local",
+            "AgentX Test",
+            120000
+        );
+
+        String worktreePath = "worktrees/SES-3/RUN-1";
+        adapter.createRunBranchAndWorktree(
+            "RUN-1",
+            "SES-3",
+            "BASELINE_UNAVAILABLE",
+            "run/RUN-1",
+            worktreePath
+        );
+
+        Path sessionRepo = repoRoot.resolve("sessions/ses-3/repo");
+        assertTrue(Files.exists(sessionRepo.resolve(worktreePath)));
+        String runBranchHead = runGit(sessionRepo, List.of("rev-parse", "run/RUN-1")).trim();
+        assertTrue(runBranchHead.equals(mainCommit));
     }
 
     private static boolean canRunGit() {

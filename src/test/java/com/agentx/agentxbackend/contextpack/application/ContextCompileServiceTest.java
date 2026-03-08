@@ -155,8 +155,230 @@ class ContextCompileServiceTest {
         String taskSkillMarkdown = storedPayloadCaptor.getAllValues().get(1);
         assertTrue(taskSkillMarkdown.contains("task_title:implement order api"));
         assertTrue(taskSkillMarkdown.contains("requirement_title:Order Center MVP"));
+        assertTrue(taskSkillMarkdown.contains("requirement_scope:groupId=com.example.helloapi must stay fixed."));
+        assertTrue(taskSkillMarkdown.contains("requirement_scope_out:Do not introduce database integration."));
         assertTrue(taskSkillMarkdown.contains("requirement_goal:"));
+        assertTrue(taskSkillMarkdown.contains("requirement_constraint:Keep p95 latency under 300ms."));
         assertTrue(taskSkillMarkdown.contains("requirement_acceptance:"));
+        assertTrue(taskSkillMarkdown.contains("content().contentTypeCompatibleWith(MediaType.TEXT_PLAIN)"));
+        assertTrue(taskSkillMarkdown.contains("@RequestParam(\"name\")"));
+    }
+
+    @Test
+    void compileTaskContextPackShouldEmbedPriorRunFailureEvidence() throws Exception {
+        ContextCompileService service = new ContextCompileService(
+            factsQueryPort,
+            artifactStorePort,
+            snapshotRepository,
+            new ObjectMapper(),
+            180,
+            20,
+            8
+        );
+        stubTaskFacts();
+        when(factsQueryPort.listRecentTaskRuns("TASK-1", 8))
+            .thenReturn(
+                List.of(
+                    new ContextFactsQueryPort.RunFact(
+                        "RUN-VERIFY-1",
+                        "FAILED",
+                        "VERIFY",
+                        "CTXS-VERIFY-1",
+                        "file:.agentx/verify-skill.md",
+                        "abc123def456",
+                        "2026-02-22T00:05:00Z",
+                        "RUN_FINISHED",
+                        "Run finished with status FAILED",
+                        """
+                        {
+                          "result_status":"FAILED",
+                          "work_report":"VERIFY command failed: mvn -q test, reason=Command failed (exit 1): bash -lc mvn -q test, output=Caused by: java.lang.IllegalArgumentException: Name for argument of type [java.lang.String] not specified, and parameter name information not found in class file either. at org.springframework.web.method.annotation.AbstractNamedValueMethodArgumentResolver.updateNamedValueInfo(AbstractNamedValueMethodArgumentResolver.java:183)",
+                          "delivery_commit":"git:abc123def456"
+                        }
+                        """
+                    )
+                )
+            );
+        when(snapshotRepository.findLatestReadyByFingerprint(anyString(), anyString(), anyString()))
+            .thenReturn(Optional.empty());
+        when(snapshotRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(snapshotRepository.transitionStatus(anyString(), eq(TaskContextSnapshotStatus.PENDING), eq(TaskContextSnapshotStatus.COMPILING), any()))
+            .thenReturn(true);
+        ArgumentCaptor<String> storedPayloadCaptor = ArgumentCaptor.forClass(String.class);
+        when(artifactStorePort.store(anyString(), storedPayloadCaptor.capture()))
+            .thenReturn("file:.agentx/context/task-context-packs/TASK-1/IMPL/CTXS-3.json")
+            .thenReturn("file:.agentx/context/task-skills/TASK-1/IMPL/CTXS-3.md");
+        when(snapshotRepository.markReady(anyString(), anyString(), anyString(), any(), any())).thenReturn(true);
+
+        service.compileTaskContextPack("TASK-1", "IMPL");
+
+        JsonNode contextPackJson = new ObjectMapper().readTree(storedPayloadCaptor.getAllValues().get(0));
+        String priorRunRef = contextPackJson.path("priorRunRefs").get(0).asText();
+        assertTrue(priorRunRef.contains("RUN-VERIFY-1"));
+        assertTrue(priorRunRef.contains("FAILED"));
+        assertTrue(priorRunRef.contains("VERIFY"));
+        assertTrue(priorRunRef.contains("RUN_FINISHED"));
+        assertTrue(priorRunRef.contains("java.lang.IllegalArgumentException"));
+        assertTrue(priorRunRef.contains("parameter name information not found"));
+        assertTrue(priorRunRef.contains("delivery_commit=abc123def456"));
+    }
+
+    @Test
+    void compileTaskContextPackShouldEmitBootstrapOnlyGuidanceForInitTasks() {
+        ContextCompileService service = new ContextCompileService(
+            factsQueryPort,
+            artifactStorePort,
+            snapshotRepository,
+            new ObjectMapper(),
+            180,
+            20,
+            8
+        );
+        when(factsQueryPort.findTaskPlanningByTaskId("TASK-INIT"))
+            .thenReturn(
+                Optional.of(
+                    new ContextFactsQueryPort.TaskPlanningFact(
+                        "TASK-INIT",
+                        "MOD-1",
+                        "bootstrap",
+                        "SES-1",
+                        "initialize baseline",
+                        "tmpl.init.v0",
+                        "[\"TP-JAVA-21\",\"TP-MAVEN-3\",\"TP-GIT-2\"]"
+                    )
+                )
+            );
+        when(factsQueryPort.findRequirementBaselineBySessionId("SES-1"))
+            .thenReturn(
+                Optional.of(
+                    new ContextFactsQueryPort.RequirementBaselineFact(
+                        "REQ-1",
+                        1,
+                        "Boot App",
+                        "CONFIRMED",
+                        """
+                        ## 1. Summary
+                        Bootstrap a service repository.
+                        ## 2. Goals
+                        - Establish the baseline scaffold.
+                        ## 5. Acceptance Criteria
+                        - The project compiles.
+                        """
+                    )
+                )
+            );
+        when(factsQueryPort.listRecentArchitectureTickets("SES-1", 20)).thenReturn(List.of());
+        when(factsQueryPort.listRecentTaskRuns("TASK-INIT", 8)).thenReturn(List.of());
+        when(factsQueryPort.listToolpacksByIds(List.of("TP-JAVA-21", "TP-MAVEN-3", "TP-GIT-2")))
+            .thenReturn(List.of());
+        when(snapshotRepository.findLatestReadyByFingerprint(anyString(), anyString(), anyString()))
+            .thenReturn(Optional.empty());
+        when(snapshotRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(snapshotRepository.transitionStatus(anyString(), eq(TaskContextSnapshotStatus.PENDING), eq(TaskContextSnapshotStatus.COMPILING), any()))
+            .thenReturn(true);
+        ArgumentCaptor<String> storedPayloadCaptor = ArgumentCaptor.forClass(String.class);
+        when(artifactStorePort.store(anyString(), storedPayloadCaptor.capture()))
+            .thenReturn("file:.agentx/context/task-context-packs/TASK-INIT/IMPL/CTXS-INIT.json")
+            .thenReturn("file:.agentx/context/task-skills/TASK-INIT/IMPL/CTXS-INIT.md");
+        when(snapshotRepository.markReady(anyString(), anyString(), anyString(), any(), any())).thenReturn(true);
+
+        service.compileTaskContextPack("TASK-INIT", "IMPL");
+
+        String taskSkillMarkdown = storedPayloadCaptor.getAllValues().get(1);
+        assertTrue(taskSkillMarkdown.contains("init_scope:bootstrap scaffold only"));
+        assertTrue(taskSkillMarkdown.contains("scaffold must use that exact stack"));
+        assertTrue(taskSkillMarkdown.contains("Do not ask for permission to adopt Spring Boot"));
+        assertTrue(taskSkillMarkdown.contains("Do not implement business endpoints"));
+        assertTrue(taskSkillMarkdown.contains("Scaffold matches the confirmed framework/runtime/build stack"));
+        assertTrue(taskSkillMarkdown.contains("No feature-specific business endpoints or acceptance tests added during init."));
+    }
+
+    @Test
+    void compileTaskContextPackShouldUseValidateForInitVerifyCommands() {
+        ContextCompileService service = new ContextCompileService(
+            factsQueryPort,
+            artifactStorePort,
+            snapshotRepository,
+            new ObjectMapper(),
+            180,
+            20,
+            8
+        );
+        when(factsQueryPort.findTaskPlanningByTaskId("TASK-INIT-VERIFY"))
+            .thenReturn(
+                Optional.of(
+                    new ContextFactsQueryPort.TaskPlanningFact(
+                        "TASK-INIT-VERIFY",
+                        "MOD-1",
+                        "bootstrap",
+                        "SES-1",
+                        "initialize baseline",
+                        "tmpl.init.v0",
+                        "[\"TP-JAVA-21\",\"TP-MAVEN-3\",\"TP-GIT-2\"]"
+                    )
+                )
+            );
+        when(factsQueryPort.findRequirementBaselineBySessionId("SES-1"))
+            .thenReturn(
+                Optional.of(
+                    new ContextFactsQueryPort.RequirementBaselineFact(
+                        "REQ-1",
+                        1,
+                        "Boot App",
+                        "CONFIRMED",
+                        "## 1. Summary\nBootstrap a service repository."
+                    )
+                )
+            );
+        when(factsQueryPort.listRecentArchitectureTickets("SES-1", 20)).thenReturn(List.of());
+        when(factsQueryPort.listRecentTaskRuns("TASK-INIT-VERIFY", 8)).thenReturn(List.of());
+        when(factsQueryPort.listToolpacksByIds(List.of("TP-JAVA-21", "TP-MAVEN-3", "TP-GIT-2")))
+            .thenReturn(List.of());
+        when(snapshotRepository.findLatestReadyByFingerprint(anyString(), anyString(), anyString()))
+            .thenReturn(Optional.empty());
+        when(snapshotRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(snapshotRepository.transitionStatus(anyString(), eq(TaskContextSnapshotStatus.PENDING), eq(TaskContextSnapshotStatus.COMPILING), any()))
+            .thenReturn(true);
+        ArgumentCaptor<String> storedPayloadCaptor = ArgumentCaptor.forClass(String.class);
+        when(artifactStorePort.store(anyString(), storedPayloadCaptor.capture()))
+            .thenReturn("file:.agentx/context/task-context-packs/TASK-INIT-VERIFY/VERIFY/CTXS-INIT-VERIFY.json")
+            .thenReturn("file:.agentx/context/task-skills/TASK-INIT-VERIFY/VERIFY/CTXS-INIT-VERIFY.md");
+        when(snapshotRepository.markReady(anyString(), anyString(), anyString(), any(), any())).thenReturn(true);
+
+        service.compileTaskContextPack("TASK-INIT-VERIFY", "VERIFY");
+
+        String taskSkillMarkdown = storedPayloadCaptor.getAllValues().get(1);
+        assertTrue(taskSkillMarkdown.contains("mvn -q -DskipTests validate"));
+    }
+
+    @Test
+    void compileTaskContextPackShouldUseMavenTestForFeatureVerifyCommands() {
+        ContextCompileService service = new ContextCompileService(
+            factsQueryPort,
+            artifactStorePort,
+            snapshotRepository,
+            new ObjectMapper(),
+            180,
+            20,
+            8
+        );
+        stubTaskFacts();
+        when(snapshotRepository.findLatestReadyByFingerprint(anyString(), anyString(), anyString()))
+            .thenReturn(Optional.empty());
+        when(snapshotRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(snapshotRepository.transitionStatus(anyString(), eq(TaskContextSnapshotStatus.PENDING), eq(TaskContextSnapshotStatus.COMPILING), any()))
+            .thenReturn(true);
+        ArgumentCaptor<String> storedPayloadCaptor = ArgumentCaptor.forClass(String.class);
+        when(artifactStorePort.store(anyString(), storedPayloadCaptor.capture()))
+            .thenReturn("file:.agentx/context/task-context-packs/TASK-1/VERIFY/CTXS-VERIFY.json")
+            .thenReturn("file:.agentx/context/task-skills/TASK-1/VERIFY/CTXS-VERIFY.md");
+        when(snapshotRepository.markReady(anyString(), anyString(), anyString(), any(), any())).thenReturn(true);
+
+        service.compileTaskContextPack("TASK-1", "VERIFY");
+
+        String taskSkillMarkdown = storedPayloadCaptor.getAllValues().get(1);
+        assertTrue(taskSkillMarkdown.contains("mvn -q test"));
+        assertFalse(taskSkillMarkdown.contains("-Dtest=* verify"));
     }
 
     @Test
@@ -407,6 +629,12 @@ class ContextCompileServiceTest {
                         ## 2. Goals
                         - Provide order create/query APIs.
                         - Ensure deterministic validation behavior.
+                        ## 4. Scope
+                        ### In
+                        - groupId=com.example.helloapi must stay fixed.
+                        - package name com.example.helloapi must stay fixed.
+                        ### Out
+                        - Do not introduce database integration.
                         ## 5. Acceptance Criteria
                         - At least one end-to-end order flow passes tests.
                         ## 6. Value Constraints
@@ -439,7 +667,16 @@ class ContextCompileServiceTest {
                         "CTXS-OLD",
                         "file:.agentx/old-skill.md",
                         "abc123",
-                        "2026-02-22T00:00:00Z"
+                        "2026-02-22T00:00:00Z",
+                        "RUN_FINISHED",
+                        "Run finished with status SUCCEEDED",
+                        """
+                        {
+                          "result_status":"SUCCEEDED",
+                          "work_report":"Implemented baseline order API.",
+                          "delivery_commit":"git:abc123"
+                        }
+                        """
                     )
                 )
             );

@@ -11,6 +11,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
@@ -25,6 +26,7 @@ public class WorkerPoolCleanupService {
     private final int maxDisablePerPoll;
     private final int scanLimit;
     private final CleanupStrategy cleanupStrategy;
+    private final Set<String> reservedWorkerIds;
 
     public WorkerPoolCleanupService(
         WorkerCapabilityUseCase workerCapabilityUseCase,
@@ -33,7 +35,8 @@ public class WorkerPoolCleanupService {
         @Value("${agentx.workforce.worker-pool-cleanup.min-idle-seconds:1800}") int minIdleSeconds,
         @Value("${agentx.workforce.worker-pool-cleanup.max-disable-per-poll:2}") int maxDisablePerPoll,
         @Value("${agentx.workforce.worker-pool-cleanup.scan-limit:256}") int scanLimit,
-        @Value("${agentx.workforce.worker-pool-cleanup.strategy:oldest_idle}") String cleanupStrategy
+        @Value("${agentx.workforce.worker-pool-cleanup.strategy:oldest_idle}") String cleanupStrategy,
+        @Value("${agentx.workforce.worker-pool-cleanup.reserved-worker-ids:WRK-BOOT-JAVA-CORE,WRK-BOOT-JAVA-DB,WRK-BOOT-PYTHON-AUX}") String reservedWorkerIds
     ) {
         this.workerCapabilityUseCase = workerCapabilityUseCase;
         this.workerRunStatsUseCase = workerRunStatsUseCase;
@@ -42,6 +45,7 @@ public class WorkerPoolCleanupService {
         this.maxDisablePerPoll = Math.max(1, maxDisablePerPoll);
         this.scanLimit = Math.max(8, Math.min(scanLimit, 4096));
         this.cleanupStrategy = CleanupStrategy.fromValue(cleanupStrategy);
+        this.reservedWorkerIds = parseReservedWorkerIds(reservedWorkerIds);
     }
 
     public CleanupResult cleanupOnce(int requestedDisableLimit) {
@@ -62,6 +66,9 @@ public class WorkerPoolCleanupService {
         int skippedActive = 0;
         int skippedTooFresh = 0;
         for (Worker worker : readyWorkers) {
+            if (reservedWorkerIds.contains(worker.workerId())) {
+                continue;
+            }
             if (activeWorkerIds.contains(worker.workerId())) {
                 skippedActive++;
                 continue;
@@ -136,6 +143,23 @@ public class WorkerPoolCleanupService {
                 .thenComparing(candidate -> candidate.worker().workerId());
         }
         return fallback;
+    }
+
+    private static Set<String> parseReservedWorkerIds(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return Set.of();
+        }
+        LinkedHashSet<String> ids = new LinkedHashSet<>();
+        for (String token : raw.split(",")) {
+            if (token == null) {
+                continue;
+            }
+            String normalized = token.trim();
+            if (!normalized.isEmpty()) {
+                ids.add(normalized);
+            }
+        }
+        return ids.isEmpty() ? Set.of() : Set.copyOf(ids);
     }
 
     public record CleanupResult(

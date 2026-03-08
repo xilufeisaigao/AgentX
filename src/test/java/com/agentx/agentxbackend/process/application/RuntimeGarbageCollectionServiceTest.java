@@ -23,6 +23,7 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -40,6 +41,8 @@ class RuntimeGarbageCollectionServiceTest {
     private MergeGateUseCase mergeGateUseCase;
     @Mock
     private MergeGateMaintenanceUseCase mergeGateMaintenanceUseCase;
+    @Mock
+    private DeliveredTaskMergeGateProcessManager deliveredTaskMergeGateProcessManager;
 
     @Test
     void collectOnceShouldReleaseAssignedTaskWhenActiveRunMissing() {
@@ -55,6 +58,7 @@ class RuntimeGarbageCollectionServiceTest {
 
         assertEquals(1, result.scannedAssignedTasks());
         assertEquals(1, result.releasedAssignments());
+        assertEquals(0, result.promotedDeliveredAssignments());
         assertEquals(0, result.failedAssignmentReleases());
         verify(taskStateMutationUseCase).releaseAssignment("TASK-1");
         verifyNoInteractions(mergeGateUseCase);
@@ -74,8 +78,48 @@ class RuntimeGarbageCollectionServiceTest {
         RuntimeGarbageCollectionService.CleanupResult result = service.collectOnce();
 
         assertEquals(0, result.releasedAssignments());
+        assertEquals(0, result.promotedDeliveredAssignments());
         assertEquals(1, result.skippedHealthyAssignedTasks());
         verifyNoInteractions(taskStateMutationUseCase, mergeGateUseCase);
+    }
+
+    @Test
+    void collectOnceShouldPromoteSucceededImplAssignmentIntoDelivered() {
+        RuntimeGarbageCollectionService service = newService();
+        WorkTask assigned = workTask("TASK-S", TaskStatus.ASSIGNED, "RUN-S", Instant.now());
+        TaskRun succeededRun = taskRun("RUN-S", "TASK-S", RunKind.IMPL, RunStatus.SUCCEEDED);
+
+        when(mergeGateMaintenanceUseCase.recoverRepositoryIfNeeded()).thenReturn(false);
+        when(taskQueryUseCase.listTasksByStatus(TaskStatus.ASSIGNED, 100)).thenReturn(List.of(assigned));
+        when(taskQueryUseCase.listTasksByStatus(TaskStatus.DELIVERED, 100)).thenReturn(List.of());
+        when(runQueryUseCase.findRunById("RUN-S")).thenReturn(Optional.of(succeededRun));
+
+        RuntimeGarbageCollectionService.CleanupResult result = service.collectOnce();
+
+        assertEquals(0, result.releasedAssignments());
+        assertEquals(1, result.promotedDeliveredAssignments());
+        verify(taskStateMutationUseCase).markDelivered("TASK-S");
+        verify(deliveredTaskMergeGateProcessManager).onTaskDelivered("TASK-S");
+    }
+
+    @Test
+    void collectOnceShouldCompleteSucceededVerifyAssignmentIntoDone() {
+        RuntimeGarbageCollectionService service = newService();
+        WorkTask assignedVerify = verifyTask("TASK-V", TaskStatus.ASSIGNED, "RUN-V", Instant.now());
+        TaskRun succeededVerifyRun = taskRun("RUN-V", "TASK-V", RunKind.VERIFY, RunStatus.SUCCEEDED);
+
+        when(mergeGateMaintenanceUseCase.recoverRepositoryIfNeeded()).thenReturn(false);
+        when(taskQueryUseCase.listTasksByStatus(TaskStatus.ASSIGNED, 100)).thenReturn(List.of(assignedVerify));
+        when(taskQueryUseCase.listTasksByStatus(TaskStatus.DELIVERED, 100)).thenReturn(List.of());
+        when(runQueryUseCase.findRunById("RUN-V")).thenReturn(Optional.of(succeededVerifyRun));
+
+        RuntimeGarbageCollectionService.CleanupResult result = service.collectOnce();
+
+        assertEquals(0, result.releasedAssignments());
+        assertEquals(0, result.promotedDeliveredAssignments());
+        assertEquals(1, result.completedVerifyAssignments());
+        verify(taskStateMutationUseCase).markDone("TASK-V");
+        verifyNoInteractions(deliveredTaskMergeGateProcessManager, mergeGateUseCase);
     }
 
     @Test
@@ -101,12 +145,12 @@ class RuntimeGarbageCollectionServiceTest {
     }
 
     @Test
-    void collectOnceShouldSkipDeliveredTaskWhenVerifyRunExists() {
+    void collectOnceShouldSkipOnlyDeliveredTaskWhenVerifySucceededExists() {
         RuntimeGarbageCollectionService service = newService();
         Instant staleTime = Instant.now().minusSeconds(300);
         WorkTask deliveredWithActiveVerify = workTask("TASK-4", TaskStatus.DELIVERED, null, staleTime);
         WorkTask deliveredWithVerifyHistory = workTask("TASK-5", TaskStatus.DELIVERED, null, staleTime);
-        TaskRun verifyFailed = taskRun("RUN-V-5", "TASK-5", RunKind.VERIFY, RunStatus.FAILED);
+        TaskRun verifySucceeded = taskRun("RUN-V-5", "TASK-5", RunKind.VERIFY, RunStatus.SUCCEEDED);
 
         when(mergeGateMaintenanceUseCase.recoverRepositoryIfNeeded()).thenReturn(false);
         when(taskQueryUseCase.listTasksByStatus(TaskStatus.ASSIGNED, 100)).thenReturn(List.of());
@@ -114,7 +158,7 @@ class RuntimeGarbageCollectionServiceTest {
             .thenReturn(List.of(deliveredWithActiveVerify, deliveredWithVerifyHistory));
         when(runQueryUseCase.hasActiveRunByTaskAndKind("TASK-4", RunKind.VERIFY)).thenReturn(true);
         when(runQueryUseCase.hasActiveRunByTaskAndKind("TASK-5", RunKind.VERIFY)).thenReturn(false);
-        when(runQueryUseCase.findLatestRunByTaskAndKind("TASK-5", RunKind.VERIFY)).thenReturn(Optional.of(verifyFailed));
+        when(runQueryUseCase.findLatestRunByTaskAndKind("TASK-5", RunKind.VERIFY)).thenReturn(Optional.of(verifySucceeded));
 
         RuntimeGarbageCollectionService.CleanupResult result = service.collectOnce();
 
@@ -123,6 +167,28 @@ class RuntimeGarbageCollectionServiceTest {
         assertEquals(1, result.skippedDeliveredWithVerifyHistory());
         assertEquals(0, result.kickedMergeGates());
         verifyNoInteractions(mergeGateUseCase);
+    }
+
+    @Test
+    void collectOnceShouldRetryMergeGateWhenLatestVerifyFailed() {
+        RuntimeGarbageCollectionService service = newService();
+        Instant staleTime = Instant.now().minusSeconds(300);
+        WorkTask delivered = workTask("TASK-VERIFY-FAILED", TaskStatus.DELIVERED, null, staleTime);
+        TaskRun verifyFailed = taskRun("RUN-V-FAILED", "TASK-VERIFY-FAILED", RunKind.VERIFY, RunStatus.FAILED);
+
+        when(mergeGateMaintenanceUseCase.recoverRepositoryIfNeeded()).thenReturn(false);
+        when(taskQueryUseCase.listTasksByStatus(TaskStatus.ASSIGNED, 100)).thenReturn(List.of());
+        when(taskQueryUseCase.listTasksByStatus(TaskStatus.DELIVERED, 100)).thenReturn(List.of(delivered));
+        when(runQueryUseCase.hasActiveRunByTaskAndKind("TASK-VERIFY-FAILED", RunKind.VERIFY)).thenReturn(false);
+        when(runQueryUseCase.findLatestRunByTaskAndKind("TASK-VERIFY-FAILED", RunKind.VERIFY))
+            .thenReturn(Optional.of(verifyFailed));
+        when(mergeGateUseCase.start("TASK-VERIFY-FAILED"))
+            .thenReturn(new MergeGateResult("TASK-VERIFY-FAILED", "RUN-V-RETRY", true, "retry"));
+
+        RuntimeGarbageCollectionService.CleanupResult result = service.collectOnce();
+
+        assertEquals(1, result.kickedMergeGates());
+        verify(mergeGateUseCase).start("TASK-VERIFY-FAILED");
     }
 
     @Test
@@ -161,6 +227,10 @@ class RuntimeGarbageCollectionServiceTest {
         assertEquals(1, result.mergeGateFailures());
         assertEquals(1, result.kickedMergeGates());
         verify(mergeGateUseCase).start("TASK-OK");
+        verify(deliveredTaskMergeGateProcessManager).handleMergeGateStartFailure(
+            eq("TASK-ERR"),
+            org.mockito.ArgumentMatchers.any(RuntimeException.class)
+        );
     }
 
     private RuntimeGarbageCollectionService newService() {
@@ -170,6 +240,7 @@ class RuntimeGarbageCollectionServiceTest {
             runQueryUseCase,
             mergeGateUseCase,
             mergeGateMaintenanceUseCase,
+            deliveredTaskMergeGateProcessManager,
             100,
             100,
             120,
@@ -183,6 +254,21 @@ class RuntimeGarbageCollectionServiceTest {
             "MOD-1",
             "Task " + taskId,
             TaskTemplateId.fromValue("tmpl.impl.v0"),
+            status,
+            "[\"TP-JAVA-21\"]",
+            activeRunId,
+            "architect_agent",
+            updatedAt.minusSeconds(60),
+            updatedAt
+        );
+    }
+
+    private static WorkTask verifyTask(String taskId, TaskStatus status, String activeRunId, Instant updatedAt) {
+        return new WorkTask(
+            taskId,
+            "MOD-1",
+            "Task " + taskId,
+            TaskTemplateId.fromValue("tmpl.verify.v0"),
             status,
             "[\"TP-JAVA-21\"]",
             activeRunId,

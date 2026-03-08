@@ -24,83 +24,134 @@ class CliGitClientAdapterTest {
     @Test
     void rebaseTaskBranchShouldRecoverFromConflictForNextAttempt() throws Exception {
         assumeTrue(canRunGit(), "git executable is required");
-        Path repo = tempDir.resolve("repo");
-        Files.createDirectories(repo);
+        Path repoRoot = tempDir.resolve("repo-root");
+        Path sessionRepo = repoRoot.resolve("sessions/SES-1/repo");
+        Files.createDirectories(sessionRepo);
 
-        runGit(repo, List.of("init"));
-        runGit(repo, List.of("config", "user.email", "agentx@test.local"));
-        runGit(repo, List.of("config", "user.name", "AgentX Test"));
-        Files.writeString(repo.resolve("pom.xml"), "<project><name>base</name></project>\n", StandardCharsets.UTF_8);
-        runGit(repo, List.of("add", "pom.xml"));
-        runGit(repo, List.of("commit", "-m", "init"));
-        runGit(repo, List.of("branch", "-M", "main"));
+        runGit(sessionRepo, List.of("init"));
+        runGit(sessionRepo, List.of("config", "user.email", "agentx@test.local"));
+        runGit(sessionRepo, List.of("config", "user.name", "AgentX Test"));
+        Files.writeString(sessionRepo.resolve("pom.xml"), "<project><name>base</name></project>\n", StandardCharsets.UTF_8);
+        runGit(sessionRepo, List.of("add", "pom.xml"));
+        runGit(sessionRepo, List.of("commit", "-m", "init"));
+        runGit(sessionRepo, List.of("branch", "-M", "main"));
 
-        runGit(repo, List.of("checkout", "-b", "task/TASK-1"));
-        Files.writeString(repo.resolve("pom.xml"), "<project><name>task-one</name></project>\n", StandardCharsets.UTF_8);
-        runGit(repo, List.of("add", "pom.xml"));
-        runGit(repo, List.of("commit", "-m", "task one changes pom"));
+        runGit(sessionRepo, List.of("checkout", "-b", "task/TASK-1"));
+        Files.writeString(sessionRepo.resolve("pom.xml"), "<project><name>task-one</name></project>\n", StandardCharsets.UTF_8);
+        runGit(sessionRepo, List.of("add", "pom.xml"));
+        runGit(sessionRepo, List.of("commit", "-m", "task one changes pom"));
 
-        runGit(repo, List.of("checkout", "main"));
-        Files.writeString(repo.resolve("pom.xml"), "<project><name>main</name></project>\n", StandardCharsets.UTF_8);
-        runGit(repo, List.of("add", "pom.xml"));
-        runGit(repo, List.of("commit", "-m", "main changes pom"));
-        String mainHead = runGit(repo, List.of("rev-parse", "main")).trim();
+        runGit(sessionRepo, List.of("checkout", "main"));
+        Files.writeString(sessionRepo.resolve("pom.xml"), "<project><name>main</name></project>\n", StandardCharsets.UTF_8);
+        runGit(sessionRepo, List.of("add", "pom.xml"));
+        runGit(sessionRepo, List.of("commit", "-m", "main changes pom"));
+        String mainHead = runGit(sessionRepo, List.of("rev-parse", "main")).trim();
 
-        runGit(repo, List.of("checkout", "-b", "task/TASK-2"));
-        Files.writeString(repo.resolve("README-task2.md"), "task 2\n", StandardCharsets.UTF_8);
-        runGit(repo, List.of("add", "README-task2.md"));
-        runGit(repo, List.of("commit", "-m", "task two non-conflict"));
-        runGit(repo, List.of("checkout", "main"));
+        runGit(sessionRepo, List.of("checkout", "-b", "task/TASK-2"));
+        Files.writeString(sessionRepo.resolve("README-task2.md"), "task 2\n", StandardCharsets.UTF_8);
+        runGit(sessionRepo, List.of("add", "README-task2.md"));
+        runGit(sessionRepo, List.of("commit", "-m", "task two non-conflict"));
+        runGit(sessionRepo, List.of("checkout", "main"));
 
-        CliGitClientAdapter adapter = new CliGitClientAdapter("git", repo.toString(), "main", "task/", 30000);
+        CliGitClientAdapter adapter = new CliGitClientAdapter(
+            "git",
+            repoRoot.toString(),
+            "sessions",
+            "main",
+            "task/",
+            30000
+        );
 
-        assertThrows(IllegalStateException.class, () -> adapter.rebaseTaskBranch("TASK-1", mainHead));
+        assertThrows(IllegalStateException.class, () -> adapter.rebaseTaskBranch("SES-1", "TASK-1", mainHead));
 
-        String unresolved = runGit(repo, List.of("diff", "--name-only", "--diff-filter=U")).trim();
+        String unresolved = runGit(sessionRepo, List.of("diff", "--name-only", "--diff-filter=U")).trim();
         assertTrue(unresolved.isEmpty(), "conflict files should be cleaned after rebase failure");
 
-        MergeCandidate candidate = adapter.rebaseTaskBranch("TASK-2", mainHead);
+        MergeCandidate candidate = adapter.rebaseTaskBranch("SES-1", "TASK-2", mainHead);
         assertEquals("TASK-2", candidate.taskId());
         assertEquals(mainHead, candidate.mainHeadBefore());
         assertFalse(candidate.mergeCandidateCommit().isBlank());
+        assertTrue(candidate.evidenceRef().startsWith("refs/agentx/candidate/"));
     }
 
     @Test
     void recoverRepositoryIfNeededShouldAbortInterruptedRebaseAndCheckoutMain() throws Exception {
         assumeTrue(canRunGit(), "git executable is required");
-        Path repo = tempDir.resolve("repo-recover");
-        Files.createDirectories(repo);
+        Path repoRoot = tempDir.resolve("repo-root-recover");
+        Path sessionRepo = repoRoot.resolve("sessions/SES-9/repo");
+        Files.createDirectories(sessionRepo);
 
-        runGit(repo, List.of("init"));
-        runGit(repo, List.of("config", "user.email", "agentx@test.local"));
-        runGit(repo, List.of("config", "user.name", "AgentX Test"));
-        Files.writeString(repo.resolve("README.md"), "base\n", StandardCharsets.UTF_8);
-        runGit(repo, List.of("add", "README.md"));
-        runGit(repo, List.of("commit", "-m", "init"));
-        runGit(repo, List.of("branch", "-M", "main"));
+        runGit(sessionRepo, List.of("init"));
+        runGit(sessionRepo, List.of("config", "user.email", "agentx@test.local"));
+        runGit(sessionRepo, List.of("config", "user.name", "AgentX Test"));
+        Files.writeString(sessionRepo.resolve("README.md"), "base\n", StandardCharsets.UTF_8);
+        runGit(sessionRepo, List.of("add", "README.md"));
+        runGit(sessionRepo, List.of("commit", "-m", "init"));
+        runGit(sessionRepo, List.of("branch", "-M", "main"));
 
-        runGit(repo, List.of("checkout", "-b", "task/TASK-9"));
-        Files.writeString(repo.resolve("README.md"), "task version\n", StandardCharsets.UTF_8);
-        runGit(repo, List.of("add", "README.md"));
-        runGit(repo, List.of("commit", "-m", "task change"));
+        runGit(sessionRepo, List.of("checkout", "-b", "task/TASK-9"));
+        Files.writeString(sessionRepo.resolve("README.md"), "task version\n", StandardCharsets.UTF_8);
+        runGit(sessionRepo, List.of("add", "README.md"));
+        runGit(sessionRepo, List.of("commit", "-m", "task change"));
 
-        runGit(repo, List.of("checkout", "main"));
-        Files.writeString(repo.resolve("README.md"), "main version\n", StandardCharsets.UTF_8);
-        runGit(repo, List.of("add", "README.md"));
-        runGit(repo, List.of("commit", "-m", "main change"));
+        runGit(sessionRepo, List.of("checkout", "main"));
+        Files.writeString(sessionRepo.resolve("README.md"), "main version\n", StandardCharsets.UTF_8);
+        runGit(sessionRepo, List.of("add", "README.md"));
+        runGit(sessionRepo, List.of("commit", "-m", "main change"));
 
-        runGit(repo, List.of("checkout", "task/TASK-9"));
-        CommandResult rebaseResult = runGitAllowFailure(repo, List.of("rebase", "main"));
+        runGit(sessionRepo, List.of("checkout", "task/TASK-9"));
+        CommandResult rebaseResult = runGitAllowFailure(sessionRepo, List.of("rebase", "main"));
         assertTrue(rebaseResult.exitCode() != 0, "rebase should fail to leave interrupted state");
 
-        CliGitClientAdapter adapter = new CliGitClientAdapter("git", repo.toString(), "main", "task/", 30000);
+        CliGitClientAdapter adapter = new CliGitClientAdapter(
+            "git",
+            repoRoot.toString(),
+            "sessions",
+            "main",
+            "task/",
+            30000
+        );
         assertTrue(adapter.recoverRepositoryIfNeeded());
 
-        String unresolved = runGit(repo, List.of("diff", "--name-only", "--diff-filter=U")).trim();
+        String unresolved = runGit(sessionRepo, List.of("diff", "--name-only", "--diff-filter=U")).trim();
         assertTrue(unresolved.isEmpty(), "unmerged files should be cleared");
-        String currentBranch = runGit(repo, List.of("rev-parse", "--abbrev-ref", "HEAD")).trim();
+        String currentBranch = runGit(sessionRepo, List.of("rev-parse", "--abbrev-ref", "HEAD")).trim();
         assertEquals("main", currentBranch);
         assertFalse(adapter.recoverRepositoryIfNeeded(), "second recovery should become no-op");
+    }
+
+    @Test
+    void ensureDeliveryTagOnMainShouldCreateAnnotatedTagOnce() throws Exception {
+        assumeTrue(canRunGit(), "git executable is required");
+        Path repoRoot = tempDir.resolve("repo-root-tag");
+        Path sessionRepo = repoRoot.resolve("sessions/SES-TAG/repo");
+        Files.createDirectories(sessionRepo);
+
+        runGit(sessionRepo, List.of("init"));
+        runGit(sessionRepo, List.of("config", "user.email", "agentx@test.local"));
+        runGit(sessionRepo, List.of("config", "user.name", "AgentX Test"));
+        Files.writeString(sessionRepo.resolve("README.md"), "base\n", StandardCharsets.UTF_8);
+        runGit(sessionRepo, List.of("add", "README.md"));
+        runGit(sessionRepo, List.of("commit", "-m", "init"));
+        runGit(sessionRepo, List.of("branch", "-M", "main"));
+        String head = runGit(sessionRepo, List.of("rev-parse", "main")).trim();
+
+        CliGitClientAdapter adapter = new CliGitClientAdapter(
+            "git",
+            repoRoot.toString(),
+            "sessions",
+            "main",
+            "task/",
+            30000
+        );
+
+        adapter.ensureDeliveryTagOnMain("SES-TAG", head);
+        adapter.ensureDeliveryTagOnMain("SES-TAG", head);
+
+        String tags = runGit(sessionRepo, List.of("tag", "--list", "delivery/*", "--merged", "main")).trim();
+        assertFalse(tags.isBlank(), "delivery tag should exist on main");
+        long tagCount = tags.lines().count();
+        assertEquals(1L, tagCount, "delivery tag creation should be idempotent");
     }
 
     private static boolean canRunGit() {

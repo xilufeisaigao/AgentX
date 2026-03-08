@@ -17,13 +17,20 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.Instant;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -50,6 +57,7 @@ class WorkerRuntimeAutoRunServiceTest {
         TaskPackage taskPackage = buildTaskPackage("RUN-1", "TASK-1", RunKind.IMPL);
 
         when(workerCapabilityUseCase.listWorkersByStatus(WorkerStatus.READY, 8)).thenReturn(List.of(worker));
+        when(runCommandUseCase.pickupRunningVerifyRun("WRK-1")).thenReturn(Optional.empty());
         when(runCommandUseCase.claimTask("WRK-1")).thenReturn(Optional.of(taskPackage));
         when(workerTaskExecutorPort.execute(taskPackage)).thenReturn(
             WorkerTaskExecutorPort.ExecutionResult.succeeded("done", "abc123", null)
@@ -75,6 +83,7 @@ class WorkerRuntimeAutoRunServiceTest {
         TaskPackage taskPackage = buildTaskPackage("RUN-2", "TASK-2", RunKind.IMPL);
 
         when(workerCapabilityUseCase.listWorkersByStatus(WorkerStatus.READY, 8)).thenReturn(List.of(worker));
+        when(runCommandUseCase.pickupRunningVerifyRun("WRK-2")).thenReturn(Optional.empty());
         when(runCommandUseCase.claimTask("WRK-2")).thenReturn(Optional.of(taskPackage));
         when(workerTaskExecutorPort.execute(taskPackage)).thenReturn(
             WorkerTaskExecutorPort.ExecutionResult.needInput("NEED_CLARIFICATION", "need info", "{\"k\":\"v\"}")
@@ -98,6 +107,7 @@ class WorkerRuntimeAutoRunServiceTest {
         TaskPackage taskPackage = buildTaskPackage("RUN-3", "TASK-3", RunKind.IMPL);
 
         when(workerCapabilityUseCase.listWorkersByStatus(WorkerStatus.READY, 8)).thenReturn(List.of(worker));
+        when(runCommandUseCase.pickupRunningVerifyRun("WRK-3")).thenReturn(Optional.empty());
         when(runCommandUseCase.claimTask("WRK-3")).thenReturn(Optional.of(taskPackage));
         when(workerTaskExecutorPort.execute(taskPackage)).thenThrow(new IllegalStateException("boom"));
 
@@ -118,9 +128,9 @@ class WorkerRuntimeAutoRunServiceTest {
         Worker worker = new Worker("WRK-4", WorkerStatus.READY, Instant.now(), Instant.now());
 
         when(workerCapabilityUseCase.listWorkersByStatus(WorkerStatus.READY, 8)).thenReturn(List.of(worker));
+        when(runCommandUseCase.pickupRunningVerifyRun("WRK-4")).thenReturn(Optional.empty());
         when(runCommandUseCase.claimTask("WRK-4"))
             .thenThrow(new PreconditionFailedException("INIT gate is active."));
-        when(runCommandUseCase.pickupRunningVerifyRun("WRK-4")).thenReturn(Optional.empty());
 
         WorkerRuntimeAutoRunService.AutoRunResult result = service.runOnce(8);
 
@@ -132,7 +142,7 @@ class WorkerRuntimeAutoRunServiceTest {
     }
 
     @Test
-    void runOnceShouldExecuteRunningVerifyRunWhenNoClaimedTask() {
+    void runOnceShouldPrioritizeRunningVerifyRunBeforeClaimingNewTask() {
         WorkerRuntimeAutoRunService service = new WorkerRuntimeAutoRunService(
             workerCapabilityUseCase,
             runCommandUseCase,
@@ -143,7 +153,6 @@ class WorkerRuntimeAutoRunServiceTest {
         TaskPackage verifyPackage = buildTaskPackage("RUN-V-1", "TASK-V-1", RunKind.VERIFY);
 
         when(workerCapabilityUseCase.listWorkersByStatus(WorkerStatus.READY, 8)).thenReturn(List.of(worker));
-        when(runCommandUseCase.claimTask("WRK-VERIFY")).thenReturn(Optional.empty());
         when(runCommandUseCase.pickupRunningVerifyRun("WRK-VERIFY")).thenReturn(Optional.of(verifyPackage));
         when(workerTaskExecutorPort.execute(verifyPackage)).thenReturn(
             WorkerTaskExecutorPort.ExecutionResult.succeeded("verify done", null, null)
@@ -153,7 +162,43 @@ class WorkerRuntimeAutoRunServiceTest {
 
         assertEquals(1, result.claimedRuns());
         assertEquals(1, result.succeededRuns());
+        verify(runCommandUseCase, never()).claimTask("WRK-VERIFY");
         verify(runCommandUseCase).finishRun(any(), any());
+    }
+
+    @Test
+    void runOnceShouldHeartbeatWhileWorkerExecutionIsStillRunning() {
+        WorkerRuntimeAutoRunService service = new WorkerRuntimeAutoRunService(
+            workerCapabilityUseCase,
+            runCommandUseCase,
+            runInternalUseCase,
+            workerTaskExecutorPort,
+            1,
+            Executors.newSingleThreadScheduledExecutor(runnable -> {
+                Thread thread = new Thread(runnable, "test-run-heartbeat");
+                thread.setDaemon(true);
+                return thread;
+            })
+        );
+        Worker worker = new Worker("WRK-HB", WorkerStatus.READY, Instant.now(), Instant.now());
+        TaskPackage taskPackage = buildTaskPackage("RUN-HB-1", "TASK-HB-1", RunKind.VERIFY);
+        CountDownLatch heartbeatLatch = new CountDownLatch(1);
+
+        when(workerCapabilityUseCase.listWorkersByStatus(WorkerStatus.READY, 8)).thenReturn(List.of(worker));
+        when(runCommandUseCase.pickupRunningVerifyRun("WRK-HB")).thenReturn(Optional.of(taskPackage));
+        doAnswer(invocation -> {
+            heartbeatLatch.countDown();
+            return null;
+        }).when(runCommandUseCase).heartbeat("RUN-HB-1");
+        when(workerTaskExecutorPort.execute(taskPackage)).thenAnswer(invocation -> {
+            assertTrue(heartbeatLatch.await(3, TimeUnit.SECONDS));
+            return WorkerTaskExecutorPort.ExecutionResult.succeeded("verify done", null, null);
+        });
+
+        WorkerRuntimeAutoRunService.AutoRunResult result = service.runOnce(8);
+
+        assertEquals(1, result.succeededRuns());
+        verify(runCommandUseCase, atLeastOnce()).heartbeat("RUN-HB-1");
     }
 
     private static TaskPackage buildTaskPackage(String runId, String taskId, RunKind runKind) {

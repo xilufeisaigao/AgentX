@@ -1,6 +1,5 @@
 package com.agentx.agentxbackend.process.application;
 
-import com.agentx.agentxbackend.contextpack.application.port.in.ContextCompileUseCase;
 import com.agentx.agentxbackend.planning.application.port.in.PlanningCommandUseCase;
 import com.agentx.agentxbackend.planning.domain.model.TaskStatus;
 import com.agentx.agentxbackend.planning.domain.model.TaskTemplateId;
@@ -17,26 +16,23 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 class SessionBootstrapInitProcessManagerTest {
 
     @Test
-    void shouldCreateBootstrapInitTaskAndCompileContexts() {
+    void shouldCreateBootstrapInitTaskWithoutCompilingContextsBeforeRequirementConfirmed() {
         PlanningCommandUseCase planning = mock(PlanningCommandUseCase.class);
-        ContextCompileUseCase context = mock(ContextCompileUseCase.class);
 
         SessionBootstrapInitProcessManager manager = new SessionBootstrapInitProcessManager(
             planning,
-            context,
             new ObjectMapper(),
             "bootstrap",
             "bootstrap module",
             "init baseline",
             "tmpl.init.v0",
-            "[\"TP-GIT-2\",\"TP-JAVA-21\"]",
-            "MANUAL_REFRESH",
-            true
+            "[\"TP-GIT-2\",\"TP-JAVA-21\"]"
         );
 
         WorkModule module = new WorkModule(
@@ -72,25 +68,20 @@ class SessionBootstrapInitProcessManagerTest {
 
         verify(planning).createModule("SES-1", "bootstrap", "bootstrap module");
         verify(planning).createTask("MOD-1", "init baseline", "tmpl.init.v0", "[\"TP-GIT-2\",\"TP-JAVA-21\"]", List.of());
-        verify(context).compileTaskContextPack("TASK-1", "IMPL", "MANUAL_REFRESH");
-        verify(context).compileTaskContextPack("TASK-1", "VERIFY", "MANUAL_REFRESH");
+        verifyNoMoreInteractions(planning);
     }
 
     @Test
     void shouldRejectNonInitTemplateConfiguration() {
         PlanningCommandUseCase planning = mock(PlanningCommandUseCase.class);
-        ContextCompileUseCase context = mock(ContextCompileUseCase.class);
         assertThrows(IllegalArgumentException.class, () -> new SessionBootstrapInitProcessManager(
             planning,
-            context,
             new ObjectMapper(),
             "bootstrap",
             "bootstrap module",
             "init baseline",
             "tmpl.impl.v0",
-            "[\"TP-GIT-2\"]",
-            "MANUAL_REFRESH",
-            false
+            "[\"TP-GIT-2\"]"
         ));
     }
 }

@@ -78,7 +78,10 @@ public interface ContextFactsQueryPort {
         String contextSnapshotId,
         String taskSkillRef,
         String baseCommit,
-        String createdAt
+        String createdAt,
+        String latestEventType,
+        String latestEventBody,
+        String latestEventDataJson
     ) {
     }
 

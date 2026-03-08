@@ -11,18 +11,27 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Stream;
 
 @Component
 public class CliGitClientAdapter implements GitClientPort {
 
     private static final Logger log = LoggerFactory.getLogger(CliGitClientAdapter.class);
+    private static final String CANDIDATE_REF_PREFIX = "refs/agentx/candidate/";
+    private static final String DELIVERY_TAG_PREFIX = "delivery/";
+    private static final DateTimeFormatter DELIVERY_TAG_TIME_FORMATTER =
+        DateTimeFormatter.ofPattern("yyyyMMdd-HHmm").withZone(ZoneOffset.UTC);
 
     private final String gitExecutable;
     private final Path repoRoot;
+    private final String sessionRepoPrefix;
     private final String mainBranch;
     private final String taskBranchPrefix;
     private final int commandTimeoutMs;
@@ -30,6 +39,7 @@ public class CliGitClientAdapter implements GitClientPort {
     public CliGitClientAdapter(
         @Value("${agentx.mergegate.git.executable:git}") String gitExecutable,
         @Value("${agentx.mergegate.git.repo-root:.}") String repoRoot,
+        @Value("${agentx.mergegate.git.session-repo-prefix:sessions}") String sessionRepoPrefix,
         @Value("${agentx.mergegate.git.main-branch:main}") String mainBranch,
         @Value("${agentx.mergegate.git.task-branch-prefix:task/}") String taskBranchPrefix,
         @Value("${agentx.mergegate.git.command-timeout-ms:120000}") int commandTimeoutMs
@@ -38,77 +48,191 @@ public class CliGitClientAdapter implements GitClientPort {
         this.repoRoot = Path.of(repoRoot == null || repoRoot.isBlank() ? "." : repoRoot.trim())
             .toAbsolutePath()
             .normalize();
+        this.sessionRepoPrefix = normalizeRelativePrefix(sessionRepoPrefix, "sessions");
         this.mainBranch = mainBranch == null || mainBranch.isBlank() ? "main" : mainBranch.trim();
-        this.taskBranchPrefix = taskBranchPrefix == null ? "task/" : taskBranchPrefix;
+        this.taskBranchPrefix = taskBranchPrefix == null ? "task/" : taskBranchPrefix.trim();
         this.commandTimeoutMs = Math.max(5_000, commandTimeoutMs);
     }
 
     @Override
-    public String readMainHead() {
-        return runGit(List.of("rev-parse", mainBranch)).trim();
+    public String readMainHead(String sessionId) {
+        Path sessionRepoRoot = resolveSessionRepoRoot(sessionId);
+        return runGit(List.of("rev-parse", mainBranch), sessionRepoRoot).trim();
     }
 
     @Override
-    public MergeCandidate rebaseTaskBranch(String taskId, String mainHeadBefore) {
+    public MergeCandidate rebaseTaskBranch(String sessionId, String taskId, String mainHeadBefore) {
         String normalizedTaskId = requireNotBlank(taskId, "taskId");
         String normalizedMainHeadBefore = requireNotBlank(mainHeadBefore, "mainHeadBefore");
+        Path sessionRepoRoot = resolveSessionRepoRoot(sessionId);
         String taskBranch = buildTaskBranch(normalizedTaskId);
 
-        runGit(List.of("show-ref", "--verify", "--quiet", "refs/heads/" + taskBranch));
-        checkoutBranchWithRecovery(taskBranch);
+        runGit(List.of("show-ref", "--verify", "--quiet", "refs/heads/" + taskBranch), sessionRepoRoot);
+        checkoutBranchWithRecovery(sessionRepoRoot, taskBranch);
         try {
-            runGit(List.of("rebase", normalizedMainHeadBefore));
+            runGit(List.of("rebase", normalizedMainHeadBefore), sessionRepoRoot);
         } catch (IllegalStateException ex) {
-            rollbackGitInProgressState();
+            rollbackGitInProgressState(sessionRepoRoot);
             throw new IllegalStateException(
-                "Git rebase failed for " + taskBranch + " onto " + normalizedMainHeadBefore
-                    + ". Repository state was rolled back for retry. Cause: " + ex.getMessage(),
+                "Git rebase failed for "
+                    + taskBranch
+                    + " onto "
+                    + normalizedMainHeadBefore
+                    + " in session "
+                    + sessionId
+                    + ". Repository state was rolled back for retry. Cause: "
+                    + ex.getMessage(),
                 ex
             );
         }
-        String mergeCandidateCommit = runGit(List.of("rev-parse", "HEAD")).trim();
+        String mergeCandidateCommit = runGit(List.of("rev-parse", "HEAD"), sessionRepoRoot).trim();
+        String evidenceRef = createCandidateEvidenceRef(sessionRepoRoot, normalizedTaskId, mergeCandidateCommit);
 
         return new MergeCandidate(
             normalizedTaskId,
             normalizedMainHeadBefore,
-            mergeCandidateCommit
+            mergeCandidateCommit,
+            evidenceRef
         );
     }
 
     @Override
-    public void fastForwardMain(String mergeCandidateCommit) {
+    public void fastForwardMain(String sessionId, String mergeCandidateCommit) {
         String normalizedMergeCandidateCommit = requireNotBlank(mergeCandidateCommit, "mergeCandidateCommit");
-        checkoutBranchWithRecovery(mainBranch);
-        runGit(List.of("merge", "--ff-only", normalizedMergeCandidateCommit));
+        Path sessionRepoRoot = resolveSessionRepoRoot(sessionId);
+        checkoutBranchWithRecovery(sessionRepoRoot, mainBranch);
+        runGit(List.of("merge", "--ff-only", normalizedMergeCandidateCommit), sessionRepoRoot);
+    }
+
+    @Override
+    public void ensureDeliveryTagOnMain(String sessionId, String mergeCandidateCommit) {
+        String normalizedMergeCandidateCommit = requireNotBlank(mergeCandidateCommit, "mergeCandidateCommit");
+        Path sessionRepoRoot = resolveSessionRepoRoot(sessionId);
+        checkoutBranchWithRecovery(sessionRepoRoot, mainBranch);
+        if (!listDeliveryTagsOnMain(sessionRepoRoot).isEmpty()) {
+            return;
+        }
+
+        String tagName = DELIVERY_TAG_PREFIX + DELIVERY_TAG_TIME_FORMATTER.format(Instant.now());
+        String message = "AgentX delivery tag on main for commit " + normalizedMergeCandidateCommit;
+        if (tagExists(sessionRepoRoot, tagName)) {
+            return;
+        }
+        runGit(
+            List.of("tag", "-a", tagName, normalizedMergeCandidateCommit, "-m", message),
+            sessionRepoRoot
+        );
     }
 
     @Override
     public boolean recoverRepositoryIfNeeded() {
-        boolean hasInProgressState = hasGitInProgressState();
-        boolean hasUnmergedIndex = hasUnmergedIndexEntries();
-        if (!hasInProgressState && !hasUnmergedIndex) {
-            return false;
-        }
+        List<Path> sessionRepos = listSessionRepoRoots();
+        boolean recoveredAny = false;
+        for (Path sessionRepo : sessionRepos) {
+            boolean hasInProgressState = hasGitInProgressState(sessionRepo);
+            boolean hasUnmergedIndex = hasUnmergedIndexEntries(sessionRepo);
+            if (!hasInProgressState && !hasUnmergedIndex) {
+                continue;
+            }
+            log.warn(
+                "Detected interrupted git state, starting repository recovery. repo={}, inProgressState={}, unmergedIndex={}",
+                sessionRepo,
+                hasInProgressState,
+                hasUnmergedIndex
+            );
+            rollbackGitInProgressState(sessionRepo);
+            checkoutBranchWithRecovery(sessionRepo, mainBranch);
 
-        log.warn(
-            "Detected interrupted git state, starting repository recovery. inProgressState={}, unmergedIndex={}",
-            hasInProgressState,
-            hasUnmergedIndex
-        );
-        rollbackGitInProgressState();
-        checkoutBranchWithRecovery(mainBranch);
-
-        if (hasGitInProgressState() || hasUnmergedIndexEntries()) {
-            throw new IllegalStateException("Repository recovery did not clear interrupted git state.");
+            if (hasGitInProgressState(sessionRepo) || hasUnmergedIndexEntries(sessionRepo)) {
+                throw new IllegalStateException("Repository recovery did not clear interrupted git state: " + sessionRepo);
+            }
+            recoveredAny = true;
         }
-        return true;
+        return recoveredAny;
     }
 
-    private boolean hasGitInProgressState() {
-        String gitDirOutput = runGit(List.of("rev-parse", "--git-dir")).trim();
+    private List<Path> listSessionRepoRoots() {
+        Path sessionRoot = repoRoot.resolve(sessionRepoPrefix);
+        if (!Files.exists(sessionRoot)) {
+            return List.of();
+        }
+        try (Stream<Path> stream = Files.list(sessionRoot)) {
+            return stream
+                .map(path -> path.resolve("repo"))
+                .filter(path -> Files.exists(path.resolve(".git")))
+                .toList();
+        } catch (IOException ex) {
+            throw new IllegalStateException("Failed to list session repositories under: " + sessionRoot, ex);
+        }
+    }
+
+    private String createCandidateEvidenceRef(Path sessionRepoRoot, String taskId, String mergeCandidateCommit) {
+        String safeTaskId = taskId
+            .toLowerCase(Locale.ROOT)
+            .replaceAll("[^a-z0-9._\\-]+", "-")
+            .replaceAll("^-+|-+$", "");
+        if (safeTaskId.isBlank()) {
+            safeTaskId = "task";
+        }
+        String attemptRef = CANDIDATE_REF_PREFIX + safeTaskId + "/" + Instant.now().toEpochMilli() + "-" + System.nanoTime();
+        String latestRef = CANDIDATE_REF_PREFIX + safeTaskId + "/latest";
+        runGit(List.of("update-ref", attemptRef, mergeCandidateCommit), sessionRepoRoot);
+        runGit(List.of("update-ref", latestRef, mergeCandidateCommit), sessionRepoRoot);
+        return attemptRef;
+    }
+
+    private List<String> listDeliveryTagsOnMain(Path sessionRepoRoot) {
+        String output = runGit(
+            List.of("tag", "--list", DELIVERY_TAG_PREFIX + "*", "--merged", mainBranch),
+            sessionRepoRoot
+        );
+        if (output == null || output.isBlank()) {
+            return List.of();
+        }
+        return output.lines()
+            .map(String::trim)
+            .filter(line -> !line.isBlank())
+            .toList();
+    }
+
+    private boolean tagExists(Path sessionRepoRoot, String tagName) {
+        try {
+            runGit(List.of("rev-parse", "--verify", "refs/tags/" + tagName), sessionRepoRoot);
+            return true;
+        } catch (IllegalStateException ex) {
+            return false;
+        }
+    }
+
+    private Path resolveSessionRepoRoot(String sessionId) {
+        String normalizedSessionId = requireNotBlank(sessionId, "sessionId");
+        String safeSessionId = normalizedSessionId
+            .toLowerCase(Locale.ROOT)
+            .replaceAll("[^a-z0-9._\\-]+", "-")
+            .replaceAll("^-+|-+$", "");
+        if (safeSessionId.isBlank()) {
+            throw new IllegalArgumentException("sessionId has no safe characters: " + sessionId);
+        }
+        Path sessionRepoRoot = repoRoot
+            .resolve(sessionRepoPrefix)
+            .resolve(safeSessionId)
+            .resolve("repo")
+            .toAbsolutePath()
+            .normalize();
+        if (!sessionRepoRoot.startsWith(repoRoot)) {
+            throw new IllegalArgumentException("session repo path escapes repo root: " + sessionId);
+        }
+        if (!Files.exists(sessionRepoRoot.resolve(".git"))) {
+            throw new IllegalStateException("Session repo is not initialized: " + sessionRepoRoot);
+        }
+        return sessionRepoRoot;
+    }
+
+    private boolean hasGitInProgressState(Path sessionRepoRoot) {
+        String gitDirOutput = runGit(List.of("rev-parse", "--git-dir"), sessionRepoRoot).trim();
         Path gitDir = Path.of(gitDirOutput);
         if (!gitDir.isAbsolute()) {
-            gitDir = repoRoot.resolve(gitDir).normalize();
+            gitDir = sessionRepoRoot.resolve(gitDir).normalize();
         }
         return Files.exists(gitDir.resolve("MERGE_HEAD"))
             || Files.exists(gitDir.resolve("CHERRY_PICK_HEAD"))
@@ -118,21 +242,25 @@ public class CliGitClientAdapter implements GitClientPort {
             || Files.exists(gitDir.resolve("rebase-merge"));
     }
 
-    private boolean hasUnmergedIndexEntries() {
-        String output = runGit(List.of("ls-files", "-u"));
+    private boolean hasUnmergedIndexEntries(Path sessionRepoRoot) {
+        String output = runGit(List.of("ls-files", "-u"), sessionRepoRoot);
         return output != null && !output.trim().isEmpty();
     }
 
-    private void checkoutBranchWithRecovery(String branchName) {
+    private void checkoutBranchWithRecovery(Path sessionRepoRoot, String branchName) {
         try {
-            runGit(List.of("checkout", branchName));
+            runGit(List.of("checkout", branchName), sessionRepoRoot);
         } catch (IllegalStateException ex) {
             if (!isRecoverableCheckoutFailure(ex)) {
                 throw ex;
             }
-            log.warn("Git checkout failed due to interrupted index state, trying recovery. branch={}", branchName);
-            rollbackGitInProgressState();
-            runGit(List.of("checkout", branchName));
+            log.warn(
+                "Git checkout failed due to interrupted index state, trying recovery. repo={}, branch={}",
+                sessionRepoRoot,
+                branchName
+            );
+            rollbackGitInProgressState(sessionRepoRoot);
+            runGit(List.of("checkout", branchName), sessionRepoRoot);
         }
     }
 
@@ -147,18 +275,18 @@ public class CliGitClientAdapter implements GitClientPort {
             || lower.contains("unmerged files");
     }
 
-    private void rollbackGitInProgressState() {
-        runGitBestEffort(List.of("rebase", "--abort"));
-        runGitBestEffort(List.of("merge", "--abort"));
-        runGitBestEffort(List.of("cherry-pick", "--abort"));
-        runGitBestEffort(List.of("am", "--abort"));
-        runGitBestEffort(List.of("reset", "--merge"));
+    private void rollbackGitInProgressState(Path sessionRepoRoot) {
+        runGitBestEffort(List.of("rebase", "--abort"), sessionRepoRoot);
+        runGitBestEffort(List.of("merge", "--abort"), sessionRepoRoot);
+        runGitBestEffort(List.of("cherry-pick", "--abort"), sessionRepoRoot);
+        runGitBestEffort(List.of("am", "--abort"), sessionRepoRoot);
+        runGitBestEffort(List.of("reset", "--merge"), sessionRepoRoot);
     }
 
-    private void runGitBestEffort(List<String> args) {
+    private void runGitBestEffort(List<String> args, Path sessionRepoRoot) {
         List<String> command = buildCommand(args);
         ProcessBuilder processBuilder = new ProcessBuilder(command);
-        processBuilder.directory(repoRoot.toFile());
+        processBuilder.directory(sessionRepoRoot.toFile());
         processBuilder.redirectErrorStream(true);
         try {
             Process process = processBuilder.start();
@@ -193,10 +321,10 @@ public class CliGitClientAdapter implements GitClientPort {
         return command;
     }
 
-    private String runGit(List<String> args) {
+    private String runGit(List<String> args, Path commandDir) {
         List<String> command = buildCommand(args);
         ProcessBuilder processBuilder = new ProcessBuilder(command);
-        processBuilder.directory(repoRoot.toFile());
+        processBuilder.directory(commandDir.toFile());
         processBuilder.redirectErrorStream(true);
         try {
             Process process = processBuilder.start();
@@ -231,5 +359,23 @@ public class CliGitClientAdapter implements GitClientPort {
             throw new IllegalArgumentException(fieldName + " must not be blank");
         }
         return value.trim();
+    }
+
+    private static String normalizeRelativePrefix(String value, String defaultValue) {
+        String normalized = value == null || value.isBlank() ? defaultValue : value.trim();
+        normalized = normalized.replace('\\', '/');
+        while (normalized.startsWith("/")) {
+            normalized = normalized.substring(1);
+        }
+        while (normalized.endsWith("/")) {
+            normalized = normalized.substring(0, normalized.length() - 1);
+        }
+        if (normalized.isBlank()) {
+            return defaultValue;
+        }
+        if (normalized.contains("..")) {
+            throw new IllegalArgumentException("Relative prefix must not contain '..': " + value);
+        }
+        return normalized;
     }
 }

@@ -12,6 +12,16 @@ final class TaskSkillTemplateSupport {
 
     static List<String> buildConventions(String taskTemplateId) {
         String normalized = taskTemplateId == null ? "" : taskTemplateId.trim().toLowerCase(Locale.ROOT);
+        if ("tmpl.init.v0".equals(normalized)) {
+            return List.of(
+                "Bootstrap only the repository baseline needed for downstream tasks to start safely.",
+                "If the confirmed requirement already specifies a framework, runtime, or build stack, the scaffold must use that exact stack instead of a generic language-only skeleton.",
+                "Treat framework alignment as part of init scope: update build config, app entrypoint, and minimal runtime config as needed to match the confirmed requirement.",
+                "Do not ask for permission to adopt Spring Boot or another explicitly required framework during init unless the requirement is silent or conflicting.",
+                "Limit changes to scaffold files such as build config, app entrypoint, minimal runtime config, and top-level docs.",
+                "Do not implement business endpoints, controllers, feature services, or feature tests during init."
+            );
+        }
         if ("tmpl.verify.v0".equals(normalized)) {
             return List.of(
                 "Do not widen verification scope without explicit evidence requirements.",
@@ -21,7 +31,12 @@ final class TaskSkillTemplateSupport {
         return List.of(
             "Respect module boundaries and dependency direction (api -> application -> domain <- infrastructure).",
             "Keep edits minimal and directly tied to acceptance criteria.",
-            "Update tests for changed transitions/invariants before marking delivery."
+            "Update tests for changed transitions/invariants before marking delivery.",
+            "Preserve exact endpoint paths, parameter names, and response formats when the requirement gives hard literals.",
+            "Preserve user-provided sample values in tests and acceptance examples when they are part of the requirement, instead of silently substituting new names or payloads.",
+            "When the requirement explicitly defines a Spring query parameter and default value, keep the literal annotation form such as @RequestParam(\"name\") with defaultValue instead of looser equivalent patterns.",
+            "For Spring Boot plain-text endpoints, keep plain-text body semantics without over-constraining framework-added charset suffixes unless the requirement explicitly pins the exact raw Content-Type header.",
+            "If a test autowires framework-provided helpers, use only supported test annotations/configuration that actually register those beans."
         );
     }
 
@@ -44,12 +59,21 @@ final class TaskSkillTemplateSupport {
                 return List.of("Run compile-only verification for baseline initialization.");
             }
             if (hasMaven) {
-                return List.of("mvn -q test", "mvn -q -Dtest=* verify");
+                return List.of("mvn -q test");
             }
             if (hasPython) {
                 return List.of("python -m pytest -q");
             }
             return List.of("Run the project-defined verification command set.");
+        }
+        if ("tmpl.init.v0".equals(normalizedTemplate)) {
+            if (hasMaven) {
+                return List.of("mvn -q -DskipTests compile");
+            }
+            if (hasPython) {
+                return List.of("python -m compileall src");
+            }
+            return List.of("Create only the minimal bootstrap scaffold required for later implementation tasks.");
         }
         List<String> commands = new java.util.ArrayList<>();
         if (hasMaven) {
@@ -66,6 +90,20 @@ final class TaskSkillTemplateSupport {
     }
 
     static List<String> buildPitfalls(String runKind) {
+        return buildPitfalls(runKind, null);
+    }
+
+    static List<String> buildPitfalls(String runKind, String taskTemplateId) {
+        String normalizedTemplate = taskTemplateId == null ? "" : taskTemplateId.trim().toLowerCase(Locale.ROOT);
+        if ("tmpl.init.v0".equals(normalizedTemplate)) {
+            return List.of(
+                "Do not implement feature-specific REST endpoints during init.",
+                "Do not create feature tests that belong to downstream implementation/test tasks.",
+                "Do not widen bootstrap scope just because the confirmed requirement contains later-phase acceptance criteria.",
+                "Do not downgrade an explicitly required framework into a plain language skeleton.",
+                "Do not raise clarification about adopting a framework that is already mandated by the confirmed requirement."
+            );
+        }
         if ("VERIFY".equalsIgnoreCase(runKind)) {
             return List.of(
                 "Do not auto-fix code during verify-only tasks.",
@@ -75,11 +113,27 @@ final class TaskSkillTemplateSupport {
         return List.of(
             "Do not modify out-of-scope modules/files without explicit dependency justification.",
             "Do not bypass failing tests by weakening assertions.",
-            "Do not emit placeholder implementations that cannot run."
+            "Do not emit placeholder implementations that cannot run.",
+            "For Spring Boot MockMvc tests of plain-text String responses, exact contentType(MediaType.TEXT_PLAIN_VALUE) assertions can fail because Spring often appends charset; use content().contentTypeCompatibleWith(MediaType.TEXT_PLAIN) unless exact raw headers are explicitly required.",
+            "Do not use a standalone contentType() matcher import from MockMvcResultMatchers for that assertion; the compatible matcher belongs on content().",
+            "For Spring Boot tests, MockMvc requires @AutoConfigureMockMvc or an equivalent test slice; do not use @AutoConfigureWebMvc as a substitute."
         );
     }
 
     static List<String> buildExpectedOutputs(String runKind) {
+        return buildExpectedOutputs(runKind, null);
+    }
+
+    static List<String> buildExpectedOutputs(String runKind, String taskTemplateId) {
+        String normalizedTemplate = taskTemplateId == null ? "" : taskTemplateId.trim().toLowerCase(Locale.ROOT);
+        if ("tmpl.init.v0".equals(normalizedTemplate)) {
+            return List.of(
+                "Bootstrap scaffold only, ready for downstream implementation tasks.",
+                "Scaffold matches the confirmed framework/runtime/build stack declared in the requirement.",
+                "Compile-ready project baseline or equivalent minimal runtime skeleton.",
+                "No feature-specific business endpoints or acceptance tests added during init."
+            );
+        }
         if ("VERIFY".equalsIgnoreCase(runKind)) {
             return List.of("Verification summary with pass/fail evidence and linked commands.");
         }

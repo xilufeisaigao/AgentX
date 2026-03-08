@@ -10,5 +10,11 @@ public interface TaskQueryUseCase {
 
     Optional<WorkTask> findTaskById(String taskId);
 
+    Optional<String> findSessionIdByTaskId(String taskId);
+
     List<WorkTask> listTasksByStatus(TaskStatus status, int limit);
+
+    boolean hasNonDoneTasksBySession(String sessionId);
+
+    boolean hasNonDoneDependentTaskByTemplate(String taskId, String taskTemplateId);
 }

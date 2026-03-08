@@ -24,8 +24,15 @@ public class WorkspaceService implements WorkspaceUseCase {
 
     @Override
     @Transactional
-    public GitWorkspace allocate(String runId, String baseCommit, String branchName, String worktreePath) {
+    public GitWorkspace allocate(
+        String runId,
+        String sessionId,
+        String baseCommit,
+        String branchName,
+        String worktreePath
+    ) {
         String normalizedRunId = requireNotBlank(runId, "runId");
+        String normalizedSessionId = requireNotBlank(sessionId, "sessionId");
         String normalizedBaseCommit = requireNotBlank(baseCommit, "baseCommit");
         String normalizedBranchName = requireNotBlank(branchName, "branchName");
         String normalizedWorktreePath = requireNotBlank(worktreePath, "worktreePath");
@@ -36,6 +43,7 @@ public class WorkspaceService implements WorkspaceUseCase {
 
         gitClientPort.createRunBranchAndWorktree(
             normalizedRunId,
+            normalizedSessionId,
             normalizedBaseCommit,
             normalizedBranchName,
             normalizedWorktreePath
@@ -111,10 +119,11 @@ public class WorkspaceService implements WorkspaceUseCase {
 
     @Override
     @Transactional
-    public void updateTaskBranch(String taskId, String deliveryCommit) {
+    public void updateTaskBranch(String sessionId, String taskId, String deliveryCommit) {
+        String normalizedSessionId = requireNotBlank(sessionId, "sessionId");
         String normalizedTaskId = requireNotBlank(taskId, "taskId");
         String normalizedDeliveryCommit = requireNotBlank(deliveryCommit, "deliveryCommit");
-        gitClientPort.updateTaskBranch(normalizedTaskId, normalizedDeliveryCommit);
+        gitClientPort.updateTaskBranch(normalizedSessionId, normalizedTaskId, normalizedDeliveryCommit);
     }
 
     private static String requireNotBlank(String value, String field) {

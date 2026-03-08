@@ -78,6 +78,25 @@ public class MybatisWorkTaskRepository implements WorkTaskRepository {
         return mapper.countNonDoneByTemplateId(taskTemplateId.trim());
     }
 
+    @Override
+    public int countNonDoneBySessionIdAndTemplateId(String sessionId, String taskTemplateId) {
+        if (sessionId == null || sessionId.isBlank()) {
+            throw new IllegalArgumentException("sessionId must not be blank");
+        }
+        if (taskTemplateId == null || taskTemplateId.isBlank()) {
+            throw new IllegalArgumentException("taskTemplateId must not be blank");
+        }
+        return mapper.countNonDoneBySessionIdAndTemplateId(sessionId.trim(), taskTemplateId.trim());
+    }
+
+    @Override
+    public int countNonDoneBySessionId(String sessionId) {
+        if (sessionId == null || sessionId.isBlank()) {
+            throw new IllegalArgumentException("sessionId must not be blank");
+        }
+        return mapper.countNonDoneBySessionId(sessionId.trim());
+    }
+
     private WorkTaskRow toRow(WorkTask task) {
         WorkTaskRow row = new WorkTaskRow();
         row.setTaskId(task.taskId());

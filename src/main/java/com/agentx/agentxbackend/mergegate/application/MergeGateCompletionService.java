@@ -35,7 +35,9 @@ public class MergeGateCompletionService implements MergeGateCompletionUseCase {
             throw new IllegalStateException("Integration lane is busy while completing verify run: " + verifyRunId);
         }
         try {
-            gitClientPort.fastForwardMain(normalizedMergeCandidateCommit);
+            String sessionId = taskStateMutationPort.resolveSessionIdByTaskId(normalizedTaskId);
+            gitClientPort.fastForwardMain(sessionId, normalizedMergeCandidateCommit);
+            gitClientPort.ensureDeliveryTagOnMain(sessionId, normalizedMergeCandidateCommit);
             taskStateMutationPort.markDone(normalizedTaskId);
         } finally {
             integrationLaneLockPort.release(INTEGRATION_LANE_LOCK_KEY);

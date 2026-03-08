@@ -4,11 +4,13 @@ import com.agentx.agentxbackend.mergegate.domain.model.MergeCandidate;
 
 public interface GitClientPort {
 
-    String readMainHead();
+    String readMainHead(String sessionId);
 
-    MergeCandidate rebaseTaskBranch(String taskId, String mainHeadBefore);
+    MergeCandidate rebaseTaskBranch(String sessionId, String taskId, String mainHeadBefore);
 
-    void fastForwardMain(String mergeCandidateCommit);
+    void fastForwardMain(String sessionId, String mergeCandidateCommit);
+
+    void ensureDeliveryTagOnMain(String sessionId, String mergeCandidateCommit);
 
     boolean recoverRepositoryIfNeeded();
 }

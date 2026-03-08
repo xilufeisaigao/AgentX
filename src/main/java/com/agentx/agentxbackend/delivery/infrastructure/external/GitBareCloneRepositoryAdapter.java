@@ -34,7 +34,8 @@ public class GitBareCloneRepositoryAdapter implements DeliveryCloneRepositoryPor
     private static final String METADATA_EXPIRES_AT_EPOCH_MS = "expires_at_epoch_ms";
 
     private final String gitExecutable;
-    private final Path sourceRepoRoot;
+    private final Path workspaceRepoRoot;
+    private final String sessionRepoPrefix;
     private final Path cloneRepoRoot;
     private final Path metadataRoot;
     private final String publicBase;
@@ -46,6 +47,8 @@ public class GitBareCloneRepositoryAdapter implements DeliveryCloneRepositoryPor
     public GitBareCloneRepositoryAdapter(
         @Value("${agentx.delivery.clone-publish.git-executable:git}") String gitExecutable,
         @Value("${agentx.delivery.clone-publish.repo-root:${agentx.workspace.git.repo-root:.}}") String sourceRepoRoot,
+        @Value("${agentx.delivery.clone-publish.session-repo-prefix:${agentx.workspace.git.session-repo-prefix:sessions}}")
+        String sessionRepoPrefix,
         @Value("${agentx.delivery.clone-publish.remote-root:}") String cloneRepoRoot,
         @Value("${agentx.delivery.clone-publish.public-base:}") String publicBase,
         @Value("${agentx.delivery.clone-publish.repo-prefix:agentx-session-}") String repoPrefix,
@@ -54,10 +57,11 @@ public class GitBareCloneRepositoryAdapter implements DeliveryCloneRepositoryPor
         @Value("${agentx.delivery.clone-publish.retention-hours:72}") long retentionHours
     ) {
         this.gitExecutable = gitExecutable == null || gitExecutable.isBlank() ? "git" : gitExecutable.trim();
-        this.sourceRepoRoot = Path.of(sourceRepoRoot == null || sourceRepoRoot.isBlank() ? "." : sourceRepoRoot.trim())
+        this.workspaceRepoRoot = Path.of(sourceRepoRoot == null || sourceRepoRoot.isBlank() ? "." : sourceRepoRoot.trim())
             .toAbsolutePath()
             .normalize();
-        Path defaultCloneRoot = this.sourceRepoRoot.resolve("remotes");
+        this.sessionRepoPrefix = normalizeRelativePrefix(sessionRepoPrefix, "sessions");
+        Path defaultCloneRoot = this.workspaceRepoRoot.resolve("remotes");
         this.cloneRepoRoot = Path.of(cloneRepoRoot == null || cloneRepoRoot.isBlank()
                 ? defaultCloneRoot.toString()
                 : cloneRepoRoot.trim())
@@ -74,7 +78,8 @@ public class GitBareCloneRepositoryAdapter implements DeliveryCloneRepositoryPor
     @Override
     public DeliveryClonePublication publish(String sessionId) {
         String normalizedSessionId = normalizeSessionId(sessionId);
-        ensureSourceRepoReady();
+        Path sourceRepoRoot = resolveSessionRepoPath(normalizedSessionId);
+        ensureSourceRepoReady(sourceRepoRoot);
         try {
             Files.createDirectories(cloneRepoRoot);
             Files.createDirectories(metadataRoot);
@@ -86,9 +91,9 @@ public class GitBareCloneRepositoryAdapter implements DeliveryCloneRepositoryPor
         Path targetRepoPath = cloneRepoRoot.resolve(repoName);
 
         if (Files.exists(targetRepoPath)) {
-            mirrorFetch(targetRepoPath);
+            mirrorFetch(targetRepoPath, sourceRepoRoot);
         } else {
-            cloneBare(targetRepoPath);
+            cloneBare(targetRepoPath, sourceRepoRoot);
         }
         pinHeadToMainIfPresent(targetRepoPath);
 
@@ -199,7 +204,7 @@ public class GitBareCloneRepositoryAdapter implements DeliveryCloneRepositoryPor
         );
     }
 
-    private void ensureSourceRepoReady() {
+    private void ensureSourceRepoReady(Path sourceRepoRoot) {
         Path gitDir = sourceRepoRoot.resolve(".git");
         if (!Files.exists(gitDir)) {
             throw new IllegalStateException("Source repository is not initialized: " + sourceRepoRoot);
@@ -207,7 +212,7 @@ public class GitBareCloneRepositoryAdapter implements DeliveryCloneRepositoryPor
         runGit(List.of("-C", sourceRepoRoot.toString(), "rev-parse", "--verify", "HEAD"), sourceRepoRoot, Set.of(0));
     }
 
-    private void cloneBare(Path targetRepoPath) {
+    private void cloneBare(Path targetRepoPath, Path sourceRepoRoot) {
         runGit(
             List.of("clone", "--bare", sourceRepoRoot.toString(), targetRepoPath.toString()),
             cloneRepoRoot,
@@ -215,7 +220,7 @@ public class GitBareCloneRepositoryAdapter implements DeliveryCloneRepositoryPor
         );
     }
 
-    private void mirrorFetch(Path targetRepoPath) {
+    private void mirrorFetch(Path targetRepoPath, Path sourceRepoRoot) {
         runGit(
             List.of(
                 "--git-dir",
@@ -230,6 +235,24 @@ public class GitBareCloneRepositoryAdapter implements DeliveryCloneRepositoryPor
             cloneRepoRoot,
             Set.of(0)
         );
+    }
+
+    private Path resolveSessionRepoPath(String sessionId) {
+        String normalizedSessionId = normalizeSessionId(sessionId);
+        String safeSessionId = UNSAFE_REPO_NAME_CHARS.matcher(normalizedSessionId.toLowerCase()).replaceAll("-");
+        if (safeSessionId.isBlank()) {
+            throw new IllegalArgumentException("sessionId is not valid for source repository resolution");
+        }
+        Path sessionRepoPath = workspaceRepoRoot
+            .resolve(sessionRepoPrefix)
+            .resolve(safeSessionId)
+            .resolve("repo")
+            .toAbsolutePath()
+            .normalize();
+        if (!sessionRepoPath.startsWith(workspaceRepoRoot)) {
+            throw new IllegalArgumentException("Resolved source repository escapes workspace root: " + sessionId);
+        }
+        return sessionRepoPath;
     }
 
     private void pinHeadToMainIfPresent(Path targetRepoPath) {
@@ -353,6 +376,24 @@ public class GitBareCloneRepositoryAdapter implements DeliveryCloneRepositoryPor
             throw new IllegalArgumentException("sessionId must not be blank");
         }
         return sessionId.trim();
+    }
+
+    private static String normalizeRelativePrefix(String value, String defaultValue) {
+        String normalized = value == null || value.isBlank() ? defaultValue : value.trim();
+        normalized = normalized.replace('\\', '/');
+        while (normalized.startsWith("/")) {
+            normalized = normalized.substring(1);
+        }
+        while (normalized.endsWith("/")) {
+            normalized = normalized.substring(0, normalized.length() - 1);
+        }
+        if (normalized.isBlank()) {
+            return defaultValue;
+        }
+        if (normalized.contains("..")) {
+            throw new IllegalArgumentException("relative prefix must not contain '..': " + value);
+        }
+        return normalized;
     }
 
     private static Instant parseEpochInstant(String rawEpochMillis) {

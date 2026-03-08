@@ -1,7 +1,8 @@
 package com.agentx.agentxbackend.session.application;
 
 import com.agentx.agentxbackend.session.application.port.in.SessionCommandUseCase;
-import com.agentx.agentxbackend.session.application.port.out.DeliveryProofPort;
+import com.agentx.agentxbackend.session.application.port.in.SessionCompletionReadinessUseCase;
+import com.agentx.agentxbackend.session.application.query.SessionCompletionReadiness;
 import com.agentx.agentxbackend.session.application.port.out.DomainEventPublisher;
 import com.agentx.agentxbackend.session.application.port.out.SessionRepository;
 import com.agentx.agentxbackend.session.domain.event.SessionCreatedEvent;
@@ -18,17 +19,17 @@ import java.util.UUID;
 public class SessionCommandService implements SessionCommandUseCase {
 
     private final SessionRepository sessionRepository;
-    private final DeliveryProofPort deliveryProofPort;
     private final DomainEventPublisher domainEventPublisher;
+    private final SessionCompletionReadinessUseCase sessionCompletionReadinessUseCase;
 
     public SessionCommandService(
         SessionRepository sessionRepository,
-        DeliveryProofPort deliveryProofPort,
-        DomainEventPublisher domainEventPublisher
+        DomainEventPublisher domainEventPublisher,
+        SessionCompletionReadinessUseCase sessionCompletionReadinessUseCase
     ) {
         this.sessionRepository = sessionRepository;
-        this.deliveryProofPort = deliveryProofPort;
         this.domainEventPublisher = domainEventPublisher;
+        this.sessionCompletionReadinessUseCase = sessionCompletionReadinessUseCase;
     }
 
     @Override
@@ -78,25 +79,27 @@ public class SessionCommandService implements SessionCommandUseCase {
 
     @Override
     public Session completeSession(String sessionId) {
-        requireNotBlank(sessionId, "sessionId");
-        Session current = sessionRepository.findById(sessionId)
-            .orElseThrow(() -> new NoSuchElementException("Session not found: " + sessionId));
+        String normalizedSessionId = requireNotBlank(sessionId, "sessionId");
+        Session current = sessionRepository.findById(normalizedSessionId)
+            .orElseThrow(() -> new NoSuchElementException("Session not found: " + normalizedSessionId));
         if (current.status() == SessionStatus.COMPLETED) {
             return current;
         }
-        if (current.status() != SessionStatus.ACTIVE) {
-            throw new IllegalStateException("Only ACTIVE session can be completed: " + sessionId);
+        SessionCompletionReadiness readiness = sessionCompletionReadinessUseCase.getCompletionReadiness(normalizedSessionId);
+        if (!readiness.canComplete()) {
+            String message = readiness.blockers().isEmpty()
+                ? "Session cannot be completed: " + normalizedSessionId
+                : readiness.blockers().get(0).replace(".", "") + ": " + normalizedSessionId;
+            throw new IllegalStateException(message);
         }
-        if (!deliveryProofPort.hasAtLeastOneDeliveryTagOnMain(sessionId)) {
-            throw new IllegalStateException("No delivery tag on main for session");
-        }
-        return sessionRepository.updateStatus(sessionId, SessionStatus.COMPLETED);
+        return sessionRepository.updateStatus(normalizedSessionId, SessionStatus.COMPLETED);
     }
 
-    private static void requireNotBlank(String value, String field) {
+    private static String requireNotBlank(String value, String field) {
         if (value == null || value.isBlank()) {
             throw new IllegalArgumentException(field + " must not be blank");
         }
+        return value.trim();
     }
 
     private static String generateSessionId() {

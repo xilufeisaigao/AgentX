@@ -4,9 +4,15 @@ import com.agentx.agentxbackend.workspace.domain.model.GitWorkspace;
 
 public interface WorkspaceUseCase {
 
-    GitWorkspace allocate(String runId, String baseCommit, String branchName, String worktreePath);
+    GitWorkspace allocate(
+        String runId,
+        String sessionId,
+        String baseCommit,
+        String branchName,
+        String worktreePath
+    );
 
-    void updateTaskBranch(String taskId, String deliveryCommit);
+    void updateTaskBranch(String sessionId, String taskId, String deliveryCommit);
 
     GitWorkspace release(String runId, String worktreePath);
 

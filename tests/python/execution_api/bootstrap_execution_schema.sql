@@ -68,6 +68,35 @@ create table if not exists work_task_dependencies (
   foreign key (depends_on_task_id) references work_tasks(task_id)
 );
 
+create table if not exists tickets (
+  ticket_id           varchar(64) primary key,
+  session_id          varchar(64) not null,
+  type                varchar(32) not null,
+  status              varchar(32) not null,
+  title               varchar(256) not null,
+  created_by_role     varchar(32) not null,
+  assignee_role       varchar(32) not null,
+  requirement_doc_id  varchar(64) null,
+  requirement_doc_ver int null,
+  payload_json        text not null,
+  claimed_by          varchar(128) null,
+  lease_until         timestamp null,
+  created_at          timestamp not null,
+  updated_at          timestamp not null,
+  foreign key (session_id) references sessions(session_id)
+);
+
+create table if not exists ticket_events (
+  event_id    varchar(64) primary key,
+  ticket_id   varchar(64) not null,
+  event_type  varchar(64) not null,
+  actor_role  varchar(32) not null,
+  body        text not null,
+  data_json   text null,
+  created_at  timestamp not null,
+  foreign key (ticket_id) references tickets(ticket_id)
+);
+
 create table if not exists task_context_snapshots (
   snapshot_id         varchar(64) primary key,
   task_id             varchar(64) not null,

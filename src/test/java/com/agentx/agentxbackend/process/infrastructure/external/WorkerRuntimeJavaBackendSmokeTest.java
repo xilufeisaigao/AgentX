@@ -49,6 +49,7 @@ class WorkerRuntimeJavaBackendSmokeTest {
             new ObjectMapper(),
             gitExecutable,
             repo.toString(),
+            "sessions",
             300_000,
             30,
             "mvn,./mvnw,gradle,./gradlew,python,pytest,git",

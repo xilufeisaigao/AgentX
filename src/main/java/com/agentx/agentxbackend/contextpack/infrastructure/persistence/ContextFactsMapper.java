@@ -116,16 +116,27 @@ public interface ContextFactsMapper {
 
     @Select("""
         select
-            run_id,
-            status,
-            run_kind,
-            context_snapshot_id,
-            task_skill_ref,
-            base_commit,
-            created_at
-        from task_runs
-        where task_id = #{taskId}
-        order by created_at desc
+            tr.run_id,
+            tr.status,
+            tr.run_kind,
+            tr.context_snapshot_id,
+            tr.task_skill_ref,
+            tr.base_commit,
+            tr.created_at,
+            latest_event.event_type as latest_event_type,
+            latest_event.body as latest_event_body,
+            latest_event.data_json as latest_event_data_json
+        from task_runs tr
+        left join task_run_events latest_event
+          on latest_event.event_id = (
+              select tre.event_id
+              from task_run_events tre
+              where tre.run_id = tr.run_id
+              order by tre.created_at desc, tre.event_id desc
+              limit 1
+          )
+        where tr.task_id = #{taskId}
+        order by tr.created_at desc
         limit #{limit}
         """)
     List<ContextRunRow> listRecentTaskRuns(

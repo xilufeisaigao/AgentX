@@ -14,15 +14,21 @@ public class WorkspacePortAdapter implements WorkspacePort {
     }
 
     @Override
-    public String allocateWorkspace(String runId, String taskId, String baseCommit, String branchName) {
-        String worktreePath = "worktrees/" + taskId + "/" + runId;
-        workspaceUseCase.allocate(runId, baseCommit, branchName, worktreePath);
+    public String allocateWorkspace(
+        String runId,
+        String sessionId,
+        String taskId,
+        String baseCommit,
+        String branchName
+    ) {
+        String worktreePath = "worktrees/" + sessionId + "/" + runId;
+        workspaceUseCase.allocate(runId, sessionId, baseCommit, branchName, worktreePath);
         return worktreePath;
     }
 
     @Override
-    public void updateTaskBranch(String taskId, String deliveryCommit) {
-        workspaceUseCase.updateTaskBranch(taskId, deliveryCommit);
+    public void updateTaskBranch(String sessionId, String taskId, String deliveryCommit) {
+        workspaceUseCase.updateTaskBranch(sessionId, taskId, deliveryCommit);
     }
 
     @Override

@@ -139,4 +139,27 @@ public interface WorkTaskMapper {
           and status <> 'DONE'
         """)
     int countNonDoneByTemplateId(@Param("taskTemplateId") String taskTemplateId);
+
+    @Select("""
+        select count(1)
+        from work_tasks t
+        join work_modules m on m.module_id = t.module_id
+        where m.session_id = #{sessionId}
+          and t.task_template_id = #{taskTemplateId}
+          and t.status <> 'DONE'
+        """)
+    int countNonDoneBySessionIdAndTemplateId(
+        @Param("sessionId") String sessionId,
+        @Param("taskTemplateId") String taskTemplateId
+    );
+
+
+    @Select("""
+        select count(1)
+        from work_tasks t
+        join work_modules m on m.module_id = t.module_id
+        where m.session_id = #{sessionId}
+          and t.status <> 'DONE'
+        """)
+    int countNonDoneBySessionId(@Param("sessionId") String sessionId);
 }

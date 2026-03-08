@@ -10,6 +10,7 @@ import com.agentx.agentxbackend.mergegate.domain.model.MergeGateResult;
 import com.agentx.agentxbackend.planning.application.port.in.TaskQueryUseCase;
 import com.agentx.agentxbackend.planning.application.port.in.TaskStateMutationUseCase;
 import com.agentx.agentxbackend.planning.domain.model.TaskStatus;
+import com.agentx.agentxbackend.planning.domain.model.TaskTemplateId;
 import com.agentx.agentxbackend.planning.domain.model.WorkTask;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -30,6 +31,7 @@ public class RuntimeGarbageCollectionService {
     private final RunQueryUseCase runQueryUseCase;
     private final MergeGateUseCase mergeGateUseCase;
     private final MergeGateMaintenanceUseCase mergeGateMaintenanceUseCase;
+    private final DeliveredTaskMergeGateProcessManager deliveredTaskMergeGateProcessManager;
     private final int assignedScanLimit;
     private final int deliveredScanLimit;
     private final long deliveredStaleSeconds;
@@ -41,6 +43,7 @@ public class RuntimeGarbageCollectionService {
         RunQueryUseCase runQueryUseCase,
         MergeGateUseCase mergeGateUseCase,
         MergeGateMaintenanceUseCase mergeGateMaintenanceUseCase,
+        DeliveredTaskMergeGateProcessManager deliveredTaskMergeGateProcessManager,
         @Value("${agentx.process.runtime-garbage-collector.assigned-scan-limit:128}") int assignedScanLimit,
         @Value("${agentx.process.runtime-garbage-collector.delivered-scan-limit:128}") int deliveredScanLimit,
         @Value("${agentx.process.runtime-garbage-collector.delivered-stale-seconds:120}") long deliveredStaleSeconds,
@@ -51,6 +54,7 @@ public class RuntimeGarbageCollectionService {
         this.runQueryUseCase = runQueryUseCase;
         this.mergeGateUseCase = mergeGateUseCase;
         this.mergeGateMaintenanceUseCase = mergeGateMaintenanceUseCase;
+        this.deliveredTaskMergeGateProcessManager = deliveredTaskMergeGateProcessManager;
         this.assignedScanLimit = clamp(assignedScanLimit, 1, 1000);
         this.deliveredScanLimit = clamp(deliveredScanLimit, 1, 1000);
         this.deliveredStaleSeconds = Math.max(30L, deliveredStaleSeconds);
@@ -69,12 +73,14 @@ public class RuntimeGarbageCollectionService {
 
         List<WorkTask> assignedTasks = taskQueryUseCase.listTasksByStatus(TaskStatus.ASSIGNED, assignedScanLimit);
         int releasedAssignments = 0;
+        int promotedDeliveredAssignments = 0;
+        int completedVerifyAssignments = 0;
         int skippedHealthyAssigned = 0;
         int failedAssignmentReleases = 0;
         for (WorkTask task : assignedTasks) {
-            boolean shouldRelease;
+            AssignedTaskDisposition disposition;
             try {
-                shouldRelease = shouldReleaseAssignedTask(task);
+                disposition = inspectAssignedTask(task);
             } catch (RuntimeException ex) {
                 failedAssignmentReleases++;
                 log.warn(
@@ -85,8 +91,39 @@ public class RuntimeGarbageCollectionService {
                 );
                 continue;
             }
-            if (!shouldRelease) {
+            if (disposition == AssignedTaskDisposition.KEEP) {
                 skippedHealthyAssigned++;
+                continue;
+            }
+            if (disposition == AssignedTaskDisposition.PROMOTE_DELIVERED) {
+                try {
+                    taskStateMutationUseCase.markDelivered(task.taskId());
+                    deliveredTaskMergeGateProcessManager.onTaskDelivered(task.taskId());
+                    promotedDeliveredAssignments++;
+                } catch (RuntimeException ex) {
+                    failedAssignmentReleases++;
+                    log.warn(
+                        "Failed to promote completed IMPL assignment into DELIVERED, taskId={}, activeRunId={}, reason={}",
+                        task.taskId(),
+                        task.activeRunId(),
+                        ex.getMessage()
+                    );
+                }
+                continue;
+            }
+            if (disposition == AssignedTaskDisposition.COMPLETE_VERIFY) {
+                try {
+                    taskStateMutationUseCase.markDone(task.taskId());
+                    completedVerifyAssignments++;
+                } catch (RuntimeException ex) {
+                    failedAssignmentReleases++;
+                    log.warn(
+                        "Failed to complete succeeded VERIFY assignment, taskId={}, activeRunId={}, reason={}",
+                        task.taskId(),
+                        task.activeRunId(),
+                        ex.getMessage()
+                    );
+                }
                 continue;
             }
             try {
@@ -126,8 +163,11 @@ public class RuntimeGarbageCollectionService {
 
                 Optional<TaskRun> latestVerifyRun = runQueryUseCase.findLatestRunByTaskAndKind(task.taskId(), RunKind.VERIFY);
                 if (latestVerifyRun.isPresent()) {
-                    skippedDeliveredWithVerifyHistory++;
-                    continue;
+                    RunStatus status = latestVerifyRun.get().status();
+                    if (status == RunStatus.SUCCEEDED) {
+                        skippedDeliveredWithVerifyHistory++;
+                        continue;
+                    }
                 }
 
                 if (kickedMergeGates >= maxMergeGateStartsPerPoll) {
@@ -143,6 +183,7 @@ public class RuntimeGarbageCollectionService {
                 }
             } catch (RuntimeException ex) {
                 mergeGateFailures++;
+                deliveredTaskMergeGateProcessManager.handleMergeGateStartFailure(task.taskId(), ex);
                 log.warn(
                     "Failed to process delivered task in runtime garbage collector, taskId={}, reason={}",
                     task.taskId(),
@@ -154,6 +195,8 @@ public class RuntimeGarbageCollectionService {
         return new CleanupResult(
             assignedTasks.size(),
             releasedAssignments,
+            promotedDeliveredAssignments,
+            completedVerifyAssignments,
             skippedHealthyAssigned,
             failedAssignmentReleases,
             deliveredTasks.size(),
@@ -169,23 +212,31 @@ public class RuntimeGarbageCollectionService {
         );
     }
 
-    private boolean shouldReleaseAssignedTask(WorkTask task) {
+    private AssignedTaskDisposition inspectAssignedTask(WorkTask task) {
         if (task == null) {
-            return false;
+            return AssignedTaskDisposition.KEEP;
         }
         String activeRunId = normalize(task.activeRunId());
         if (activeRunId == null) {
-            return true;
+            return AssignedTaskDisposition.RELEASE;
         }
         Optional<TaskRun> runOptional = runQueryUseCase.findRunById(activeRunId);
         if (runOptional.isEmpty()) {
-            return true;
+            return AssignedTaskDisposition.RELEASE;
         }
         TaskRun run = runOptional.get();
         if (!task.taskId().equals(run.taskId())) {
-            return true;
+            return AssignedTaskDisposition.RELEASE;
         }
-        return !isRunActive(run.status());
+        if (run.runKind() == RunKind.IMPL && run.status() == RunStatus.SUCCEEDED) {
+            return AssignedTaskDisposition.PROMOTE_DELIVERED;
+        }
+        if (run.runKind() == RunKind.VERIFY
+            && run.status() == RunStatus.SUCCEEDED
+            && task.taskTemplateId() == TaskTemplateId.TMPL_VERIFY_V0) {
+            return AssignedTaskDisposition.COMPLETE_VERIFY;
+        }
+        return isRunActive(run.status()) ? AssignedTaskDisposition.KEEP : AssignedTaskDisposition.RELEASE;
     }
 
     private static boolean isRunActive(RunStatus status) {
@@ -217,6 +268,8 @@ public class RuntimeGarbageCollectionService {
     public record CleanupResult(
         int scannedAssignedTasks,
         int releasedAssignments,
+        int promotedDeliveredAssignments,
+        int completedVerifyAssignments,
         int skippedHealthyAssignedTasks,
         int failedAssignmentReleases,
         int scannedDeliveredTasks,
@@ -230,5 +283,12 @@ public class RuntimeGarbageCollectionService {
         boolean repositoryRecovered,
         int repositoryRecoveryFailures
     ) {
+    }
+
+    private enum AssignedTaskDisposition {
+        KEEP,
+        RELEASE,
+        PROMOTE_DELIVERED,
+        COMPLETE_VERIFY
     }
 }

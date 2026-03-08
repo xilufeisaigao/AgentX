@@ -11,6 +11,9 @@ public class ContextRunRow {
     private String taskSkillRef;
     private String baseCommit;
     private Timestamp createdAt;
+    private String latestEventType;
+    private String latestEventBody;
+    private String latestEventDataJson;
 
     public String getRunId() {
         return runId;
@@ -66,5 +69,29 @@ public class ContextRunRow {
 
     public void setCreatedAt(Timestamp createdAt) {
         this.createdAt = createdAt;
+    }
+
+    public String getLatestEventType() {
+        return latestEventType;
+    }
+
+    public void setLatestEventType(String latestEventType) {
+        this.latestEventType = latestEventType;
+    }
+
+    public String getLatestEventBody() {
+        return latestEventBody;
+    }
+
+    public void setLatestEventBody(String latestEventBody) {
+        this.latestEventBody = latestEventBody;
+    }
+
+    public String getLatestEventDataJson() {
+        return latestEventDataJson;
+    }
+
+    public void setLatestEventDataJson(String latestEventDataJson) {
+        this.latestEventDataJson = latestEventDataJson;
     }
 }

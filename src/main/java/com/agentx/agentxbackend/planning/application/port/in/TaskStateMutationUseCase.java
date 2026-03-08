@@ -11,4 +11,6 @@ public interface TaskStateMutationUseCase {
     WorkTask markDone(String taskId);
 
     WorkTask releaseAssignment(String taskId);
+
+    WorkTask reopenDelivered(String taskId);
 }

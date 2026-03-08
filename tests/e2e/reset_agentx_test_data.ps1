@@ -57,7 +57,7 @@ $dbName = Read-EnvValue $resolvedEnvFile "AGENTX_DB_NAME" "agentx_backend"
 $mysqlRootPassword = Read-EnvValue $resolvedEnvFile "MYSQL_ROOT_PASSWORD" "agentx-root"
 $redisPassword = Read-EnvValue $resolvedEnvFile "AGENTX_REDIS_PASSWORD" "agentx-redis"
 $dbAccountPrefix = Read-EnvValue $resolvedEnvFile "AGENTX_WORKFORCE_RUNTIME_ENVIRONMENT_DB_ACCOUNT_USERNAME_PREFIX" "ax"
-$hostRepoRootRaw = Read-EnvValue $resolvedEnvFile "AGENTX_HOST_REPO_ROOT" "./agentx-repo"
+$hostRepoRootRaw = Read-EnvValue $resolvedEnvFile "AGENTX_HOST_REPO_ROOT" "./runtime-projects/default-repo"
 
 Write-Output "[reset] checking docker compose services ..."
 Invoke-Compose @("ps")

@@ -33,8 +33,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -72,10 +74,13 @@ class RunCommandServiceTest {
             new ObjectMapper(),
             300,
             "BASELINE_UNAVAILABLE",
+            3,
             "WRK-VERIFY",
             ".",
             ".agentx"
         );
+        lenient().when(taskAllocationPort.isSessionActive(anyString())).thenReturn(true);
+        lenient().when(taskAllocationPort.hasNonDoneDependentTaskByTemplate(anyString(), anyString())).thenReturn(false);
     }
 
     @Test
@@ -99,6 +104,7 @@ class RunCommandServiceTest {
         when(taskAllocationPort.claimReadyTaskForWorker(eq("WRK-1"), any()))
             .thenReturn(Optional.of(new TaskAllocationPort.ClaimedTask(
                 "TASK-1",
+                "SES-TEST",
                 "MOD-1",
                 "Implement module baseline",
                 "tmpl.impl.v0",
@@ -110,7 +116,7 @@ class RunCommandServiceTest {
                 null,
                 "file:.agentx/skill.md"
             )));
-        when(workspacePort.allocateWorkspace(any(), eq("TASK-1"), eq("BASELINE_UNAVAILABLE"), any()))
+        when(workspacePort.allocateWorkspace(any(), eq("SES-TEST"), eq("TASK-1"), eq("BASELINE_UNAVAILABLE"), any()))
             .thenReturn("worktrees/TASK-1/RUN-1");
 
         Optional<TaskPackage> claimed = service.claimTask("WRK-1");
@@ -138,11 +144,82 @@ class RunCommandServiceTest {
         inOrder.verify(taskRunRepository).save(any(TaskRun.class));
         inOrder.verify(workspacePort).allocateWorkspace(
             any(),
+            eq("SES-TEST"),
             eq("TASK-1"),
             eq("BASELINE_UNAVAILABLE"),
             any()
         );
         inOrder.verify(taskRunEventRepository).save(any());
+    }
+
+    @Test
+    void claimTaskShouldExcludeTestWriteScopeWhenDependentTestTaskExists() {
+        when(workerRuntimePort.workerExists("WRK-1")).thenReturn(true);
+        when(workerRuntimePort.isWorkerReady("WRK-1")).thenReturn(true);
+        when(workerRuntimePort.listWorkerToolpackIds("WRK-1"))
+            .thenReturn(List.of("TP-JAVA-21", "TP-MAVEN-3"));
+        when(taskAllocationPort.claimReadyTaskForWorker(eq("WRK-1"), any()))
+            .thenReturn(Optional.of(new TaskAllocationPort.ClaimedTask(
+                "TASK-1",
+                "SES-TEST",
+                "MOD-1",
+                "Implement module baseline",
+                "tmpl.impl.v0",
+                "[\"TP-JAVA-21\",\"TP-MAVEN-3\"]"
+            )));
+        when(taskAllocationPort.hasNonDoneDependentTaskByTemplate("TASK-1", "tmpl.test.v0")).thenReturn(true);
+        when(contextSnapshotReadPort.findLatestReadySnapshot("TASK-1", RunKind.IMPL))
+            .thenReturn(Optional.of(new ContextSnapshotReadPort.ReadySnapshot(
+                "CTXS-1",
+                null,
+                "file:.agentx/skill.md"
+            )));
+        when(workspacePort.allocateWorkspace(any(), eq("SES-TEST"), eq("TASK-1"), eq("BASELINE_UNAVAILABLE"), any()))
+            .thenReturn("worktrees/TASK-1/RUN-1");
+
+        Optional<TaskPackage> claimed = service.claimTask("WRK-1");
+
+        assertTrue(claimed.isPresent());
+        assertTrue(claimed.get().writeScope().contains("src/main/java/"));
+        assertTrue(!claimed.get().writeScope().contains("src/test/java/"));
+        assertTrue(!claimed.get().writeScope().contains("src/test/resources/"));
+    }
+
+    @Test
+    void claimTaskShouldAllowMavenWrapperFilesForMavenImplTasks() {
+        when(workerRuntimePort.workerExists("WRK-1")).thenReturn(true);
+        when(workerRuntimePort.isWorkerReady("WRK-1")).thenReturn(true);
+        when(workerRuntimePort.listWorkerToolpackIds("WRK-1"))
+            .thenReturn(List.of("TP-JAVA-21", "TP-MAVEN-3"));
+        when(taskAllocationPort.claimReadyTaskForWorker(eq("WRK-1"), any()))
+            .thenReturn(Optional.of(new TaskAllocationPort.ClaimedTask(
+                "TASK-MAVEN-WRAPPER",
+                "SES-TEST",
+                "bootstrap",
+                "Configure Maven wrapper",
+                "tmpl.impl.v0",
+                "[\"TP-JAVA-21\",\"TP-MAVEN-3\"]"
+            )));
+        when(contextSnapshotReadPort.findLatestReadySnapshot("TASK-MAVEN-WRAPPER", RunKind.IMPL))
+            .thenReturn(Optional.of(new ContextSnapshotReadPort.ReadySnapshot(
+                "CTXS-MAVEN-WRAPPER-1",
+                null,
+                "file:.agentx/skill.md"
+            )));
+        when(workspacePort.allocateWorkspace(
+            any(),
+            eq("SES-TEST"),
+            eq("TASK-MAVEN-WRAPPER"),
+            eq("BASELINE_UNAVAILABLE"),
+            any()
+        )).thenReturn("worktrees/TASK-MAVEN-WRAPPER/RUN-1");
+
+        Optional<TaskPackage> claimed = service.claimTask("WRK-1");
+
+        assertTrue(claimed.isPresent());
+        assertTrue(claimed.get().writeScope().contains(".mvn/"));
+        assertTrue(claimed.get().writeScope().contains("mvnw"));
+        assertTrue(claimed.get().writeScope().contains("mvnw.cmd"));
     }
 
     @Test
@@ -173,7 +250,8 @@ class RunCommandServiceTest {
             domainEventPublisher,
             new ObjectMapper(),
             300,
-            "BASELINE_UNAVAILABLE",
+            "STALE-COMMIT",
+            3,
             "WRK-VERIFY",
             repoRoot.toString(),
             repoRoot.resolve(".agentx").toString()
@@ -186,6 +264,7 @@ class RunCommandServiceTest {
         when(taskAllocationPort.claimReadyTaskForWorker(eq("WRK-1"), any()))
             .thenReturn(Optional.of(new TaskAllocationPort.ClaimedTask(
                 "TASK-CTX",
+                "SES-TEST",
                 "MOD-CTX",
                 "Apply context-driven implementation",
                 "tmpl.impl.v0",
@@ -197,7 +276,7 @@ class RunCommandServiceTest {
                 "file:" + contextPath.toString(),
                 "file:.agentx/context/task-skills/TASK-CTX.md"
             )));
-        when(workspacePort.allocateWorkspace(any(), eq("TASK-CTX"), eq("BASELINE_UNAVAILABLE"), any()))
+        when(workspacePort.allocateWorkspace(any(), eq("SES-TEST"), eq("TASK-CTX"), eq("abc123"), any()))
             .thenReturn("worktrees/TASK-CTX/RUN-CTX-1");
 
         Optional<TaskPackage> claimed = localService.claimTask("WRK-1");
@@ -209,6 +288,7 @@ class RunCommandServiceTest {
         assertTrue(pkg.taskContext().architectureRefs().contains("ticket:TCK-2|DECISION"));
         assertEquals(List.of("run:RUN-OLD-1|FAILED"), pkg.taskContext().priorRunRefs());
         assertEquals("git:abc123", pkg.taskContext().repoBaselineRef());
+        verify(workspacePort).allocateWorkspace(any(), eq("SES-TEST"), eq("TASK-CTX"), eq("abc123"), any());
     }
 
     @Test
@@ -239,7 +319,8 @@ class RunCommandServiceTest {
             domainEventPublisher,
             new ObjectMapper(),
             300,
-            "BASELINE_UNAVAILABLE",
+            "STALE-COMMIT",
+            3,
             "WRK-VERIFY",
             repoRoot.toString(),
             repoRoot.resolve(".agentx").toString()
@@ -252,6 +333,7 @@ class RunCommandServiceTest {
         when(taskAllocationPort.claimReadyTaskForWorker(eq("WRK-1"), any()))
             .thenReturn(Optional.of(new TaskAllocationPort.ClaimedTask(
                 "TASK-CTX-CAMEL",
+                "SES-TEST",
                 "MOD-CTX",
                 "Apply camel context pack",
                 "tmpl.impl.v0",
@@ -263,7 +345,7 @@ class RunCommandServiceTest {
                 "file:" + contextPath.toString(),
                 "file:.agentx/context/task-skills/TASK-CTX-CAMEL.md"
             )));
-        when(workspacePort.allocateWorkspace(any(), eq("TASK-CTX-CAMEL"), eq("BASELINE_UNAVAILABLE"), any()))
+        when(workspacePort.allocateWorkspace(any(), eq("SES-TEST"), eq("TASK-CTX-CAMEL"), eq("def456"), any()))
             .thenReturn("worktrees/TASK-CTX-CAMEL/RUN-CTX-CAMEL-1");
 
         Optional<TaskPackage> claimed = localService.claimTask("WRK-1");
@@ -275,6 +357,68 @@ class RunCommandServiceTest {
         assertTrue(pkg.taskContext().architectureRefs().contains("ticket:TCK-C2|DECISION"));
         assertEquals(List.of("run:RUN-C-OLD-1|FAILED"), pkg.taskContext().priorRunRefs());
         assertEquals("git:def456", pkg.taskContext().repoBaselineRef());
+        verify(workspacePort).allocateWorkspace(any(), eq("SES-TEST"), eq("TASK-CTX-CAMEL"), eq("def456"), any());
+    }
+
+    @Test
+    void claimTaskShouldPreferBaselineUnavailableMarkerFromContextArtifactOverDefaultCommit() throws Exception {
+        Path repoRoot = Files.createTempDirectory("agentx-context-pack-baseline-unavailable-");
+        Path contextPath = repoRoot.resolve(".agentx/context/task-context-packs/TASK-CTX-BASELINE.json");
+        Files.createDirectories(contextPath.getParent());
+        Files.writeString(
+            contextPath,
+            """
+                {
+                  "requirement_ref": "req:REQ-BASE@v1",
+                  "repo_baseline_ref": "git:BASELINE_UNAVAILABLE"
+                }
+                """,
+            StandardCharsets.UTF_8
+        );
+        RunCommandService localService = new RunCommandService(
+            taskRunRepository,
+            taskRunEventRepository,
+            taskAllocationPort,
+            workspacePort,
+            contextSnapshotReadPort,
+            workerRuntimePort,
+            domainEventPublisher,
+            new ObjectMapper(),
+            300,
+            "STALE-COMMIT",
+            3,
+            "WRK-VERIFY",
+            repoRoot.toString(),
+            repoRoot.resolve(".agentx").toString()
+        );
+
+        when(workerRuntimePort.workerExists("WRK-1")).thenReturn(true);
+        when(workerRuntimePort.isWorkerReady("WRK-1")).thenReturn(true);
+        when(workerRuntimePort.listWorkerToolpackIds("WRK-1"))
+            .thenReturn(List.of("TP-JAVA-21"));
+        when(taskAllocationPort.claimReadyTaskForWorker(eq("WRK-1"), any()))
+            .thenReturn(Optional.of(new TaskAllocationPort.ClaimedTask(
+                "TASK-CTX-BASELINE",
+                "SES-TEST",
+                "MOD-CTX",
+                "Apply baseline fallback",
+                "tmpl.impl.v0",
+                "[\"TP-JAVA-21\"]"
+            )));
+        when(contextSnapshotReadPort.findLatestReadySnapshot("TASK-CTX-BASELINE", RunKind.IMPL))
+            .thenReturn(Optional.of(new ContextSnapshotReadPort.ReadySnapshot(
+                "CTXS-CTX-BASELINE-1",
+                "file:" + contextPath.toString(),
+                "file:.agentx/context/task-skills/TASK-CTX-BASELINE.md"
+            )));
+        when(workspacePort.allocateWorkspace(any(), eq("SES-TEST"), eq("TASK-CTX-BASELINE"), eq("BASELINE_UNAVAILABLE"), any()))
+            .thenReturn("worktrees/TASK-CTX-BASELINE/RUN-CTX-BASELINE-1");
+
+        Optional<TaskPackage> claimed = localService.claimTask("WRK-1");
+
+        assertTrue(claimed.isPresent());
+        verify(workspacePort)
+            .allocateWorkspace(any(), eq("SES-TEST"), eq("TASK-CTX-BASELINE"), eq("BASELINE_UNAVAILABLE"), any());
     }
 
     @Test
@@ -284,6 +428,7 @@ class RunCommandServiceTest {
         when(taskAllocationPort.claimReadyTaskForWorker(eq("WRK-1"), any()))
             .thenReturn(Optional.of(new TaskAllocationPort.ClaimedTask(
                 "TASK-2",
+                "SES-TEST",
                 "MOD-2",
                 "Task without snapshot",
                 "tmpl.impl.v0",
@@ -297,32 +442,67 @@ class RunCommandServiceTest {
     }
 
     @Test
+    void claimTaskShouldReleaseAssignmentWhenSessionIsPaused() {
+        when(workerRuntimePort.workerExists("WRK-1")).thenReturn(true);
+        when(workerRuntimePort.isWorkerReady("WRK-1")).thenReturn(true);
+        when(taskAllocationPort.claimReadyTaskForWorker(eq("WRK-1"), any()))
+            .thenReturn(Optional.of(new TaskAllocationPort.ClaimedTask(
+                "TASK-PAUSED-1",
+                "SES-PAUSED",
+                "MOD-1",
+                "Paused session task",
+                "tmpl.impl.v0",
+                "[\"TP-JAVA-21\"]"
+            )));
+        when(taskAllocationPort.isSessionActive("SES-PAUSED")).thenReturn(false);
+
+        Optional<TaskPackage> claimed = service.claimTask("WRK-1");
+
+        assertTrue(claimed.isEmpty());
+        verify(taskAllocationPort).releaseTaskAssignment("TASK-PAUSED-1");
+        verify(taskRunRepository, never()).save(any(TaskRun.class));
+        verify(workspacePort, never()).allocateWorkspace(any(), any(), any(), any(), any());
+    }
+
+    @Test
     void claimTaskShouldRejectWhenInitGateActiveAndAnotherRunIsRunning() {
         when(workerRuntimePort.workerExists("WRK-1")).thenReturn(true);
         when(workerRuntimePort.isWorkerReady("WRK-1")).thenReturn(true);
-        when(taskAllocationPort.isInitGateActive()).thenReturn(true);
-        when(taskRunRepository.countActiveRuns()).thenReturn(1);
+        when(taskAllocationPort.claimReadyTaskForWorker(eq("WRK-1"), any()))
+            .thenReturn(Optional.of(new TaskAllocationPort.ClaimedTask(
+                "TASK-INIT-LOCKED",
+                "SES-TEST",
+                "MOD-1",
+                "Init task while another run is active",
+                "tmpl.init.v0",
+                "[\"TP-JAVA-21\"]"
+            )));
+        when(taskAllocationPort.isInitGateActive("SES-TEST")).thenReturn(true);
+        when(taskRunRepository.existsActiveRunBySessionId("SES-TEST")).thenReturn(true);
 
         assertThrows(PreconditionFailedException.class, () -> service.claimTask("WRK-1"));
-        verify(taskAllocationPort, never()).claimReadyTaskForWorker(any(), any());
+        verify(taskAllocationPort).releaseTaskAssignment("TASK-INIT-LOCKED");
     }
 
     @Test
     void claimTaskShouldRejectNonInitTaskWhenInitGateActive() {
         when(workerRuntimePort.workerExists("WRK-1")).thenReturn(true);
         when(workerRuntimePort.isWorkerReady("WRK-1")).thenReturn(true);
-        when(taskAllocationPort.isInitGateActive()).thenReturn(true);
-        when(taskRunRepository.countActiveRuns()).thenReturn(0);
         when(taskAllocationPort.claimReadyTaskForWorker(eq("WRK-1"), any()))
             .thenReturn(Optional.of(new TaskAllocationPort.ClaimedTask(
                 "TASK-NON-INIT",
+                "SES-TEST",
                 "MOD-1",
                 "Non-init task under init gate",
                 "tmpl.impl.v0",
                 "[\"TP-JAVA-21\"]"
             )));
+        when(taskAllocationPort.isInitGateActive("SES-TEST")).thenReturn(true);
+        when(taskRunRepository.existsActiveRunBySessionId("SES-TEST")).thenReturn(false);
 
-        assertThrows(PreconditionFailedException.class, () -> service.claimTask("WRK-1"));
+        Optional<TaskPackage> claimed = service.claimTask("WRK-1");
+
+        assertTrue(claimed.isEmpty());
         verify(taskAllocationPort).releaseTaskAssignment("TASK-NON-INIT");
     }
 
@@ -528,6 +708,40 @@ class RunCommandServiceTest {
     }
 
     @Test
+    void recoverExpiredRunsShouldIgnoreWaitingForemanRuns() {
+        Instant now = Instant.parse("2026-02-22T00:00:00Z");
+        TaskRun waiting = new TaskRun(
+            "RUN-WAITING-1",
+            "TASK-WAITING-1",
+            "WRK-1",
+            RunStatus.WAITING_FOREMAN,
+            RunKind.IMPL,
+            "CTXS-1",
+            now.minusSeconds(60),
+            now.minusSeconds(120),
+            now.minusSeconds(600),
+            null,
+            "file:.agentx/skill.md",
+            "[\"TP-JAVA-21\"]",
+            "BASELINE_UNAVAILABLE",
+            "run/RUN-WAITING-1",
+            "worktrees/TASK-WAITING-1/RUN-WAITING-1",
+            now.minusSeconds(600),
+            now.minusSeconds(120)
+        );
+        when(taskRunRepository.findExpiredActiveRuns(any(), eq(10))).thenReturn(List.of(waiting));
+        when(taskRunRepository.findById("RUN-WAITING-1")).thenReturn(Optional.of(waiting));
+
+        int recovered = service.recoverExpiredRuns(10);
+
+        assertEquals(0, recovered);
+        verify(taskRunRepository, never()).markFailedIfLeaseExpired(any(), any(), any());
+        verify(taskRunEventRepository, never()).save(any());
+        verify(taskAllocationPort, never()).releaseTaskAssignment(any());
+        verify(workspacePort, never()).releaseWorkspace(any(), any());
+    }
+
+    @Test
     void recoverExpiredRunsShouldNotReleaseAssignmentForVerifyRun() {
         Instant now = Instant.parse("2026-02-22T00:00:00Z");
         TaskRun expiredVerify = new TaskRun(
@@ -568,6 +782,7 @@ class RunCommandServiceTest {
         when(workerRuntimePort.workerExists("WRK-VERIFY")).thenReturn(true);
         when(workerRuntimePort.isWorkerReady("WRK-VERIFY")).thenReturn(true);
         when(workerRuntimePort.listWorkerToolpackIds("WRK-VERIFY")).thenReturn(List.of("TP-JAVA-21"));
+        when(taskAllocationPort.findSessionIdByTaskId("TASK-VERIFY-1")).thenReturn(Optional.of("SES-TEST"));
         when(taskRunRepository.findLatestVerifyRunByTaskAndBaseCommit("TASK-VERIFY-1", "abc123"))
             .thenReturn(Optional.empty());
         when(contextSnapshotReadPort.findLatestReadySnapshot("TASK-VERIFY-1", RunKind.VERIFY))
@@ -576,7 +791,7 @@ class RunCommandServiceTest {
                 null,
                 "file:.agentx/skill-verify.md"
             )));
-        when(workspacePort.allocateWorkspace(any(), eq("TASK-VERIFY-1"), eq("abc123"), any()))
+        when(workspacePort.allocateWorkspace(any(), eq("SES-TEST"), eq("TASK-VERIFY-1"), eq("abc123"), any()))
             .thenReturn("worktrees/TASK-VERIFY-1/RUN-VERIFY-1");
 
         TaskRun run = service.createVerifyRun("TASK-VERIFY-1", "abc123");
@@ -621,10 +836,35 @@ class RunCommandServiceTest {
             )));
         when(taskRunRepository.findLatestVerifyRunByTaskAndBaseCommit("TASK-VERIFY-1", "abc123"))
             .thenReturn(Optional.of(failedVerify));
+        when(taskRunRepository.countVerifyRunsByTaskAndBaseCommit("TASK-VERIFY-1", "abc123"))
+            .thenReturn(3);
 
         assertThrows(PreconditionFailedException.class, () -> service.createVerifyRun("TASK-VERIFY-1", "abc123"));
         verify(taskRunRepository, never()).save(any(TaskRun.class));
-        verify(workspacePort, never()).allocateWorkspace(any(), any(), any(), any());
+        verify(workspacePort, never()).allocateWorkspace(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void createVerifyRunShouldRejectWhenSessionIsPaused() {
+        when(workerRuntimePort.workerExists("WRK-VERIFY")).thenReturn(true);
+        when(workerRuntimePort.isWorkerReady("WRK-VERIFY")).thenReturn(true);
+        when(taskAllocationPort.findSessionIdByTaskId("TASK-VERIFY-PAUSED")).thenReturn(Optional.of("SES-PAUSED"));
+        when(taskAllocationPort.isSessionActive("SES-PAUSED")).thenReturn(false);
+        when(taskRunRepository.findLatestVerifyRunByTaskAndBaseCommit("TASK-VERIFY-PAUSED", "abc123"))
+            .thenReturn(Optional.empty());
+        when(contextSnapshotReadPort.findLatestReadySnapshot("TASK-VERIFY-PAUSED", RunKind.VERIFY))
+            .thenReturn(Optional.of(new ContextSnapshotReadPort.ReadySnapshot(
+                "CTXS-VERIFY-PAUSED",
+                null,
+                "file:.agentx/skill-verify.md"
+            )));
+
+        assertThrows(
+            PreconditionFailedException.class,
+            () -> service.createVerifyRun("TASK-VERIFY-PAUSED", "abc123")
+        );
+        verify(taskRunRepository, never()).save(any(TaskRun.class));
+        verify(workspacePort, never()).allocateWorkspace(any(), any(), any(), any(), any());
     }
 
     @Test
@@ -638,7 +878,7 @@ class RunCommandServiceTest {
                 # Task Skill
 
                 ## Recommended Commands
-                - mvn -q -Dtest=* verify
+                - mvn -q test
                 - Run the project-defined verification command set.
                 """,
             StandardCharsets.UTF_8
@@ -655,6 +895,7 @@ class RunCommandServiceTest {
             new ObjectMapper(),
             300,
             "BASELINE_UNAVAILABLE",
+            3,
             "WRK-VERIFY",
             repoRoot.toString(),
             repoRoot.resolve(".agentx").toString()
@@ -666,6 +907,7 @@ class RunCommandServiceTest {
         when(taskAllocationPort.claimReadyTaskForWorker(eq("WRK-1"), any()))
             .thenReturn(Optional.of(new TaskAllocationPort.ClaimedTask(
                 "TASK-VERIFY-1",
+                "SES-TEST",
                 "MOD-VERIFY-1",
                 "Verify delivery candidate",
                 "tmpl.verify.v0",
@@ -677,7 +919,7 @@ class RunCommandServiceTest {
                 null,
                 "file:" + taskSkillPath.toString()
             )));
-        when(workspacePort.allocateWorkspace(any(), eq("TASK-VERIFY-1"), eq("BASELINE_UNAVAILABLE"), any()))
+        when(workspacePort.allocateWorkspace(any(), eq("SES-TEST"), eq("TASK-VERIFY-1"), eq("BASELINE_UNAVAILABLE"), any()))
             .thenReturn("worktrees/TASK-VERIFY-1/RUN-VERIFY-1");
 
         Optional<TaskPackage> claimed = localService.claimTask("WRK-1");
@@ -686,7 +928,7 @@ class RunCommandServiceTest {
         TaskPackage pkg = claimed.get();
         assertEquals(RunKind.VERIFY, pkg.runKind());
         assertTrue(pkg.writeScope().isEmpty());
-        assertEquals(List.of("mvn -q -Dtest=* verify"), pkg.verifyCommands());
+        assertEquals(List.of("mvn -q test"), pkg.verifyCommands());
     }
 
     @Test
@@ -717,6 +959,7 @@ class RunCommandServiceTest {
             new ObjectMapper(),
             300,
             "BASELINE_UNAVAILABLE",
+            3,
             "WRK-VERIFY",
             repoRoot.toString(),
             contextRoot.toString()
@@ -782,6 +1025,7 @@ class RunCommandServiceTest {
         );
         when(taskRunRepository.findById("RUN-SUCC-1")).thenReturn(Optional.of(running));
         when(taskRunRepository.update(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(taskAllocationPort.findSessionIdByTaskId("TASK-SUCC-1")).thenReturn(Optional.of("SES-TEST"));
 
         TaskRun finished = service.finishRun(
             "RUN-SUCC-1",
@@ -789,7 +1033,7 @@ class RunCommandServiceTest {
         );
 
         assertEquals(RunStatus.SUCCEEDED, finished.status());
-        verify(workspacePort).updateTaskBranch("TASK-SUCC-1", "abc123");
+        verify(workspacePort).updateTaskBranch("SES-TEST", "TASK-SUCC-1", "abc123");
         verify(workspacePort).releaseWorkspace("RUN-SUCC-1", "worktrees/TASK-SUCC-1/RUN-SUCC-1");
         verify(taskRunEventRepository).save(any());
         verify(domainEventPublisher).publish(any(RunFinishedEvent.class));
@@ -966,3 +1210,6 @@ class RunCommandServiceTest {
         verify(domainEventPublisher, never()).publish(any(RunFinishedEvent.class));
     }
 }
+
+
+

@@ -59,6 +59,8 @@ public class LocalRuntimeEnvironmentAdapter implements RuntimeEnvironmentPort, R
     private static final Duration DEFAULT_ENV_TTL = Duration.ofDays(7);
     private static final String MODE_LOCAL = "local";
     private static final String MODE_DOCKER = "docker";
+    private static final String TP_JAVA_17 = "TP-JAVA-17";
+    private static final String TP_JAVA_21 = "TP-JAVA-21";
     private static final String PULL_POLICY_ALWAYS = "always";
     private static final String PULL_POLICY_IF_NOT_PRESENT = "if-not-present";
     private static final String PULL_POLICY_NEVER = "never";
@@ -292,7 +294,7 @@ public class LocalRuntimeEnvironmentAdapter implements RuntimeEnvironmentPort, R
                 pythonVenvPath = ensurePythonVenv(projectRoot);
                 continue;
             }
-            if ("TP-JAVA-21".equals(normalizedToolpackId)) {
+            if (isJavaRuntimeToolpack(normalizedToolpackId)) {
                 ensureCommandAvailable(List.of("java", "-version"), projectRoot, toolpackId);
                 continue;
             }
@@ -1134,7 +1136,7 @@ public class LocalRuntimeEnvironmentAdapter implements RuntimeEnvironmentPort, R
 
     private String resolveDockerImageForToolpack(String toolpackId) {
         String normalizedToolpackId = toolpackId == null ? "" : toolpackId.trim().toUpperCase(Locale.ROOT);
-        if ("TP-JAVA-21".equals(normalizedToolpackId)) {
+        if (isJavaRuntimeToolpack(normalizedToolpackId)) {
             return dockerJava21Image;
         }
         if ("TP-MAVEN-3".equals(normalizedToolpackId)) {
@@ -1147,6 +1149,10 @@ public class LocalRuntimeEnvironmentAdapter implements RuntimeEnvironmentPort, R
             return dockerPython311Image;
         }
         return dockerDefaultImage;
+    }
+
+    private static boolean isJavaRuntimeToolpack(String normalizedToolpackId) {
+        return TP_JAVA_17.equals(normalizedToolpackId) || TP_JAVA_21.equals(normalizedToolpackId);
     }
 
     private void writeEnvironmentManifest(

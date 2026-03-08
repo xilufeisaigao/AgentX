@@ -33,12 +33,14 @@ class MergeGateCompletionServiceTest {
             integrationLaneLockPort
         );
         when(integrationLaneLockPort.tryAcquire("integration-lane")).thenReturn(true);
+        when(taskStateMutationPort.resolveSessionIdByTaskId("TASK-1")).thenReturn("SES-1");
 
         service.completeVerifySuccess("TASK-1", "RUN-VERIFY-1", "abc123");
 
         InOrder inOrder = inOrder(integrationLaneLockPort, gitClientPort, taskStateMutationPort);
         inOrder.verify(integrationLaneLockPort).tryAcquire("integration-lane");
-        inOrder.verify(gitClientPort).fastForwardMain("abc123");
+        inOrder.verify(gitClientPort).fastForwardMain("SES-1", "abc123");
+        inOrder.verify(gitClientPort).ensureDeliveryTagOnMain("SES-1", "abc123");
         inOrder.verify(taskStateMutationPort).markDone("TASK-1");
         inOrder.verify(integrationLaneLockPort).release("integration-lane");
     }
@@ -57,7 +59,8 @@ class MergeGateCompletionServiceTest {
             () -> service.completeVerifySuccess("TASK-2", "RUN-VERIFY-2", "def456")
         );
 
-        verify(gitClientPort, never()).fastForwardMain("def456");
+        verify(gitClientPort, never()).fastForwardMain("SES-2", "def456");
+        verify(gitClientPort, never()).ensureDeliveryTagOnMain("SES-2", "def456");
         verify(taskStateMutationPort, never()).markDone("TASK-2");
     }
 }

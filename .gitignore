@@ -36,6 +36,7 @@ __pycache__/
 
 # local docker runtime artifacts
 .env.docker
+runtime-projects/
 agentx-repo/
 frontend-demo/node_modules/
 frontend-demo/dist/

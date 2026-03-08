@@ -1,3 +1,4 @@
+import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
 const host = process.env.AGENTX_UI_HOST || "127.0.0.1";
@@ -5,6 +6,7 @@ const port = Number(process.env.AGENTX_UI_PORT || "5173");
 const apiBase = (process.env.AGENTX_UI_API_BASE || "http://127.0.0.1:18082").replace(/\/$/, "");
 
 export default defineConfig({
+  plugins: [react()],
   server: {
     host,
     port,

@@ -59,7 +59,7 @@ services:
     ports:
       - "${AGENTX_GIT_EXPORT_PORT:-19418}:9418"
     volumes:
-      - ${AGENTX_HOST_REPO_ROOT:-./agentx-repo}:/agentx/repo
+      - ${AGENTX_HOST_REPO_ROOT:-./runtime-projects/default-repo}:/agentx/repo
 
   backend:
     build:
@@ -143,7 +143,7 @@ services:
       AGENTX_EXECUTION_VERIFY_WORKER_ID: ${AGENTX_EXECUTION_VERIFY_WORKER_ID:-WRK-BOOT-JAVA-CORE}
       AGENTX_WORKFORCE_BOOTSTRAP_DEFAULT_WORKERS: ${AGENTX_WORKFORCE_BOOTSTRAP_DEFAULT_WORKERS:-true}
     volumes:
-      - ${AGENTX_HOST_REPO_ROOT:-./agentx-repo}:/agentx/repo
+      - ${AGENTX_HOST_REPO_ROOT:-./runtime-projects/default-repo}:/agentx/repo
       - runtime_data:/agentx/runtime-data
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:8080/api/v0/sessions || exit 1"]

@@ -34,6 +34,8 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Component
 public class BailianRequirementDraftGenerator implements RequirementDraftGeneratorPort {
@@ -44,6 +46,7 @@ public class BailianRequirementDraftGenerator implements RequirementDraftGenerat
     private static final String LANGCHAIN4J_FRAMEWORK = "langchain4j";
     private static final String DEFAULT_HANDOFF_REASON = "Detected architecture-layer change request";
     private static final String OUTPUT_LANGUAGE_HEADER = "X-AgentX-Language";
+    private static final Pattern NUMBERED_REQUIREMENT_PATTERN = Pattern.compile("(?m)^\\s*\\d+[.)、：:]");
 
     private final ObjectMapper objectMapper;
     private final RuntimeLlmConfigUseCase runtimeLlmConfigUseCase;
@@ -333,6 +336,27 @@ public class BailianRequirementDraftGenerator implements RequirementDraftGenerat
             1) YAML front matter with schema_version: %s
             2) # Title
             %s
+            Open Questions section rules:
+            - The section must always exist, but it does not need unresolved questions.
+            - If no blocking requirement facts remain, use only CLOSED/已关闭 items in section 8.
+            - Do not invent optional platform defaults as open questions. Prefer sensible defaults for protocol, port,
+              JSON field naming, dependency version management, and other routine conventions unless the user explicitly
+              asks to choose between alternatives.
+            - If a routine default is chosen, capture it under References/Decisions and keep the corresponding question CLOSED/已关闭.
+            Structured delivery spec rules:
+            - Preserve user-provided fixed literals verbatim when they define versions, groupId/artifactId, package names,
+              class names, endpoint paths, filenames, commands, or explicit exclusions.
+            - Do not rename or generalize fixed identifiers.
+            - Treat user-provided sample inputs and outputs as fixed literals too. Do not replace example values such as
+              query parameter names, sample user names, or response bodies with different examples unless the user
+              explicitly broadens them.
+            - Reflect those fixed literals in Scope, Acceptance Criteria, and Value Constraints whenever they are part of
+              the user-stated non-negotiable requirements.
+            - When the user asks for a plain-text HTTP response, describe the response as plain-text body semantics and do
+              not invent a stricter raw Content-Type header requirement unless the user explicitly requires exact header
+              bytes or charset behavior.
+            - For Spring Boot + MockMvc acceptance wording, allow compatible text/plain content types because framework
+              defaults may append charset automatically.
             Use %s for all natural-language prose content in paragraphs and list items.
             Never output implementation architecture details.
             """.formatted(schemaVersion, headingGuide, languageInstruction(outputLanguage));
@@ -381,6 +405,18 @@ public class BailianRequirementDraftGenerator implements RequirementDraftGenerat
             prompt.append(role).append(": ").append(content).append('\n');
         }
         prompt.append("User input:\n").append(input.userInput()).append('\n');
+        String structuredSpecSource = buildDraftContext(input);
+        if (looksLikeStructuredDeliverySpec(structuredSpecSource)) {
+            prompt.append("Structured delivery spec detected: true\n");
+            prompt.append("Preserve every explicit fixed literal verbatim. Do not rename coordinates, package names, class names, endpoints, files, commands, versions, or exclusions.\n");
+            List<String> numberedRequirements = extractNumberedRequirementLines(structuredSpecSource);
+            if (!numberedRequirements.isEmpty()) {
+                prompt.append("Non-negotiable user clauses (copy their literal values into the requirement doc):\n");
+                for (String clause : numberedRequirements) {
+                    prompt.append("- ").append(clause).append('\n');
+                }
+            }
+        }
         if (input.existingContent() != null && !input.existingContent().isBlank()) {
             prompt.append("Current requirement markdown (latest version):\n")
                 .append(input.existingContent())
@@ -459,13 +495,18 @@ public class BailianRequirementDraftGenerator implements RequirementDraftGenerat
         if (needsHandoff) {
             readyForDraft = false;
         }
-
-        return new ConversationAssessment(
-            assistantMessage,
-            readyForDraft,
-            missingInformation,
-            needsHandoff,
-            handoffReason.isBlank() ? null : handoffReason,
+        return normalizeAssessment(
+            new ConversationAssessment(
+                assistantMessage,
+                readyForDraft,
+                missingInformation,
+                needsHandoff,
+                handoffReason.isBlank() ? null : handoffReason,
+                BAILIAN_PROVIDER,
+                modelName
+            ),
+            input,
+            outputLanguage,
             BAILIAN_PROVIDER,
             modelName
         );
@@ -481,13 +522,83 @@ public class BailianRequirementDraftGenerator implements RequirementDraftGenerat
         List<String> missing = evaluateMissingInformation(merged);
         boolean ready = missing.isEmpty() && !needsHandoff;
         String message = buildFallbackAssistantMessage(input.userWantsDraft(), ready, needsHandoff, missing, outputLanguage);
-        return new ConversationAssessment(
-            message,
-            ready,
-            missing,
-            needsHandoff,
-            needsHandoff ? DEFAULT_HANDOFF_REASON : null,
+        return normalizeAssessment(
+            new ConversationAssessment(
+                message,
+                ready,
+                missing,
+                needsHandoff,
+                needsHandoff ? DEFAULT_HANDOFF_REASON : null,
+                BAILIAN_PROVIDER,
+                modelName
+            ),
+            input,
+            outputLanguage,
             BAILIAN_PROVIDER,
+            modelName
+        );
+    }
+
+    ConversationAssessment normalizeAssessment(
+        ConversationAssessment rawAssessment,
+        AssessConversationInput input,
+        String outputLanguage,
+        String provider,
+        String modelName
+    ) {
+        String merged = buildMergedConversationText(input);
+        boolean structuredDeliverySpec = looksLikeStructuredDeliverySpec(merged);
+        boolean architectureDecisionRequest = detectArchitectureNeed(merged);
+
+        boolean needsHandoff = rawAssessment != null && rawAssessment.needsHandoff();
+        if (needsHandoff && structuredDeliverySpec && !architectureDecisionRequest) {
+            needsHandoff = false;
+        }
+
+        List<String> missingInformation = copyMissingInformation(rawAssessment);
+        List<String> heuristicMissing = evaluateMissingInformation(merged);
+        boolean readyForDraft = rawAssessment != null && rawAssessment.readyForDraft();
+        if (!needsHandoff && (readyForDraft || structuredDeliverySpec || heuristicMissing.isEmpty())) {
+            readyForDraft = true;
+            missingInformation = List.of();
+        } else if (!readyForDraft && missingInformation.isEmpty()) {
+            missingInformation = heuristicMissing;
+        }
+
+        if (needsHandoff) {
+            readyForDraft = false;
+            missingInformation = List.of();
+        }
+
+        String handoffReason = normalizeNullable(rawAssessment == null ? null : rawAssessment.handoffReason());
+        if (needsHandoff && handoffReason == null) {
+            handoffReason = DEFAULT_HANDOFF_REASON;
+        }
+        if (!needsHandoff) {
+            handoffReason = null;
+        }
+
+        boolean statusChanged = rawAssessment == null
+            || rawAssessment.readyForDraft() != readyForDraft
+            || rawAssessment.needsHandoff() != needsHandoff;
+        String assistantMessage = normalizeNullable(rawAssessment == null ? null : rawAssessment.assistantMessage());
+        if (assistantMessage == null || statusChanged) {
+            assistantMessage = buildFallbackAssistantMessage(
+                input.userWantsDraft(),
+                readyForDraft,
+                needsHandoff,
+                missingInformation,
+                outputLanguage
+            );
+        }
+
+        return new ConversationAssessment(
+            assistantMessage,
+            readyForDraft,
+            missingInformation,
+            needsHandoff,
+            handoffReason,
+            provider,
             modelName
         );
     }
@@ -591,6 +702,9 @@ public class BailianRequirementDraftGenerator implements RequirementDraftGenerat
     }
 
     private static List<String> evaluateMissingInformation(String mergedText) {
+        if (looksLikeStructuredDeliverySpec(mergedText)) {
+            return List.of();
+        }
         List<String> missing = new ArrayList<>();
         if (!containsAny(
             mergedText,
@@ -614,12 +728,91 @@ public class BailianRequirementDraftGenerator implements RequirementDraftGenerat
     }
 
     private static boolean detectArchitectureNeed(String text) {
+        if (looksLikeStructuredDeliverySpec(text)) {
+            return false;
+        }
         return containsAny(
             text,
-            "架构", "数据库", "表结构", "分库分表", "微服务", "模块拆分", "技术选型", "部署", "缓存", "redis", "kafka",
-            "消息队列", "一致性", "事务", "读写分离", "schema", "architecture", "database", "table design",
-            "microservice", "module split", "tech stack", "deployment", "event-driven"
+            "架构设计", "架构方案", "数据库设计", "表结构", "分库分表", "微服务", "模块拆分", "部署方案", "缓存方案", "redis方案",
+            "kafka方案", "消息队列方案", "一致性方案", "事务方案", "读写分离方案", "schema设计", "table design",
+            "database design", "architecture design", "microservice split", "module split", "deployment topology",
+            "event-driven architecture", "consistency model", "transaction strategy"
         );
+    }
+
+    private static boolean looksLikeStructuredDeliverySpec(String text) {
+        if (text == null || text.isBlank()) {
+            return false;
+        }
+        boolean hasProjectIntent = containsAny(
+            text,
+            "创建一个", "生成一个", "做一个", "搭一个", "脚手架", "后端仓库", "仓库", "repo", "repository",
+            "project", "scaffold", "backend", "可直接克隆运行", "clone"
+        );
+        if (!hasProjectIntent) {
+            return false;
+        }
+        int signals = 0;
+        if (containsAny(text, "java 17", "spring boot", "maven", "gradle", "node.js", "react", "vue")) {
+            signals++;
+        }
+        if (containsAny(text, "groupid", "artifactid", "包名", "主启动类", "pom.xml", "readme", "application.properties")) {
+            signals++;
+        }
+        if (containsAny(text, "/api/", "endpoint", "health", "greeting", "controller", "返回 200", "json")) {
+            signals++;
+        }
+        if (containsAny(text, "不要接入", "不要", "不需要", "不要求", "without", "do not", "no database", "no cache")) {
+            signals++;
+        }
+        if (containsAny(text, "mvn test", "gradle test", "启动方式", "测试方式", "run", "test")) {
+            signals++;
+        }
+        return signals >= 3 || (signals >= 2 && countNumberedRequirements(text) >= 5);
+    }
+
+    private static int countNumberedRequirements(String text) {
+        Matcher matcher = NUMBERED_REQUIREMENT_PATTERN.matcher(text);
+        int count = 0;
+        while (matcher.find()) {
+            count++;
+        }
+        return count;
+    }
+
+    private static List<String> extractNumberedRequirementLines(String text) {
+        if (text == null || text.isBlank()) {
+            return List.of();
+        }
+        List<String> lines = new ArrayList<>();
+        for (String rawLine : text.split("\\R")) {
+            if (rawLine == null) {
+                continue;
+            }
+            String trimmed = rawLine.trim();
+            if (trimmed.isBlank()) {
+                continue;
+            }
+            Matcher matcher = NUMBERED_REQUIREMENT_PATTERN.matcher(trimmed);
+            if (matcher.find()) {
+                lines.add(trimmed);
+            }
+        }
+        return lines.isEmpty() ? List.of() : List.copyOf(lines);
+    }
+
+    private static List<String> copyMissingInformation(ConversationAssessment rawAssessment) {
+        if (rawAssessment == null || rawAssessment.missingInformation() == null || rawAssessment.missingInformation().isEmpty()) {
+            return List.of();
+        }
+        List<String> missing = new ArrayList<>();
+        for (String item : rawAssessment.missingInformation()) {
+            String normalized = normalizeNullable(item);
+            if (normalized != null) {
+                missing.add(normalized);
+            }
+        }
+        return missing.isEmpty() ? List.of() : List.copyOf(missing);
     }
 
     private static boolean containsAny(String text, String... keywords) {
@@ -776,7 +969,7 @@ public class BailianRequirementDraftGenerator implements RequirementDraftGenerat
                 7) ## 5. 验收标准 with at least one '- [AC-1] ...'
                 8) ## 6. 价值约束 with at least one '- [VC-1] ...'
                 9) ## 7. 风险与权衡 with at least one '- [R-1] ...'
-                10) ## 8. 开放问题 with at least one '- [Q-1][待确认]' or '- [Q-1][OPEN] ...'
+                10) ## 8. 开放问题 with at least one '- [Q-1][待确认|已关闭]' or '- [Q-1][OPEN|CLOSED] ...'
                 11) ## 9. 参考 with '### 决策' and '### 架构决策记录'
                 12) ## 10. 变更记录
                 Keep the required headings exactly as written in Chinese.
@@ -790,7 +983,7 @@ public class BailianRequirementDraftGenerator implements RequirementDraftGenerat
             7) ## 5. Acceptance Criteria with at least one '- [AC-1] ...'
             8) ## 6. Value Constraints with at least one '- [VC-1] ...'
             9) ## 7. Risks & Tradeoffs with at least one '- [R-1] ...'
-            10) ## 8. Open Questions with at least one '- [Q-1][OPEN] ...'
+            10) ## 8. Open Questions with at least one '- [Q-1][OPEN|CLOSED] ...'
             11) ## 9. References with '### Decisions' and '### ADRs'
             12) ## 10. Change Log
             Keep the required headings exactly as written in English.
@@ -846,6 +1039,14 @@ public class BailianRequirementDraftGenerator implements RequirementDraftGenerat
 
     private static String nullSafe(String value) {
         return Objects.toString(value, "");
+    }
+
+    private static String normalizeNullable(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
     }
 
     private record ActiveLlmConfig(

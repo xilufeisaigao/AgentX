@@ -9,6 +9,7 @@ import com.agentx.agentxbackend.planning.application.port.out.WorkTaskDependency
 import com.agentx.agentxbackend.planning.application.port.out.WorkModuleRepository;
 import com.agentx.agentxbackend.planning.application.port.out.WorkTaskRepository;
 import com.agentx.agentxbackend.planning.application.port.out.WorkerEligibilityPort;
+import com.agentx.agentxbackend.planning.application.port.out.SessionDispatchPolicyPort;
 import com.agentx.agentxbackend.planning.domain.model.TaskStatus;
 import com.agentx.agentxbackend.planning.domain.model.TaskTemplateId;
 import com.agentx.agentxbackend.planning.domain.model.WorkModule;
@@ -41,6 +42,7 @@ public class PlanningCommandService implements PlanningCommandUseCase, TaskState
     private final WorkTaskRepository workTaskRepository;
     private final WorkTaskDependencyRepository workTaskDependencyRepository;
     private final WorkerEligibilityPort workerEligibilityPort;
+    private final SessionDispatchPolicyPort sessionDispatchPolicyPort;
     private final ObjectMapper objectMapper;
     private final int claimScanBatchSize;
     private final int claimScanMaxRows;
@@ -50,6 +52,7 @@ public class PlanningCommandService implements PlanningCommandUseCase, TaskState
         WorkTaskRepository workTaskRepository,
         WorkTaskDependencyRepository workTaskDependencyRepository,
         WorkerEligibilityPort workerEligibilityPort,
+        SessionDispatchPolicyPort sessionDispatchPolicyPort,
         ObjectMapper objectMapper,
         @Value("${agentx.planning.claim-scan.batch-size:64}") int claimScanBatchSize,
         @Value("${agentx.planning.claim-scan.max-rows:2048}") int claimScanMaxRows
@@ -58,6 +61,7 @@ public class PlanningCommandService implements PlanningCommandUseCase, TaskState
         this.workTaskRepository = workTaskRepository;
         this.workTaskDependencyRepository = workTaskDependencyRepository;
         this.workerEligibilityPort = workerEligibilityPort;
+        this.sessionDispatchPolicyPort = sessionDispatchPolicyPort;
         this.objectMapper = objectMapper;
         this.claimScanBatchSize = clamp(claimScanBatchSize, 1, 500);
         this.claimScanMaxRows = Math.max(this.claimScanBatchSize, claimScanMaxRows);
@@ -205,9 +209,14 @@ public class PlanningCommandService implements PlanningCommandUseCase, TaskState
         if (current.status() == TaskStatus.DONE) {
             return current;
         }
-        if (current.status() != TaskStatus.DELIVERED) {
+        if (!canTransitionToDone(current)) {
             throw new IllegalStateException(
-                "Task can be done only from DELIVERED: " + current.taskId() + ", status=" + current.status()
+                "Task can be done only from DELIVERED or ASSIGNED verify: "
+                    + current.taskId()
+                    + ", status="
+                    + current.status()
+                    + ", template="
+                    + current.taskTemplateId().value()
             );
         }
         WorkTask updated = new WorkTask(
@@ -259,6 +268,34 @@ public class PlanningCommandService implements PlanningCommandUseCase, TaskState
         return workTaskRepository.update(updated);
     }
 
+    @Override
+    @Transactional
+    public WorkTask reopenDelivered(String taskId) {
+        WorkTask current = loadTaskOrThrow(taskId);
+        if (current.status() == TaskStatus.DONE) {
+            throw new IllegalStateException(
+                "Done task cannot be reopened: " + current.taskId()
+            );
+        }
+        if (current.status() != TaskStatus.DELIVERED) {
+            return current;
+        }
+        TaskStatus nextStatus = resolveDispatchStatus(current.taskId(), current.requiredToolpacksJson());
+        WorkTask updated = new WorkTask(
+            current.taskId(),
+            current.moduleId(),
+            current.title(),
+            current.taskTemplateId(),
+            nextStatus,
+            current.requiredToolpacksJson(),
+            null,
+            current.createdByRole(),
+            current.createdAt(),
+            Instant.now()
+        );
+        return workTaskRepository.update(updated);
+    }
+
     @Transactional
     public int refreshWaitingTasks(int limit) {
         int cappedLimit = limit <= 0 ? 100 : Math.min(limit, 500);
@@ -289,6 +326,16 @@ public class PlanningCommandService implements PlanningCommandUseCase, TaskState
                 break;
             }
             for (WorkTask candidate : candidates) {
+                String sessionId = findSessionIdByModuleId(candidate.moduleId()).orElse("");
+                if (sessionId.isBlank()) {
+                    continue;
+                }
+                if (!sessionDispatchPolicyPort.isSessionDispatchable(sessionId)) {
+                    continue;
+                }
+                if (isInitGateActive(sessionId) && !isInitTemplate(candidate.taskTemplateId())) {
+                    continue;
+                }
                 if (!workerEligibilityPort.isWorkerEligible(normalizedWorkerId, candidate.requiredToolpacksJson())) {
                     continue;
                 }
@@ -305,10 +352,21 @@ public class PlanningCommandService implements PlanningCommandUseCase, TaskState
         return Optional.empty();
     }
 
+    private static boolean isInitTemplate(TaskTemplateId taskTemplateId) {
+        if (taskTemplateId == null) {
+            return false;
+        }
+        return TaskTemplateId.TMPL_INIT_V0 == taskTemplateId;
+    }
+
     @Override
     @Transactional(readOnly = true)
-    public boolean isInitGateActive() {
-        return workTaskRepository.countNonDoneByTemplateId(TaskTemplateId.TMPL_INIT_V0.value()) > 0;
+    public boolean isInitGateActive(String sessionId) {
+        String normalizedSessionId = requireNotBlank(sessionId, "sessionId");
+        return workTaskRepository.countNonDoneBySessionIdAndTemplateId(
+            normalizedSessionId,
+            TaskTemplateId.TMPL_INIT_V0.value()
+        ) > 0;
     }
 
     @Override
@@ -348,6 +406,35 @@ public class PlanningCommandService implements PlanningCommandUseCase, TaskState
         }
         int cappedLimit = limit <= 0 ? 100 : Math.min(limit, 500);
         return workTaskRepository.findByStatus(status, cappedLimit);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public boolean hasNonDoneTasksBySession(String sessionId) {
+        String normalizedSessionId = requireNotBlank(sessionId, "sessionId");
+        return workTaskRepository.countNonDoneBySessionId(normalizedSessionId) > 0;
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public boolean hasNonDoneDependentTaskByTemplate(String taskId, String taskTemplateId) {
+        String normalizedTaskId = requireNotBlank(taskId, "taskId");
+        TaskTemplateId expectedTemplate = TaskTemplateId.fromValue(taskTemplateId);
+        List<WorkTaskDependency> dependents = workTaskDependencyRepository.findByDependsOnTaskId(normalizedTaskId);
+        for (WorkTaskDependency dependent : dependents) {
+            if (dependent == null || dependent.taskId() == null || dependent.taskId().isBlank()) {
+                continue;
+            }
+            Optional<WorkTask> dependentTask = workTaskRepository.findById(dependent.taskId());
+            if (dependentTask.isEmpty()) {
+                continue;
+            }
+            WorkTask task = dependentTask.get();
+            if (task.taskTemplateId() == expectedTemplate && task.status() != TaskStatus.DONE) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private WorkTask loadTaskOrThrow(String taskId) {
@@ -436,6 +523,16 @@ public class PlanningCommandService implements PlanningCommandUseCase, TaskState
             }
         }
         return false;
+    }
+
+    private static boolean canTransitionToDone(WorkTask task) {
+        if (task == null) {
+            return false;
+        }
+        if (task.status() == TaskStatus.DELIVERED) {
+            return true;
+        }
+        return task.status() == TaskStatus.ASSIGNED && task.taskTemplateId() == TaskTemplateId.TMPL_VERIFY_V0;
     }
 
     private void assertSameSession(WorkTask task, WorkTask dependsOnTask) {

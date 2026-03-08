@@ -5,6 +5,7 @@ import com.agentx.agentxbackend.mergegate.application.port.out.GitClientPort;
 import com.agentx.agentxbackend.mergegate.application.port.out.IntegrationLaneLockPort;
 import com.agentx.agentxbackend.mergegate.application.port.out.RunCreationPort;
 import com.agentx.agentxbackend.mergegate.application.port.out.TaskStateMutationPort;
+import com.agentx.agentxbackend.mergegate.domain.model.MergeCandidate;
 import com.agentx.agentxbackend.mergegate.domain.model.MergeGateResult;
 import org.springframework.stereotype.Service;
 
@@ -43,16 +44,20 @@ public class MergeGateService implements MergeGateUseCase {
             );
         }
         try {
-            String mainHeadBefore = gitClientPort.readMainHead();
-            String mergeCandidateCommit = gitClientPort
-                .rebaseTaskBranch(normalizedTaskId, mainHeadBefore)
-                .mergeCandidateCommit();
+            String sessionId = taskStateMutationPort.resolveSessionIdByTaskId(normalizedTaskId);
+            String mainHeadBefore = gitClientPort.readMainHead(sessionId);
+            MergeCandidate candidate = gitClientPort.rebaseTaskBranch(sessionId, normalizedTaskId, mainHeadBefore);
+            String mergeCandidateCommit = candidate.mergeCandidateCommit();
             String verifyRunId = runCreationPort.createVerifyRun(normalizedTaskId, mergeCandidateCommit);
+            String evidenceRef = candidate.evidenceRef();
+            String message = evidenceRef == null || evidenceRef.isBlank()
+                ? "VERIFY run created for merge candidate " + mergeCandidateCommit
+                : "VERIFY run created for merge candidate " + mergeCandidateCommit + " (" + evidenceRef + ")";
             return new MergeGateResult(
                 normalizedTaskId,
                 verifyRunId,
                 true,
-                "VERIFY run created for merge candidate " + mergeCandidateCommit
+                message
             );
         } finally {
             integrationLaneLockPort.release(INTEGRATION_LANE_LOCK_KEY);
