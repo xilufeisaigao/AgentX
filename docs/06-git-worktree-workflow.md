@@ -368,3 +368,5 @@ create table git_workspaces (
 异常（最小）：
 1. rebase 冲突：创建“冲突修复任务”（`tmpl.bugfix.v0`），把原任务回退并挂上 `depends_on=冲突修复任务(DONE)`，完成后再回到 C9
 2. fast-forward 失败（`main` HEAD 已变化）：必须重新执行 C9（产生新的 merge candidate 并重新 VERIFY）
+   - 控制面不得把任务卡死在旧的 `DELIVERED + VERIFY SUCCEEDED` 组合上
+   - 正确行为是：识别“本次 VERIFY 已过时”，立即重新启动 merge gate，基于新的 `main` HEAD 再走一次 rebase -> VERIFY -> fast-forward

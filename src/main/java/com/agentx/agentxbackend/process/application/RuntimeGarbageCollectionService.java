@@ -161,14 +161,7 @@ public class RuntimeGarbageCollectionService {
                     continue;
                 }
 
-                Optional<TaskRun> latestVerifyRun = runQueryUseCase.findLatestRunByTaskAndKind(task.taskId(), RunKind.VERIFY);
-                if (latestVerifyRun.isPresent()) {
-                    RunStatus status = latestVerifyRun.get().status();
-                    if (status == RunStatus.SUCCEEDED) {
-                        skippedDeliveredWithVerifyHistory++;
-                        continue;
-                    }
-                }
+                runQueryUseCase.findLatestRunByTaskAndKind(task.taskId(), RunKind.VERIFY);
 
                 if (kickedMergeGates >= maxMergeGateStartsPerPoll) {
                     skippedDeliveredByKickLimit++;

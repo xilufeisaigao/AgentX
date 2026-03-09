@@ -20,6 +20,8 @@ import {
 } from "./controlPlane";
 import { readPreferredLocale, translate, translateServerValue } from "./i18n";
 
+const REQUIREMENT_CONFIRMATION_PROMPT = "确认需求";
+
 export function useMissionRoom() {
   const initialNav = readNavigationState();
   const [sessions, setSessions] = useState([]);
@@ -166,27 +168,39 @@ export function useMissionRoom() {
     if (existing) {
       return existing;
     }
-    const doc = getRequirementDoc(detail);
-    return {
-      title: doc ? read(doc, "title") || getSessionTitle(detail) : getSessionTitle(detail),
-      content: doc
-        ? read(doc, "content") || buildRequirementTemplate(read(doc, "title") || getSessionTitle(detail), readPreferredLocale())
-        : buildRequirementTemplate(getSessionTitle(detail), readPreferredLocale()),
-      userInput: "",
-      assistantMessage: "",
-      missingInformation: [],
-      readyToDraft: false,
-    };
+    return buildRequirementEditorState(detail);
   }
 
-  function seedRequirementEditor(sessionId, detail) {
+  function syncRequirementEditor(sessionId, detail) {
     setRequirementEditors((current) => {
-      if (current[sessionId]) {
-        return current;
+      const existing = current[sessionId];
+      const nextState = buildRequirementEditorState(detail, existing);
+      if (!existing) {
+        return {
+          ...current,
+          [sessionId]: nextState,
+        };
       }
+
+      const previousDocId = existing.sourceDocId || null;
+      const previousVersion = Number(existing.sourceDocVersion || 0);
+      const previousBaselineTitle = existing.baselineTitle ?? existing.title;
+      const previousBaselineContent = existing.baselineContent ?? existing.content;
+      const titleChangedLocally = existing.title !== previousBaselineTitle;
+      const contentChangedLocally = existing.content !== previousBaselineContent;
+      const docChanged = previousDocId !== nextState.sourceDocId || nextState.sourceDocVersion > previousVersion;
+
       return {
         ...current,
-        [sessionId]: getRequirementEditor(sessionId, detail),
+        [sessionId]: {
+          ...existing,
+          title: docChanged || !titleChangedLocally ? nextState.title : existing.title,
+          content: docChanged || !contentChangedLocally ? nextState.content : existing.content,
+          sourceDocId: nextState.sourceDocId,
+          sourceDocVersion: nextState.sourceDocVersion,
+          baselineTitle: nextState.baselineTitle,
+          baselineContent: nextState.baselineContent,
+        },
       };
     });
   }
@@ -201,7 +215,7 @@ export function useMissionRoom() {
   async function loadSessionDetail(sessionId) {
     const detail = await apiRequest(`/api/v0/sessions/${sessionId}`);
     setSessionDetails((current) => ({ ...current, [sessionId]: detail }));
-    seedRequirementEditor(sessionId, detail);
+    syncRequirementEditor(sessionId, detail);
     return detail;
   }
 
@@ -498,15 +512,35 @@ export function useMissionRoom() {
     await runBusy(persist ? "draft-persist" : "draft-analyze", async () => {
       const editor = getRequirementEditor(activeSessionId, activeDetail);
       const doc = getRequirementDoc(activeDetail);
-      const response = await apiRequest(`/api/v0/sessions/${activeSessionId}/requirement-agent/drafts`, {
+      let response = await apiRequest(`/api/v0/sessions/${activeSessionId}/requirement-agent/drafts`, {
         method: "POST",
         body: {
           title: editor.title.trim() || getSessionTitle(activeDetail),
-          user_input: editor.userInput.trim(),
+          user_input: editor.userInput.trim() || (persist && editor.readyToDraft ? REQUIREMENT_CONFIRMATION_PROMPT : ""),
           doc_id: doc ? getDocId(doc) : null,
           persist,
         },
       });
+
+      const phase = String(read(response, "phase") || "").toUpperCase();
+      const readyToDraft = Boolean(read(response, "readyToDraft")) || phase === "READY_TO_DRAFT";
+      const draftCreated = Boolean(read(response, "persisted")) || phase === "DRAFT_CREATED" || Boolean(read(response, "content"));
+
+      if (persist && readyToDraft && !draftCreated) {
+        response = await apiRequest(`/api/v0/sessions/${activeSessionId}/requirement-agent/drafts`, {
+          method: "POST",
+          body: {
+            title: editor.title.trim() || getSessionTitle(activeDetail),
+            user_input: REQUIREMENT_CONFIRMATION_PROMPT,
+            doc_id: doc ? getDocId(doc) : null,
+            persist: true,
+          },
+        });
+      }
+
+      const finalPhase = String(read(response, "phase") || "").toUpperCase();
+      const finalReadyToDraft = Boolean(read(response, "readyToDraft")) || finalPhase === "READY_TO_DRAFT";
+      const finalDraftCreated = Boolean(read(response, "persisted")) || finalPhase === "DRAFT_CREATED" || Boolean(read(response, "content"));
 
       setRequirementEditors((current) => ({
         ...current,
@@ -514,13 +548,29 @@ export function useMissionRoom() {
           ...editor,
           content: read(response, "content") || editor.content,
           assistantMessage: read(response, "assistantMessage") || "",
-          readyToDraft: Boolean(read(response, "readyToDraft")),
+          readyToDraft: finalReadyToDraft,
           missingInformation: arrayOf(response, "missingInformation"),
         },
       }));
 
       await Promise.allSettled([loadSessionDetail(activeSessionId), loadProgress(activeSessionId)]);
-      showToast(persist ? tr("requirementDraftGenerated") : tr("requirementGapAnalyzed"), "active");
+
+      if (!persist) {
+        showToast(tr("requirementGapAnalyzed"), "active");
+        return;
+      }
+
+      if (finalDraftCreated) {
+        showToast(tr("requirementDraftGenerated"), "active");
+        return;
+      }
+
+      if (finalReadyToDraft) {
+        showToast(tr("requirementDraftReadyToConfirm"), "neutral");
+        return;
+      }
+
+      showToast(translateServerValue(read(response, "assistantMessage") || tr("requirementGapAnalyzed"), readPreferredLocale()), "neutral");
     });
   }
 
@@ -730,6 +780,27 @@ export function useMissionRoom() {
     testRuntimeConfig,
     applyRuntimeConfig,
     runAutomation,
+  };
+}
+
+function buildRequirementEditorState(detail, previous = null) {
+  const doc = getRequirementDoc(detail);
+  const title = doc ? read(doc, "title") || getSessionTitle(detail) : getSessionTitle(detail);
+  const content = doc
+    ? read(doc, "content") || buildRequirementTemplate(title, readPreferredLocale())
+    : buildRequirementTemplate(getSessionTitle(detail), readPreferredLocale());
+
+  return {
+    title,
+    content,
+    userInput: previous?.userInput || "",
+    assistantMessage: previous?.assistantMessage || "",
+    missingInformation: previous?.missingInformation || [],
+    readyToDraft: previous?.readyToDraft || false,
+    sourceDocId: doc ? getDocId(doc) : null,
+    sourceDocVersion: Number(read(doc, "currentVersion") || 0),
+    baselineTitle: title,
+    baselineContent: content,
   };
 }
 

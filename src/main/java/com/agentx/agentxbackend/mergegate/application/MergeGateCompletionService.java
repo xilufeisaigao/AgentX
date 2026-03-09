@@ -28,15 +28,15 @@ public class MergeGateCompletionService implements MergeGateCompletionUseCase {
     @Override
     public void completeVerifySuccess(String taskId, String verifyRunId, String mergeCandidateCommit) {
         String normalizedTaskId = requireNotBlank(taskId, "taskId");
-        requireNotBlank(verifyRunId, "verifyRunId");
+        String normalizedVerifyRunId = requireNotBlank(verifyRunId, "verifyRunId");
         String normalizedMergeCandidateCommit = requireNotBlank(mergeCandidateCommit, "mergeCandidateCommit");
 
         if (!integrationLaneLockPort.tryAcquire(INTEGRATION_LANE_LOCK_KEY)) {
-            throw new IllegalStateException("Integration lane is busy while completing verify run: " + verifyRunId);
+            throw new IllegalStateException("Integration lane is busy while completing verify run: " + normalizedVerifyRunId);
         }
         try {
             String sessionId = taskStateMutationPort.resolveSessionIdByTaskId(normalizedTaskId);
-            gitClientPort.fastForwardMain(sessionId, normalizedMergeCandidateCommit);
+            fastForwardMainOrRequestReplan(sessionId, normalizedTaskId, normalizedVerifyRunId, normalizedMergeCandidateCommit);
             gitClientPort.ensureDeliveryTagOnMain(sessionId, normalizedMergeCandidateCommit);
             taskStateMutationPort.markDone(normalizedTaskId);
         } finally {
@@ -49,6 +49,35 @@ public class MergeGateCompletionService implements MergeGateCompletionUseCase {
             throw new IllegalArgumentException(fieldName + " must not be blank");
         }
         return value.trim();
+    }
+
+    private void fastForwardMainOrRequestReplan(
+        String sessionId,
+        String taskId,
+        String verifyRunId,
+        String mergeCandidateCommit
+    ) {
+        try {
+            gitClientPort.fastForwardMain(sessionId, mergeCandidateCommit);
+        } catch (IllegalStateException ex) {
+            if (!isFastForwardRace(ex.getMessage())) {
+                throw ex;
+            }
+            throw new MergeGateReplanRequiredException(
+                "Verify run " + verifyRunId + " became stale because main moved before completion. taskId=" + taskId,
+                ex
+            );
+        }
+    }
+
+    private static boolean isFastForwardRace(String message) {
+        if (message == null || message.isBlank()) {
+            return false;
+        }
+        String normalized = message.trim().toLowerCase(java.util.Locale.ROOT);
+        return normalized.contains("not possible to fast-forward")
+            || normalized.contains("ff-only")
+            || normalized.contains("fast-forward, aborting");
     }
 }
 

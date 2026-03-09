@@ -16,8 +16,12 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
 import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.Optional;
@@ -32,6 +36,12 @@ public class RunNeedsInputProcessManager {
         TicketStatus.IN_PROGRESS,
         TicketStatus.WAITING_USER
     );
+    private static final String RUN_NEED_INPUT_KIND = "run_need_input";
+    private static final String HANDOFF_PACKET_KIND = "handoff_packet";
+    private static final String PLANNER_NOOP_GUARD_KIND = "PLANNER_NOOP";
+    private static final String PLANNER_NOOP_GUARD_TRIGGER = "PLANNER_NOOP_GUARD";
+    private static final String PLANNER_NOOP_ZH_MARKER = "规划器连续两次都没有返回会产生实际代码变更的 edits";
+    private static final String PLANNER_NOOP_EN_MARKER = "planner failed twice to return edits that change the worktree";
 
     private final TicketCommandUseCase ticketCommandUseCase;
     private final TicketQueryUseCase ticketQueryUseCase;
@@ -40,6 +50,7 @@ public class RunNeedsInputProcessManager {
     private final ObjectMapper objectMapper;
     private final String architectAgentId;
     private final int architectLeaseSeconds;
+    private final int noopClarificationMaxBeforeArchReview;
 
     public RunNeedsInputProcessManager(
         TicketCommandUseCase ticketCommandUseCase,
@@ -48,7 +59,9 @@ public class RunNeedsInputProcessManager {
         RequirementDocQueryUseCase requirementDocQueryUseCase,
         ObjectMapper objectMapper,
         @Value("${agentx.architect.auto-processor.agent-id:architect-agent-auto}") String architectAgentId,
-        @Value("${agentx.architect.auto-processor.lease-seconds:300}") int architectLeaseSeconds
+        @Value("${agentx.architect.auto-processor.lease-seconds:300}") int architectLeaseSeconds,
+        @Value("${agentx.process.run-need-input.noop-clarification-max-before-arch-review:3}")
+        int noopClarificationMaxBeforeArchReview
     ) {
         this.ticketCommandUseCase = ticketCommandUseCase;
         this.ticketQueryUseCase = ticketQueryUseCase;
@@ -57,6 +70,7 @@ public class RunNeedsInputProcessManager {
         this.objectMapper = objectMapper;
         this.architectAgentId = normalizeAgentId(architectAgentId);
         this.architectLeaseSeconds = Math.max(30, architectLeaseSeconds);
+        this.noopClarificationMaxBeforeArchReview = Math.max(1, noopClarificationMaxBeforeArchReview);
     }
 
     public void handle(RunNeedsDecisionEvent event) {
@@ -99,6 +113,18 @@ public class RunNeedsInputProcessManager {
                 "Session not found for task: " + normalizedTaskId
             ));
         RequirementRef requirementRef = resolveRequirementRef(sessionId);
+        Optional<Ticket> escalatedTicket = maybeEscalatePlannerNoopClarification(
+            sessionId,
+            normalizedRunId,
+            normalizedTaskId,
+            type,
+            normalizedBody,
+            dataJson,
+            requirementRef
+        );
+        if (escalatedTicket.isPresent()) {
+            return;
+        }
         Optional<Ticket> reusableTicket = reuseOrSupersedeRunNeedInputTickets(
             sessionId,
             normalizedRunId,
@@ -153,7 +179,7 @@ public class RunNeedsInputProcessManager {
             if (ticket == null || !ACTIVE_STATUSES.contains(ticket.status())) {
                 continue;
             }
-            RunNeedInputRef ref = parseRunNeedInputRef(ticket);
+            RunNeedInputTicketRef ref = parseRunNeedInputTicketRef(ticket);
             if (ref == null || !taskId.equals(ref.taskId()) || ticketType != ref.ticketType()) {
                 continue;
             }
@@ -201,7 +227,150 @@ public class RunNeedsInputProcessManager {
         return working;
     }
 
-    private void supersedeTicket(Ticket staleTicket, RunNeedInputRef staleRef, String replacementRunId) {
+    private Optional<Ticket> maybeEscalatePlannerNoopClarification(
+        String sessionId,
+        String runId,
+        String taskId,
+        TicketType ticketType,
+        String body,
+        String dataJson,
+        RequirementRef requirementRef
+    ) {
+        if (ticketType != TicketType.CLARIFICATION || !isPlannerNoopClarification(body, dataJson)) {
+            return Optional.empty();
+        }
+
+        List<Ticket> clarificationTickets = ticketQueryUseCase.listBySession(
+            sessionId,
+            null,
+            "architect_agent",
+            TicketType.CLARIFICATION.name()
+        );
+        int historicalAttempts = 0;
+        List<ActiveRunNeedInputTicket> activeClarifications = new ArrayList<>();
+        for (Ticket ticket : clarificationTickets) {
+            RunNeedInputTicketRef ref = parseRunNeedInputTicketRef(ticket);
+            if (ref == null || !taskId.equals(ref.taskId()) || !ref.isPlannerNoopGuard()) {
+                continue;
+            }
+            historicalAttempts++;
+            if (ticket.status() != null && ACTIVE_STATUSES.contains(ticket.status())) {
+                activeClarifications.add(new ActiveRunNeedInputTicket(ticket, ref));
+            }
+        }
+
+        Optional<Ticket> existingArchReview = findActivePlannerNoopArchReview(sessionId, taskId);
+        int currentAttempt = historicalAttempts + 1;
+        if (existingArchReview.isEmpty() && currentAttempt <= noopClarificationMaxBeforeArchReview) {
+            return Optional.empty();
+        }
+
+        for (ActiveRunNeedInputTicket activeClarification : activeClarifications) {
+            if (!runId.equals(activeClarification.ref().runId())) {
+                supersedeTicket(activeClarification.ticket(), activeClarification.ref(), runId);
+                continue;
+            }
+            blockForPlannerNoopEscalation(activeClarification.ticket(), activeClarification.ref(), currentAttempt);
+        }
+
+        Ticket archReviewTicket = existingArchReview.orElseGet(() -> createPlannerNoopArchReview(
+            sessionId,
+            taskId,
+            runId,
+            body,
+            dataJson,
+            currentAttempt,
+            requirementRef
+        ));
+        appendPlannerNoopArchReviewComment(archReviewTicket.ticketId(), taskId, runId, currentAttempt, existingArchReview.isPresent());
+        return Optional.of(archReviewTicket);
+    }
+
+    private Optional<Ticket> findActivePlannerNoopArchReview(String sessionId, String taskId) {
+        for (Ticket ticket : ticketQueryUseCase.listBySession(sessionId, null, "architect_agent", TicketType.ARCH_REVIEW.name())) {
+            if (ticket == null || ticket.status() == null || !ACTIVE_STATUSES.contains(ticket.status())) {
+                continue;
+            }
+            PlannerNoopArchReviewRef ref = parsePlannerNoopArchReviewRef(ticket);
+            if (ref != null && taskId.equals(ref.taskId())) {
+                return Optional.of(ticket);
+            }
+        }
+        return Optional.empty();
+    }
+
+    private Ticket createPlannerNoopArchReview(
+        String sessionId,
+        String taskId,
+        String runId,
+        String body,
+        String dataJson,
+        int attemptCount,
+        RequirementRef requirementRef
+    ) {
+        return ticketCommandUseCase.createTicket(
+            sessionId,
+            TicketType.ARCH_REVIEW,
+            "ARCH_REVIEW: replan " + taskId + " after repeated no-op runs",
+            "architect_agent",
+            "architect_agent",
+            requirementRef.docId(),
+            requirementRef.docVersion(),
+            buildPlannerNoopArchReviewPayloadJson(taskId, runId, body, dataJson, attemptCount)
+        );
+    }
+
+    private void appendPlannerNoopArchReviewComment(
+        String ticketId,
+        String taskId,
+        String runId,
+        int attemptCount,
+        boolean reusedExistingTicket
+    ) {
+        ObjectNode data = objectMapper.createObjectNode();
+        data.put("source", "run_need_input_guard");
+        data.put("trigger", PLANNER_NOOP_GUARD_TRIGGER);
+        data.put("task_id", taskId);
+        data.put("run_id", runId);
+        data.put("attempt_count", attemptCount);
+        data.put("reused_existing_ticket", reusedExistingTicket);
+        ticketCommandUseCase.appendEvent(
+            ticketId,
+            "architect_agent",
+            "COMMENT",
+            "Escalated planner no-op clarification loop for task " + taskId + " after attempt " + attemptCount + ".",
+            data.toString()
+        );
+    }
+
+    private void blockForPlannerNoopEscalation(Ticket ticket, RunNeedInputTicketRef ref, int attemptCount) {
+        try {
+            ObjectNode data = objectMapper.createObjectNode();
+            data.put("to_status", "BLOCKED");
+            data.put("reason", "Escalated to ARCH_REVIEW after repeated planner no-op clarifications.");
+            data.put("source", "run_need_input_guard");
+            data.put("trigger", PLANNER_NOOP_GUARD_TRIGGER);
+            data.put("task_id", ref.taskId());
+            data.put("run_id", ref.runId());
+            data.put("attempt_count", attemptCount);
+            ticketCommandUseCase.appendEvent(
+                ticket.ticketId(),
+                "architect_agent",
+                "STATUS_CHANGED",
+                "Need-input ticket blocked because planner no-op protection escalated to ARCH_REVIEW.",
+                data.toString()
+            );
+        } catch (RuntimeException ex) {
+            log.warn(
+                "Failed to block planner no-op clarification ticket, ticketId={}, taskId={}, cause={}",
+                ticket.ticketId(),
+                ref.taskId(),
+                ex.getMessage()
+            );
+        }
+    }
+
+    private void supersedeTicket(Ticket staleTicket, RunNeedInputTicketRef staleRef, String replacementRunId) {
         try {
             ObjectNode data = objectMapper.createObjectNode();
             data.put("to_status", "BLOCKED");
@@ -228,28 +397,53 @@ public class RunNeedsInputProcessManager {
         }
     }
 
-    private RunNeedInputRef parseRunNeedInputRef(Ticket ticket) {
+    private RunNeedInputTicketRef parseRunNeedInputTicketRef(Ticket ticket) {
         if (ticket == null || ticket.payloadJson() == null || ticket.payloadJson().isBlank()) {
             return null;
         }
         try {
             JsonNode root = objectMapper.readTree(ticket.payloadJson());
-            if (!"run_need_input".equalsIgnoreCase(root.path("kind").asText())) {
+            if (!RUN_NEED_INPUT_KIND.equalsIgnoreCase(root.path("kind").asText())) {
                 return null;
             }
             String runId = normalizeNullable(root.path("run_id").asText(null));
             String taskId = normalizeNullable(root.path("task_id").asText(null));
             String payloadType = normalizeNullable(root.path("ticket_type").asText(null));
+            String summary = normalizeNullable(root.path("summary").asText(null));
+            String guardKind = normalizeNullable(root.path("guard_kind").asText(null));
             if (runId == null || taskId == null) {
                 return null;
             }
             TicketType ticketType = payloadType == null
                 ? ticket.type()
-                : TicketType.valueOf(payloadType.toUpperCase(java.util.Locale.ROOT));
+                : TicketType.valueOf(payloadType.toUpperCase(Locale.ROOT));
             if (ticketType == null) {
                 return null;
             }
-            return new RunNeedInputRef(runId, taskId, ticketType);
+            return new RunNeedInputTicketRef(runId, taskId, ticketType, summary, guardKind);
+        } catch (Exception ex) {
+            return null;
+        }
+    }
+
+    private PlannerNoopArchReviewRef parsePlannerNoopArchReviewRef(Ticket ticket) {
+        if (ticket == null || ticket.payloadJson() == null || ticket.payloadJson().isBlank()) {
+            return null;
+        }
+        try {
+            JsonNode root = objectMapper.readTree(ticket.payloadJson());
+            if (!HANDOFF_PACKET_KIND.equalsIgnoreCase(root.path("kind").asText())) {
+                return null;
+            }
+            if (!PLANNER_NOOP_GUARD_TRIGGER.equalsIgnoreCase(root.path("trigger").asText())) {
+                return null;
+            }
+            String taskId = normalizeNullable(root.path("task_id").asText(null));
+            String runId = normalizeNullable(root.path("run_id").asText(null));
+            if (taskId == null) {
+                return null;
+            }
+            return new PlannerNoopArchReviewRef(taskId, runId);
         } catch (Exception ex) {
             return null;
         }
@@ -263,12 +457,16 @@ public class RunNeedsInputProcessManager {
         String dataJson
     ) {
         ObjectNode root = objectMapper.createObjectNode();
-        root.put("kind", "run_need_input");
+        root.put("kind", RUN_NEED_INPUT_KIND);
         root.put("source", "worker_run_event");
         root.put("run_id", runId);
         root.put("task_id", taskId);
         root.put("ticket_type", type.name());
         root.put("summary", body);
+        String guardKind = resolveRunNeedInputGuardKind(type, body, dataJson);
+        if (guardKind != null) {
+            root.put("guard_kind", guardKind);
+        }
         if (dataJson != null) {
             root.put("run_data_json", dataJson);
         } else {
@@ -285,6 +483,10 @@ public class RunNeedsInputProcessManager {
         root.put("ticket_type", type.name());
         root.put("request_kind", type == TicketType.DECISION ? "DECISION" : "CLARIFICATION");
         root.put("question", body == null ? "" : body);
+        String guardKind = resolveRunNeedInputGuardKind(type, body, dataJson);
+        if (guardKind != null) {
+            root.put("guard_kind", guardKind);
+        }
         if (dataJson != null) {
             root.put("run_data_json", dataJson);
         } else {
@@ -303,7 +505,42 @@ public class RunNeedsInputProcessManager {
         root.put("run_id", runId);
         root.put("task_id", taskId);
         root.put("ticket_type", type.name());
+        String guardKind = resolveRunNeedInputGuardKind(type, null, dataJson);
+        if (guardKind != null) {
+            root.put("guard_kind", guardKind);
+        }
         if (dataJson != null) {
+            root.put("run_data_json", dataJson);
+        } else {
+            root.putNull("run_data_json");
+        }
+        return root.toString();
+    }
+
+    private String buildPlannerNoopArchReviewPayloadJson(
+        String taskId,
+        String runId,
+        String body,
+        String dataJson,
+        int attemptCount
+    ) {
+        ObjectNode root = objectMapper.createObjectNode();
+        root.put("kind", HANDOFF_PACKET_KIND);
+        root.put("trigger", PLANNER_NOOP_GUARD_TRIGGER);
+        root.put("task_id", taskId);
+        root.put("run_id", runId);
+        root.put("attempt_count", attemptCount);
+
+        ObjectNode userChangeNode = root.putObject("user_change");
+        userChangeNode.put("summary", "Repeated planner no-op clarification loop requires task re-planning.");
+        userChangeNode.put("raw_user_text", defaultText(body, "Planner repeatedly failed to produce executable edits."));
+
+        ArrayNode questionNode = root.putArray("question_for_architect");
+        questionNode.add(
+            "Re-evaluate completed versus pending work for task " + taskId
+                + ", split the remaining scope into executable tasks, and avoid no-op planner loops."
+        );
+        if (dataJson != null && !dataJson.isBlank()) {
             root.put("run_data_json", dataJson);
         } else {
             root.putNull("run_data_json");
@@ -380,6 +617,33 @@ public class RunNeedsInputProcessManager {
         return new RequirementRef(currentDoc.docId(), currentDoc.confirmedVersion());
     }
 
+    private String resolveRunNeedInputGuardKind(TicketType ticketType, String body, String dataJson) {
+        if (ticketType == TicketType.CLARIFICATION && isPlannerNoopClarification(body, dataJson)) {
+            return PLANNER_NOOP_GUARD_KIND;
+        }
+        return null;
+    }
+
+    private boolean isPlannerNoopClarification(String body, String dataJson) {
+        if (dataJson != null && !dataJson.isBlank()) {
+            try {
+                JsonNode runData = objectMapper.readTree(dataJson);
+                String explicitGuard = normalizeNullable(runData.path("guard_kind").asText(null));
+                if (PLANNER_NOOP_GUARD_KIND.equalsIgnoreCase(defaultText(explicitGuard, ""))) {
+                    return true;
+                }
+            } catch (Exception ignored) {
+                // Fall through to summary-text matching.
+            }
+        }
+        String normalizedBody = normalizeNullable(body);
+        if (normalizedBody == null) {
+            return false;
+        }
+        String lower = normalizedBody.toLowerCase(Locale.ROOT);
+        return lower.contains(PLANNER_NOOP_EN_MARKER) || normalizedBody.contains(PLANNER_NOOP_ZH_MARKER);
+    }
+
     private static String normalizeAgentId(String rawAgentId) {
         if (rawAgentId == null || rawAgentId.isBlank()) {
             return "architect-agent-auto";
@@ -402,7 +666,34 @@ public class RunNeedsInputProcessManager {
         return normalized.isEmpty() ? null : normalized;
     }
 
-    private record RunNeedInputRef(String runId, String taskId, TicketType ticketType) {
+    private static String defaultText(String value, String fallback) {
+        if (value == null || value.isBlank()) {
+            return fallback;
+        }
+        return value.trim();
+    }
+
+    private record RunNeedInputTicketRef(
+        String runId,
+        String taskId,
+        TicketType ticketType,
+        String summary,
+        String guardKind
+    ) {
+        private boolean isPlannerNoopGuard() {
+            if (PLANNER_NOOP_GUARD_KIND.equalsIgnoreCase(defaultText(guardKind, ""))) {
+                return true;
+            }
+            String normalizedSummary = defaultText(summary, "");
+            String lower = normalizedSummary.toLowerCase(Locale.ROOT);
+            return lower.contains(PLANNER_NOOP_EN_MARKER) || normalizedSummary.contains(PLANNER_NOOP_ZH_MARKER);
+        }
+    }
+
+    private record ActiveRunNeedInputTicket(Ticket ticket, RunNeedInputTicketRef ref) {
+    }
+
+    private record PlannerNoopArchReviewRef(String taskId, String runId) {
     }
 
     private record RequirementRef(String docId, Integer docVersion) {

@@ -24,7 +24,9 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -52,7 +54,8 @@ class RunNeedsInputProcessManagerTest {
             requirementDocQueryUseCase,
             new ObjectMapper(),
             "architect-agent-auto",
-            300
+            300,
+            3
         );
         RunNeedsDecisionEvent event = new RunNeedsDecisionEvent(
             "RUN-1",
@@ -159,7 +162,8 @@ class RunNeedsInputProcessManagerTest {
             requirementDocQueryUseCase,
             new ObjectMapper(),
             "architect-agent-auto",
-            300
+            300,
+            3
         );
         RunNeedsClarificationEvent event = new RunNeedsClarificationEvent(
             "RUN-2",
@@ -239,7 +243,8 @@ class RunNeedsInputProcessManagerTest {
             requirementDocQueryUseCase,
             new ObjectMapper(),
             "architect-agent-auto",
-            300
+            300,
+            3
         );
         when(waitingTaskQueryUseCase.findSessionIdByTaskId("TASK-3")).thenReturn(Optional.empty());
 
@@ -258,7 +263,8 @@ class RunNeedsInputProcessManagerTest {
             requirementDocQueryUseCase,
             new ObjectMapper(),
             "architect-agent-auto",
-            300
+            300,
+            3
         );
         Ticket existing = new Ticket(
             "TCK-EXISTING",
@@ -307,7 +313,8 @@ class RunNeedsInputProcessManagerTest {
             requirementDocQueryUseCase,
             new ObjectMapper(),
             "architect-agent-auto",
-            300
+            300,
+            3
         );
         Ticket stale = new Ticket(
             "TCK-STALE",
@@ -379,5 +386,111 @@ class RunNeedsInputProcessManagerTest {
             org.mockito.ArgumentMatchers.contains("\"to_status\":\"BLOCKED\"")
         );
         verify(ticketCommandUseCase).createTicket(any(), eq(TicketType.DECISION), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void handleClarificationShouldEscalatePlannerNoopLoopToArchReviewAfterThreshold() {
+        RunNeedsInputProcessManager manager = new RunNeedsInputProcessManager(
+            ticketCommandUseCase,
+            ticketQueryUseCase,
+            waitingTaskQueryUseCase,
+            requirementDocQueryUseCase,
+            new ObjectMapper(),
+            "architect-agent-auto",
+            300,
+            3
+        );
+        Ticket stale1 = plannerNoopClarification("TCK-NOOP-1", "SES-LOOP", "RUN-1", TicketStatus.BLOCKED);
+        Ticket stale2 = plannerNoopClarification("TCK-NOOP-2", "SES-LOOP", "RUN-2", TicketStatus.BLOCKED);
+        Ticket active = plannerNoopClarification("TCK-NOOP-3", "SES-LOOP", "RUN-3", TicketStatus.WAITING_USER);
+        Ticket archReview = new Ticket(
+            "TCK-ARCH-1",
+            "SES-LOOP",
+            TicketType.ARCH_REVIEW,
+            TicketStatus.OPEN,
+            "ARCH_REVIEW",
+            "architect_agent",
+            "architect_agent",
+            "REQ-LOOP",
+            7,
+            "{\"kind\":\"handoff_packet\",\"trigger\":\"PLANNER_NOOP_GUARD\",\"task_id\":\"TASK-LOOP\",\"run_id\":\"RUN-4\"}",
+            null,
+            null,
+            Instant.parse("2026-02-23T00:00:00Z"),
+            Instant.parse("2026-02-23T00:00:00Z")
+        );
+        when(waitingTaskQueryUseCase.findSessionIdByTaskId("TASK-LOOP")).thenReturn(Optional.of("SES-LOOP"));
+        when(requirementDocQueryUseCase.findCurrentBySessionId("SES-LOOP"))
+            .thenReturn(Optional.of(
+                new RequirementCurrentDoc(
+                    "REQ-LOOP",
+                    8,
+                    7,
+                    "CONFIRMED",
+                    "title",
+                    "content",
+                    Instant.parse("2026-02-23T00:00:00Z")
+                )
+            ));
+        when(ticketQueryUseCase.listBySession("SES-LOOP", null, "architect_agent", "CLARIFICATION"))
+            .thenReturn(List.of(stale1, stale2, active));
+        when(ticketQueryUseCase.listBySession("SES-LOOP", null, "architect_agent", "ARCH_REVIEW"))
+            .thenReturn(List.of());
+        when(ticketCommandUseCase.createTicket(any(), eq(TicketType.ARCH_REVIEW), any(), any(), any(), any(), any(), any()))
+            .thenReturn(archReview);
+
+        manager.handle(new RunNeedsClarificationEvent(
+            "RUN-4",
+            "TASK-LOOP",
+            "规划器连续两次都没有返回会产生实际代码变更的 edits，请检查任务拆分或约束是否过宽。",
+            null
+        ));
+
+        verify(ticketCommandUseCase, never()).claimTicket(any(), any(), anyInt());
+        verify(ticketCommandUseCase).createTicket(
+            eq("SES-LOOP"),
+            eq(TicketType.ARCH_REVIEW),
+            argThat(title -> title != null && title.contains("TASK-LOOP")),
+            eq("architect_agent"),
+            eq("architect_agent"),
+            eq("REQ-LOOP"),
+            eq(7),
+            argThat(payload -> payload != null && payload.contains("\"trigger\":\"PLANNER_NOOP_GUARD\""))
+        );
+        verify(ticketCommandUseCase).appendEvent(
+            eq("TCK-NOOP-3"),
+            eq("architect_agent"),
+            eq("STATUS_CHANGED"),
+            any(),
+            argThat(data -> data != null && data.contains("\"superseded_by_run_id\":\"RUN-4\""))
+        );
+        verify(ticketCommandUseCase).appendEvent(
+            eq("TCK-ARCH-1"),
+            eq("architect_agent"),
+            eq("COMMENT"),
+            argThat(body -> body != null && body.contains("TASK-LOOP")),
+            argThat(data -> data != null && data.contains("\"trigger\":\"PLANNER_NOOP_GUARD\""))
+        );
+        verify(ticketCommandUseCase, never()).createTicket(any(), eq(TicketType.CLARIFICATION), any(), any(), any(), any(), any(), any());
+    }
+
+    private static Ticket plannerNoopClarification(String ticketId, String sessionId, String runId, TicketStatus status) {
+        return new Ticket(
+            ticketId,
+            sessionId,
+            TicketType.CLARIFICATION,
+            status,
+            "Planner noop",
+            "architect_agent",
+            "architect_agent",
+            null,
+            null,
+            "{\"kind\":\"run_need_input\",\"run_id\":\"" + runId
+                + "\",\"task_id\":\"TASK-LOOP\",\"ticket_type\":\"CLARIFICATION\",\"summary\":\"Planner failed twice to return edits that change the worktree.\",\"guard_kind\":\"PLANNER_NOOP\"}",
+            "architect-agent-auto",
+            Instant.parse("2026-02-23T00:05:00Z"),
+            Instant.parse("2026-02-23T00:00:00Z"),
+            Instant.parse("2026-02-23T00:00:00Z")
+        );
     }
 }

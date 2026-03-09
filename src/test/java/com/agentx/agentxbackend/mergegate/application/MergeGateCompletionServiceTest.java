@@ -10,6 +10,8 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -43,6 +45,30 @@ class MergeGateCompletionServiceTest {
         inOrder.verify(gitClientPort).ensureDeliveryTagOnMain("SES-1", "abc123");
         inOrder.verify(taskStateMutationPort).markDone("TASK-1");
         inOrder.verify(integrationLaneLockPort).release("integration-lane");
+    }
+
+    @Test
+    void completeVerifySuccessShouldRequestReplanWhenMainMovedAfterVerify() {
+        MergeGateCompletionService service = new MergeGateCompletionService(
+            taskStateMutationPort,
+            gitClientPort,
+            integrationLaneLockPort
+        );
+        when(integrationLaneLockPort.tryAcquire("integration-lane")).thenReturn(true);
+        when(taskStateMutationPort.resolveSessionIdByTaskId("TASK-REPLAN")).thenReturn("SES-REPLAN");
+        doThrow(
+            new IllegalStateException("Git command failed (exit 128): git merge --ff-only abc999, output=fatal: Not possible to fast-forward, aborting.")
+        ).when(gitClientPort).fastForwardMain("SES-REPLAN", "abc999");
+
+        MergeGateReplanRequiredException ex = assertThrows(
+            MergeGateReplanRequiredException.class,
+            () -> service.completeVerifySuccess("TASK-REPLAN", "RUN-VERIFY-REPLAN", "abc999")
+        );
+
+        assertTrue(ex.getMessage().contains("RUN-VERIFY-REPLAN"));
+        verify(gitClientPort, never()).ensureDeliveryTagOnMain("SES-REPLAN", "abc999");
+        verify(taskStateMutationPort, never()).markDone("TASK-REPLAN");
+        verify(integrationLaneLockPort).release("integration-lane");
     }
 
     @Test

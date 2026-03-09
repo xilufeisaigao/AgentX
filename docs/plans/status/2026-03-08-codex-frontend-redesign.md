@@ -130,6 +130,10 @@
    - `Set-Location frontend-demo`
    - `npm install`
    - `npm run dev`
+4. Requirement Studio 已修正需求草稿生成链路：
+   - 不再把 `READY_TO_DRAFT` 误报成“已生成草稿”
+   - 信息足够时，`生成草稿` 会自动完成后端要求的确认步骤
+   - `GET /api/v0/sessions/{sessionId}` 返回新文档后，右侧编辑器会同步最新标题与内容，而不是停留在旧本地状态
 
 ## 6. 当前仍需继续做的事
 

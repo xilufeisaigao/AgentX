@@ -145,7 +145,7 @@ class RuntimeGarbageCollectionServiceTest {
     }
 
     @Test
-    void collectOnceShouldSkipOnlyDeliveredTaskWhenVerifySucceededExists() {
+    void collectOnceShouldRetryDeliveredTaskWhenVerifySucceededExistsButTaskStillDelivered() {
         RuntimeGarbageCollectionService service = newService();
         Instant staleTime = Instant.now().minusSeconds(300);
         WorkTask deliveredWithActiveVerify = workTask("TASK-4", TaskStatus.DELIVERED, null, staleTime);
@@ -159,14 +159,16 @@ class RuntimeGarbageCollectionServiceTest {
         when(runQueryUseCase.hasActiveRunByTaskAndKind("TASK-4", RunKind.VERIFY)).thenReturn(true);
         when(runQueryUseCase.hasActiveRunByTaskAndKind("TASK-5", RunKind.VERIFY)).thenReturn(false);
         when(runQueryUseCase.findLatestRunByTaskAndKind("TASK-5", RunKind.VERIFY)).thenReturn(Optional.of(verifySucceeded));
+        when(mergeGateUseCase.start("TASK-5"))
+            .thenReturn(new MergeGateResult("TASK-5", "RUN-V-5-RETRY", true, "retry"));
 
         RuntimeGarbageCollectionService.CleanupResult result = service.collectOnce();
 
         assertEquals(2, result.staleDeliveredTasks());
         assertEquals(1, result.skippedDeliveredWithActiveVerify());
-        assertEquals(1, result.skippedDeliveredWithVerifyHistory());
-        assertEquals(0, result.kickedMergeGates());
-        verifyNoInteractions(mergeGateUseCase);
+        assertEquals(0, result.skippedDeliveredWithVerifyHistory());
+        assertEquals(1, result.kickedMergeGates());
+        verify(mergeGateUseCase).start("TASK-5");
     }
 
     @Test

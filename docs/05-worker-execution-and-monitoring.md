@@ -326,6 +326,12 @@ run_kind：`IMPL`（写测试本质仍是写入任务）
 5. `Adjust Toolpacks`：若发现任务标注错误/过宽过窄，回到模块 04 的任务标注规则，更新 required_toolpacks（必要时提请）
 6. `Provision Worker`：当长期 WAITING_WORKER，触发创建新 Worker 或扩容提请
 
+补充保护规则（2026-03-09 起生效）：
+1. 若同一任务连续多次出现“planner 连续两轮都没有产出真实文件差异”的 `NEED_CLARIFICATION`，控制面不再无限重复创建澄清工单
+2. 默认策略是：超过 3 次后，自动封口当前 no-op `CLARIFICATION`，并升级为 `ARCH_REVIEW`
+3. 该 `ARCH_REVIEW` 的目标不是问用户补信息，而是要求架构师回看“已完成/未完成/任务粒度/依赖关系”，重新拆分并重新编排，避免 Worker 在宽泛任务上空转
+4. 这类升级仍然走工单事件链，可审计、可回放，不引入新的 ticket type
+
 ---
 
 ## 7. 最小数据结构草案（仅为表达监控与审计）

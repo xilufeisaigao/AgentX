@@ -31,6 +31,20 @@ cmd /c npm --prefix frontend-demo run build
 cmd /c npm --prefix frontend-demo run dev
 ```
 
+## Requirement Studio 行为说明
+
+`Requirement Studio` 中的两个关键动作现在按结构化 UI 语义工作，而不是要求用户理解聊天式确认词：
+
+1. `分析缺口`
+   - 只做需求澄清与缺口分析
+   - 不会创建需求文档
+2. `生成草稿`
+   - 当信息不足时，展示缺口信息
+   - 当信息已足够时，前端会自动完成后端要求的确认步骤并生成需求草稿
+   - 草稿生成成功后，右侧 `文档编辑器` 会立即同步后端返回的最新需求内容
+
+如果接口只进入 `READY_TO_DRAFT` 而尚未真正持久化，前端不会再误报“草稿已生成”。
+
 ## 运行时配置（无需重启后端）
 
 `Ops Console` 中的 Runtime 页面支持：

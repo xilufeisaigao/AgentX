@@ -1,6 +1,9 @@
 package com.agentx.agentxbackend.process.application;
 
+import com.agentx.agentxbackend.mergegate.application.MergeGateReplanRequiredException;
 import com.agentx.agentxbackend.mergegate.application.port.in.MergeGateCompletionUseCase;
+import com.agentx.agentxbackend.mergegate.application.port.in.MergeGateUseCase;
+import com.agentx.agentxbackend.mergegate.domain.model.MergeGateResult;
 import com.agentx.agentxbackend.planning.application.port.in.TaskQueryUseCase;
 import com.agentx.agentxbackend.planning.domain.model.TaskStatus;
 import com.agentx.agentxbackend.planning.domain.model.TaskTemplateId;
@@ -24,12 +27,15 @@ class MergeGateCompletionProcessManagerTest {
     @Mock
     private MergeGateCompletionUseCase mergeGateCompletionUseCase;
     @Mock
+    private MergeGateUseCase mergeGateUseCase;
+    @Mock
     private TaskQueryUseCase taskQueryUseCase;
 
     @Test
     void onVerifySucceededShouldMarkDone() {
         MergeGateCompletionProcessManager manager = new MergeGateCompletionProcessManager(
             mergeGateCompletionUseCase,
+            mergeGateUseCase,
             taskQueryUseCase
         );
         when(taskQueryUseCase.findTaskById("TASK-1")).thenReturn(Optional.of(deliveredTask("TASK-1")));
@@ -43,6 +49,7 @@ class MergeGateCompletionProcessManagerTest {
     void onVerifySucceededShouldRejectBlankTaskId() {
         MergeGateCompletionProcessManager manager = new MergeGateCompletionProcessManager(
             mergeGateCompletionUseCase,
+            mergeGateUseCase,
             taskQueryUseCase
         );
 
@@ -53,6 +60,7 @@ class MergeGateCompletionProcessManagerTest {
     void onVerifySucceededShouldIgnorePlannedVerifyTask() {
         MergeGateCompletionProcessManager manager = new MergeGateCompletionProcessManager(
             mergeGateCompletionUseCase,
+            mergeGateUseCase,
             taskQueryUseCase
         );
         when(taskQueryUseCase.findTaskById("TASK-VERIFY")).thenReturn(Optional.of(assignedVerifyTask("TASK-VERIFY")));
@@ -60,6 +68,25 @@ class MergeGateCompletionProcessManagerTest {
         manager.onVerifySucceeded("TASK-VERIFY", "RUN-VERIFY", "abc123");
 
         verifyNoInteractions(mergeGateCompletionUseCase);
+    }
+
+    @Test
+    void onVerifySucceededShouldRestartMergeGateWhenVerifyResultBecameStale() {
+        MergeGateCompletionProcessManager manager = new MergeGateCompletionProcessManager(
+            mergeGateCompletionUseCase,
+            mergeGateUseCase,
+            taskQueryUseCase
+        );
+        when(taskQueryUseCase.findTaskById("TASK-RESTART")).thenReturn(Optional.of(deliveredTask("TASK-RESTART")));
+        org.mockito.Mockito.doThrow(
+            new MergeGateReplanRequiredException("stale verify", new IllegalStateException("ff-only failed"))
+        ).when(mergeGateCompletionUseCase).completeVerifySuccess("TASK-RESTART", "RUN-STale", "abc123");
+        when(mergeGateUseCase.start("TASK-RESTART"))
+            .thenReturn(new MergeGateResult("TASK-RESTART", "RUN-RETRY", true, "retry started"));
+
+        manager.onVerifySucceeded("TASK-RESTART", "RUN-STale", "abc123");
+
+        verify(mergeGateUseCase).start("TASK-RESTART");
     }
 
     private static WorkTask deliveredTask(String taskId) {
