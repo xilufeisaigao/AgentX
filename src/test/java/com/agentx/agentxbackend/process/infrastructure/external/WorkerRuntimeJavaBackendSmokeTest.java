@@ -71,6 +71,7 @@ class WorkerRuntimeJavaBackendSmokeTest {
             "tmpl.impl.v0",
             List.of("TP-JAVA-21", "TP-MAVEN-3", "TP-GIT-2"),
             "file:" + taskSkill.toString(),
+            null,
             new TaskContext(
                 "task:TASK-REAL-JAVA-1",
                 List.of(),

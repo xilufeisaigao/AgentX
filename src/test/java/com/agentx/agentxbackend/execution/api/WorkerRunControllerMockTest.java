@@ -62,6 +62,7 @@ class WorkerRunControllerMockTest {
             "tmpl.impl.v0",
             List.of("TP-JAVA-21", "TP-MAVEN-3"),
             "file:.agentx/task_skill.md",
+            "file:.agentx/task_context.json",
             new TaskContext("task:TASK-1", List.of(), List.of(), "git:BASELINE"),
             List.of("./"),
             List.of("./"),

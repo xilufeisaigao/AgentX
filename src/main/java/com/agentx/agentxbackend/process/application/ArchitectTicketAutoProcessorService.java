@@ -1,5 +1,6 @@
 package com.agentx.agentxbackend.process.application;
 
+import com.agentx.agentxbackend.contextpack.application.port.in.ContextCompileUseCase;
 import com.agentx.agentxbackend.process.application.port.out.ArchitectTicketEventContext;
 import com.agentx.agentxbackend.process.application.port.out.ArchitectTicketProposalGeneratorPort;
 import com.agentx.agentxbackend.requirement.application.port.in.RequirementCurrentDoc;
@@ -17,6 +18,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
 
@@ -40,6 +42,7 @@ public class ArchitectTicketAutoProcessorService {
     private final RequirementDocQueryUseCase requirementDocQueryUseCase;
     private final TicketQueryUseCase ticketQueryUseCase;
     private final TicketCommandUseCase ticketCommandUseCase;
+    private final ContextCompileUseCase contextCompileUseCase;
     private final ArchitectTicketProposalGeneratorPort proposalGeneratorPort;
     private final ArchitectWorkPlanningService architectWorkPlanningService;
     private final ObjectMapper objectMapper;
@@ -55,6 +58,7 @@ public class ArchitectTicketAutoProcessorService {
         RequirementDocQueryUseCase requirementDocQueryUseCase,
         TicketQueryUseCase ticketQueryUseCase,
         TicketCommandUseCase ticketCommandUseCase,
+        ContextCompileUseCase contextCompileUseCase,
         ArchitectTicketProposalGeneratorPort proposalGeneratorPort,
         ArchitectWorkPlanningService architectWorkPlanningService,
         ObjectMapper objectMapper,
@@ -69,6 +73,7 @@ public class ArchitectTicketAutoProcessorService {
         this.requirementDocQueryUseCase = requirementDocQueryUseCase;
         this.ticketQueryUseCase = ticketQueryUseCase;
         this.ticketCommandUseCase = ticketCommandUseCase;
+        this.contextCompileUseCase = contextCompileUseCase;
         this.proposalGeneratorPort = proposalGeneratorPort;
         this.architectWorkPlanningService = architectWorkPlanningService;
         this.objectMapper = objectMapper;
@@ -159,6 +164,24 @@ public class ArchitectTicketAutoProcessorService {
         List<ArchitectTicketEventContext> recentEvents
     ) {
         ArchitectTicketProposalGeneratorPort.Proposal proposal;
+        String payloadJson = ticket.payloadJson();
+        try {
+            Object rolePack = contextCompileUseCase.compileRolePack(ticket.sessionId(), "architect_agent");
+            ObjectNode enrichedPayload = objectMapper.createObjectNode();
+            enrichedPayload.put("kind", "architect_ticket_context_v1");
+            enrichedPayload.put("ticket_id", nullSafe(ticket.ticketId()));
+            enrichedPayload.put("session_id", nullSafe(ticket.sessionId()));
+            JsonNode ticketPayloadNode = tryParseJson(ticket.payloadJson());
+            if (ticketPayloadNode != null) {
+                enrichedPayload.set("ticket_payload", ticketPayloadNode);
+            } else {
+                enrichedPayload.put("ticket_payload_raw", nullSafe(ticket.payloadJson()));
+            }
+            enrichedPayload.set("role_context_pack", objectMapper.valueToTree(rolePack));
+            payloadJson = objectMapper.writeValueAsString(enrichedPayload);
+        } catch (Exception ignored) {
+            payloadJson = ticket.payloadJson();
+        }
         try {
             proposal = proposalGeneratorPort.generate(
                 new ArchitectTicketProposalGeneratorPort.GenerateInput(
@@ -168,7 +191,7 @@ public class ArchitectTicketAutoProcessorService {
                     ticket.title(),
                     ticket.requirementDocId(),
                     ticket.requirementDocVer(),
-                    ticket.payloadJson(),
+                    payloadJson,
                     requirementDocContent,
                     recentEvents
                 )
@@ -826,6 +849,17 @@ public class ArchitectTicketAutoProcessorService {
 
     private static String nullSafe(String value) {
         return value == null ? "" : value;
+    }
+
+    private JsonNode tryParseJson(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        try {
+            return objectMapper.readTree(raw);
+        } catch (Exception ex) {
+            return null;
+        }
     }
 
     public record AutoProcessResult(

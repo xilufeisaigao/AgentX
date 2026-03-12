@@ -339,6 +339,7 @@ task_package:
 
   required_toolpacks: ["TP-..."]
   task_skill_ref: "git:<commit>:<path>|file:<path>"
+  task_context_ref: "file:.agentx/context/task-context-packs/<task>/<kind>/<snapshot>.json"
 
   task_context:
     requirement_ref: "req:REQ-...@confirmed_v2"
@@ -369,6 +370,7 @@ task_package:
 1. `run_kind=VERIFY` 时：`write_scope=[]` 且 `verify_commands` 必填（模块 05/07）
 2. `repo_baseline_ref` 必须与 run 的 `base_commit` 一致（模块 06）
 3. `context_snapshot_id` 必须对应 `task_context_snapshots.status=READY`，且指纹未过期（非 `STALE`）
+4. 若下发 `task_context_ref`，它必须指向本次 `context_snapshot_id` 对应快照编译出的 task_context_pack（审计锚点）
 
 ---
 

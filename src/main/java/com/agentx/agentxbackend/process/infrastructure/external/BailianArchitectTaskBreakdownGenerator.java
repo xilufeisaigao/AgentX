@@ -362,6 +362,13 @@ public class BailianArchitectTaskBreakdownGenerator implements ArchitectTaskBrea
         } else {
             prompt.append("requirement_doc_content: <not_available>\n");
         }
+        if (input.roleContextPackJson() != null && !input.roleContextPackJson().isBlank()) {
+            prompt.append("role_context_pack_json:\n")
+                .append(trimForPrompt(input.roleContextPackJson(), 6000))
+                .append('\n');
+        } else {
+            prompt.append("role_context_pack_json: <not_available>\n");
+        }
         prompt.append("recent_ticket_events:\n");
         if (input.recentEvents() == null || input.recentEvents().isEmpty()) {
             prompt.append("- <none>\n");

@@ -15,6 +15,7 @@ public interface ArchitectTaskBreakdownGeneratorPort {
         Integer requirementDocVer,
         String payloadJson,
         String requirementDocContent,
+        String roleContextPackJson,
         List<ArchitectTicketEventContext> recentEvents
     ) {
     }

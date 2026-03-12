@@ -3,6 +3,7 @@ package com.agentx.agentxbackend.contextpack.application;
 import com.agentx.agentxbackend.contextpack.application.port.in.ContextCompileUseCase;
 import com.agentx.agentxbackend.contextpack.application.port.out.ArtifactStorePort;
 import com.agentx.agentxbackend.contextpack.application.port.out.ContextFactsQueryPort;
+import com.agentx.agentxbackend.contextpack.application.port.out.RepoContextQueryPort;
 import com.agentx.agentxbackend.contextpack.application.port.out.TaskContextSnapshotRepository;
 import com.agentx.agentxbackend.contextpack.domain.model.RoleContextPack;
 import com.agentx.agentxbackend.contextpack.domain.model.TaskContextPack;
@@ -48,6 +49,7 @@ public class ContextCompileService implements ContextCompileUseCase {
     private final ContextFactsQueryPort contextFactsQueryPort;
     private final ArtifactStorePort artifactStorePort;
     private final TaskContextSnapshotRepository snapshotRepository;
+    private final RepoContextQueryPort repoContextQueryPort;
     private final ObjectMapper objectMapper;
     private final int retentionDays;
     private final int recentTicketLimit;
@@ -57,6 +59,7 @@ public class ContextCompileService implements ContextCompileUseCase {
         ContextFactsQueryPort contextFactsQueryPort,
         ArtifactStorePort artifactStorePort,
         TaskContextSnapshotRepository snapshotRepository,
+        RepoContextQueryPort repoContextQueryPort,
         ObjectMapper objectMapper,
         @Value("${agentx.contextpack.snapshot-retention-days:180}") int retentionDays,
         @Value("${agentx.contextpack.facts.recent-ticket-limit:20}") int recentTicketLimit,
@@ -65,6 +68,7 @@ public class ContextCompileService implements ContextCompileUseCase {
         this.contextFactsQueryPort = contextFactsQueryPort;
         this.artifactStorePort = artifactStorePort;
         this.snapshotRepository = snapshotRepository;
+        this.repoContextQueryPort = repoContextQueryPort;
         this.objectMapper = objectMapper;
         this.retentionDays = Math.max(30, retentionDays);
         this.recentTicketLimit = Math.max(1, Math.min(100, recentTicketLimit));
@@ -93,6 +97,15 @@ public class ContextCompileService implements ContextCompileUseCase {
             sourceRefs.add("ticket:" + ticket.ticketId());
         }
 
+        RepoContextQueryPort.RepoContext repoContext = safeQueryRepoContext(
+            buildRepoQueryForRolePack(requirementOptional, tickets),
+            List.of("./"),
+            18,
+            3,
+            900,
+            3_000
+        );
+
         String goal = requirementOptional
             .map(req -> {
                 if (req.title() != null && !req.title().isBlank()) {
@@ -116,6 +129,7 @@ public class ContextCompileService implements ContextCompileUseCase {
                 currentState.add("Ticket " + ticket.ticketId() + " is " + ticket.status() + " (" + ticket.type() + ").");
             }
         }
+        appendRepoContextState(currentState, repoContext);
 
         List<String> openQuestions = new ArrayList<>();
         for (ContextFactsQueryPort.TicketFact ticket : tickets) {
@@ -380,6 +394,14 @@ public class ContextCompileService implements ContextCompileUseCase {
         try {
             TaskContextPack taskContextPack = withSnapshotId(draftTaskContextPack, snapshotId);
             TaskSkill taskSkill = withSnapshotId(draftTaskSkill, snapshotId);
+            RepoContextQueryPort.RepoContext repoContext = safeQueryRepoContext(
+                buildRepoQueryForTask(taskPlanning, taskContextPack, taskSkill),
+                List.of("./"),
+                26,
+                4,
+                900,
+                4_800
+            );
 
             String taskContextRef = artifactStorePort.store(
                 "context/task-context-packs/" + normalizedTaskId + "/" + normalizedRunKind + "/" + snapshotId + ".json",
@@ -387,7 +409,7 @@ public class ContextCompileService implements ContextCompileUseCase {
             );
             String taskSkillRef = artifactStorePort.store(
                 "context/task-skills/" + normalizedTaskId + "/" + normalizedRunKind + "/" + snapshotId + ".md",
-                TaskSkillTemplateSupport.renderTaskSkillMarkdown(taskSkill)
+                TaskSkillTemplateSupport.renderTaskSkillMarkdown(taskSkill, repoContext)
             );
             Instant compiledAt = Instant.now();
             boolean markedReady = snapshotRepository.markReady(
@@ -438,6 +460,134 @@ public class ContextCompileService implements ContextCompileUseCase {
         } catch (Exception ex) {
             throw new IllegalStateException("Failed to persist role context pack artifact", ex);
         }
+    }
+
+    private RepoContextQueryPort.RepoContext safeQueryRepoContext(
+        String queryText,
+        List<String> includeRoots,
+        int maxFiles,
+        int maxExcerpts,
+        int maxExcerptChars,
+        int maxTotalExcerptChars
+    ) {
+        if (repoContextQueryPort == null) {
+            return null;
+        }
+        try {
+            return repoContextQueryPort.query(new RepoContextQueryPort.RepoContextQuery(
+                queryText,
+                includeRoots,
+                maxFiles,
+                maxExcerpts,
+                maxExcerptChars,
+                maxTotalExcerptChars
+            ));
+        } catch (RuntimeException ex) {
+            return null;
+        }
+    }
+
+    private static void appendRepoContextState(List<String> currentState, RepoContextQueryPort.RepoContext repoContext) {
+        if (currentState == null || repoContext == null) {
+            return;
+        }
+        if (repoContext.repoHeadRef() != null && !repoContext.repoHeadRef().isBlank()) {
+            currentState.add("Repo baseline: " + abbreviate(repoContext.repoHeadRef().trim(), 80));
+        }
+        if (repoContext.topLevelEntries() != null && !repoContext.topLevelEntries().isEmpty()) {
+            String joined = String.join(
+                ", ",
+                repoContext.topLevelEntries().subList(0, Math.min(10, repoContext.topLevelEntries().size()))
+            );
+            currentState.add("Repo top-level: " + abbreviate(joined, 240));
+        }
+        if (repoContext.relevantFiles() != null && !repoContext.relevantFiles().isEmpty()) {
+            List<String> paths = new ArrayList<>();
+            for (RepoContextQueryPort.ScoredPath file : repoContext.relevantFiles()) {
+                if (file == null || file.path() == null || file.path().isBlank()) {
+                    continue;
+                }
+                paths.add(file.path().trim());
+                if (paths.size() >= 6) {
+                    break;
+                }
+            }
+            if (!paths.isEmpty()) {
+                currentState.add("Repo relevant files: " + abbreviate(String.join(", ", paths), 240));
+            }
+        }
+    }
+
+    private static String buildRepoQueryForRolePack(
+        Optional<ContextFactsQueryPort.RequirementBaselineFact> requirementOptional,
+        List<ContextFactsQueryPort.TicketFact> tickets
+    ) {
+        StringBuilder query = new StringBuilder();
+        if (requirementOptional != null && requirementOptional.isPresent()) {
+            ContextFactsQueryPort.RequirementBaselineFact req = requirementOptional.get();
+            appendQueryLine(query, req.title());
+            appendQueryLine(query, extractSectionFirstLine(req.content(), "## 1."));
+        }
+        if (tickets != null) {
+            for (ContextFactsQueryPort.TicketFact ticket : tickets) {
+                if (ticket == null) {
+                    continue;
+                }
+                appendQueryLine(query, ticket.title());
+                appendQueryLine(query, ticket.type());
+            }
+        }
+        return query.toString().trim();
+    }
+
+    private static String buildRepoQueryForTask(
+        ContextFactsQueryPort.TaskPlanningFact planning,
+        TaskContextPack taskContextPack,
+        TaskSkill taskSkill
+    ) {
+        StringBuilder query = new StringBuilder();
+        if (planning != null) {
+            appendQueryLine(query, planning.taskTitle());
+            appendQueryLine(query, planning.taskTemplateId());
+        }
+        if (taskContextPack != null) {
+            appendQueryLine(query, taskContextPack.requirementRef());
+            for (String ref : nullSafeList(taskContextPack.decisionRefs())) {
+                if (ref != null && ref.startsWith("ticket-summary:")) {
+                    appendQueryLine(query, ref);
+                }
+            }
+            for (String ref : nullSafeList(taskContextPack.priorRunRefs())) {
+                appendQueryLine(query, ref);
+            }
+        }
+        if (taskSkill != null) {
+            for (String frag : nullSafeList(taskSkill.sourceFragments())) {
+                appendQueryLine(query, frag);
+            }
+            for (String line : nullSafeList(taskSkill.toolpackAssumptions())) {
+                appendQueryLine(query, line);
+            }
+        }
+        String raw = query.toString().trim();
+        if (raw.length() <= 2_200) {
+            return raw;
+        }
+        return raw.substring(0, 2_200);
+    }
+
+    private static void appendQueryLine(StringBuilder query, String value) {
+        if (query == null || value == null) {
+            return;
+        }
+        String normalized = value.trim();
+        if (!normalized.isBlank()) {
+            query.append(normalized).append('\n');
+        }
+    }
+
+    private static List<String> nullSafeList(List<String> value) {
+        return value == null ? List.of() : value;
     }
 
     private String computeFingerprint(
@@ -785,6 +935,7 @@ public class ContextCompileService implements ContextCompileUseCase {
         List<ContextFactsQueryPort.ToolpackFact> toolpacks
     ) {
         LinkedHashSet<String> fragments = new LinkedHashSet<>();
+        fragments.add("contextpack_v1:repo_context=lexical_v1");
         fragments.add("template:" + nullSafe(taskTemplateId));
         if (taskTitle != null && !taskTitle.isBlank()) {
             fragments.add("task_title:" + abbreviate(normalizeFreeText(taskTitle), 220));

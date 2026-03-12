@@ -13,6 +13,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
 
 import java.io.IOException;
@@ -33,6 +34,8 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 @Component
@@ -43,6 +46,12 @@ public class LocalWorkerTaskExecutor implements WorkerTaskExecutorPort {
     private static final String LANGCHAIN4J_FRAMEWORK = "langchain4j";
     private static final String WORKTREES_PREFIX = "worktrees/";
     private static final int MAX_CAPTURED_PROCESS_OUTPUT_CHARS = 256_000;
+    private static final int MAX_WORKSPACE_FILES_TO_SCORE = 6_000;
+    private static final int MAX_WORKSPACE_PATH_CANDIDATES_FOR_CONTENT = 240;
+    private static final int MAX_WORKSPACE_QUERY_CHARS = 2_200;
+    private static final int MAX_WORKSPACE_RELEVANCE_HINT_TERMS = 24;
+    private static final Pattern QUERY_IDENTIFIER_PATTERN = Pattern.compile("[A-Za-z_][A-Za-z0-9_]{2,}");
+    private static final Pattern QUERY_CHINESE_PHRASE_PATTERN = Pattern.compile("[\\p{IsHan}]{2,}");
 
     private final ObjectMapper objectMapper;
     private final RuntimeLlmConfigUseCase runtimeLlmConfigUseCase;
@@ -202,10 +211,12 @@ public class LocalWorkerTaskExecutor implements WorkerTaskExecutorPort {
     private ExecutionResult executeImpl(TaskPackage taskPackage, Path worktree) {
         String outputLanguage = resolveOutputLanguage();
         String taskSkillText = readTaskSkill(taskPackage.taskSkillRef());
-        String workspaceSnapshot = buildWorkspaceSnapshot(worktree, taskPackage.readScope(), taskPackage.writeScope());
+        JsonNode taskContextPack = readTaskContextPack(taskPackage.taskContextRef());
+        String workspaceSnapshot = buildWorkspaceSnapshotForWorker(taskPackage, worktree, taskSkillText, outputLanguage);
         PlannerResult plannerResult = proposePlan(
             taskPackage,
             taskSkillText,
+            taskContextPack,
             outputLanguage,
             workspaceSnapshot,
             false,
@@ -215,6 +226,7 @@ public class LocalWorkerTaskExecutor implements WorkerTaskExecutorPort {
             plannerResult = proposePlan(
                 taskPackage,
                 taskSkillText,
+                taskContextPack,
                 outputLanguage,
                 workspaceSnapshot,
                 true,
@@ -225,6 +237,7 @@ public class LocalWorkerTaskExecutor implements WorkerTaskExecutorPort {
             plannerResult = retryPlannerWithForcedExecution(
                 taskPackage,
                 taskSkillText,
+                taskContextPack,
                 outputLanguage,
                 workspaceSnapshot,
                 localize(
@@ -306,6 +319,7 @@ public class LocalWorkerTaskExecutor implements WorkerTaskExecutorPort {
             plannerResult = retryPlannerWithForcedExecution(
                 taskPackage,
                 taskSkillText,
+                taskContextPack,
                 outputLanguage,
                 workspaceSnapshot,
                 localize(
@@ -466,13 +480,19 @@ public class LocalWorkerTaskExecutor implements WorkerTaskExecutorPort {
         ));
     }
 
-    private PlannerResult proposePlan(TaskPackage taskPackage, String taskSkillText, String outputLanguage) {
-        return proposePlan(taskPackage, taskSkillText, outputLanguage, "", false, null);
+    private PlannerResult proposePlan(
+        TaskPackage taskPackage,
+        String taskSkillText,
+        JsonNode taskContextPack,
+        String outputLanguage
+    ) {
+        return proposePlan(taskPackage, taskSkillText, taskContextPack, outputLanguage, "", false, null);
     }
 
     private PlannerResult proposePlan(
         TaskPackage taskPackage,
         String taskSkillText,
+        JsonNode taskContextPack,
         String outputLanguage,
         String workspaceSnapshot,
         boolean forceExecutionMode,
@@ -522,6 +542,7 @@ public class LocalWorkerTaskExecutor implements WorkerTaskExecutorPort {
                     UserMessage.from(buildUserPrompt(
                         taskPackage,
                         taskSkillText,
+                        taskContextPack,
                         llmConfig.outputLanguage(),
                         workspaceSnapshot,
                         forceExecutionMode,
@@ -582,6 +603,7 @@ public class LocalWorkerTaskExecutor implements WorkerTaskExecutorPort {
     private PlannerResult retryPlannerWithForcedExecution(
         TaskPackage taskPackage,
         String taskSkillText,
+        JsonNode taskContextPack,
         String outputLanguage,
         String workspaceSnapshot,
         String reason
@@ -589,6 +611,7 @@ public class LocalWorkerTaskExecutor implements WorkerTaskExecutorPort {
         return proposePlan(
             taskPackage,
             taskSkillText,
+            taskContextPack,
             outputLanguage,
             workspaceSnapshot,
             true,
@@ -1102,6 +1125,103 @@ public class LocalWorkerTaskExecutor implements WorkerTaskExecutorPort {
         }
     }
 
+    private JsonNode readTaskContextPack(String taskContextRef) {
+        if (taskContextRef == null || taskContextRef.isBlank()) {
+            return null;
+        }
+        String normalized = taskContextRef.trim();
+        if (!normalized.startsWith("file:")) {
+            return null;
+        }
+        Path path = Path.of(normalized.substring("file:".length()));
+        if (!path.isAbsolute()) {
+            path = repoRoot.resolve(path);
+        }
+        try {
+            if (!Files.exists(path)) {
+                return null;
+            }
+            String content = Files.readString(path, StandardCharsets.UTF_8);
+            if (content.isBlank()) {
+                return null;
+            }
+            // Cap to a sane amount in case the pack format is expanded in the future.
+            if (content.length() > 80_000) {
+                content = content.substring(0, 80_000);
+            }
+            JsonNode root = objectMapper.readTree(content);
+            if (root == null || !root.isObject()) {
+                return null;
+            }
+            return compactTaskContextPack(root);
+        } catch (Exception ex) {
+            return null;
+        }
+    }
+
+    private JsonNode compactTaskContextPack(JsonNode raw) {
+        if (raw == null || !raw.isObject()) {
+            return null;
+        }
+        ObjectNode compact = objectMapper.createObjectNode();
+        compact.put("pack_kind", "task_context_pack_v1");
+        compact.put("snapshot_id", readTextOrEmpty(raw, "snapshot_id", "snapshotId"));
+        compact.put("task_id", readTextOrEmpty(raw, "task_id", "taskId"));
+        compact.put("run_kind", readTextOrEmpty(raw, "run_kind", "runKind"));
+        compact.put("requirement_ref", readTextOrEmpty(raw, "requirement_ref", "requirementRef"));
+        compact.put("module_ref", readTextOrEmpty(raw, "module_ref", "moduleRef"));
+        compact.put("repo_baseline_ref", readTextOrEmpty(raw, "repo_baseline_ref", "repoBaselineRef"));
+        compact.set("architecture_refs", capTextArray(raw, "architecture_refs", "architectureRefs", 24));
+        compact.set("decision_refs", capTextArray(raw, "decision_refs", "decisionRefs", 24));
+        compact.set("prior_run_refs", capTextArray(raw, "prior_run_refs", "priorRunRefs", 16));
+        return compact;
+    }
+
+    private static String readTextOrEmpty(JsonNode root, String snakeCase, String camelCase) {
+        if (root == null || !root.isObject()) {
+            return "";
+        }
+        JsonNode node = root.path(snakeCase);
+        if (node.isMissingNode()) {
+            node = root.path(camelCase);
+        }
+        if (node == null || node.isNull()) {
+            return "";
+        }
+        String value = node.asText("").trim();
+        return value.isBlank() ? "" : value;
+    }
+
+    private ArrayNode capTextArray(JsonNode root, String snakeCase, String camelCase, int maxItems) {
+        ArrayNode result = objectMapper.createArrayNode();
+        if (root == null || !root.isObject()) {
+            return result;
+        }
+        JsonNode node = root.path(snakeCase);
+        if (node.isMissingNode()) {
+            node = root.path(camelCase);
+        }
+        if (node == null || !node.isArray()) {
+            return result;
+        }
+        int added = 0;
+        for (JsonNode element : node) {
+            if (added >= maxItems) {
+                break;
+            }
+            if (element == null || !element.isTextual()) {
+                continue;
+            }
+            String text = element.asText("").trim();
+            if (text.isBlank()) {
+                continue;
+            }
+            result.add(text);
+            added++;
+        }
+        return result;
+    }
+
     private JsonNode parseJson(String raw) {
         try {
             return objectMapper.readTree(raw);
@@ -1168,6 +1288,7 @@ public class LocalWorkerTaskExecutor implements WorkerTaskExecutorPort {
     private String buildUserPrompt(
         TaskPackage taskPackage,
         String taskSkillText,
+        JsonNode taskContextPack,
         String outputLanguage,
         String workspaceSnapshot,
         boolean forceExecutionMode,
@@ -1187,6 +1308,12 @@ public class LocalWorkerTaskExecutor implements WorkerTaskExecutorPort {
         root.putPOJO("expected_outputs", taskPackage.expectedOutputs());
         root.putPOJO("stop_rules", taskPackage.stopRules());
         root.putPOJO("task_context", taskPackage.taskContext());
+        root.put("task_context_ref", defaultText(taskPackage.taskContextRef(), ""));
+        if (taskContextPack != null && taskContextPack.isObject()) {
+            root.set("task_context_pack", taskContextPack);
+        } else {
+            root.putObject("task_context_pack");
+        }
         root.putPOJO("resolved_clarifications", resolvedClarifications);
         root.put("resolved_clarifications_count", resolvedClarifications.size());
         root.putPOJO("recent_decision_refs", extractDecisionRefs(taskPackage.taskContext()));
@@ -1199,6 +1326,382 @@ public class LocalWorkerTaskExecutor implements WorkerTaskExecutorPort {
         root.put("task_skill_excerpt", taskSkillText == null ? "" : taskSkillText);
         root.put("workspace_snapshot", workspaceSnapshot == null ? "" : workspaceSnapshot);
         return root.toString();
+    }
+
+    private String buildWorkspaceSnapshotForWorker(
+        TaskPackage taskPackage,
+        Path worktree,
+        String taskSkillText,
+        String outputLanguage
+    ) {
+        if (taskPackage == null) {
+            return buildWorkspaceSnapshot(worktree, List.of("./"), List.of());
+        }
+        String query = buildWorkspaceQuery(taskPackage, taskSkillText);
+        List<String> queryTokens = extractWorkspaceQueryTokens(query);
+        if (queryTokens.isEmpty()) {
+            return buildWorkspaceSnapshot(worktree, taskPackage.readScope(), taskPackage.writeScope());
+        }
+        try {
+            return buildWorkspaceSnapshotWithLexicalIndex(
+                worktree,
+                taskPackage.readScope(),
+                taskPackage.writeScope(),
+                queryTokens,
+                outputLanguage
+            );
+        } catch (RuntimeException ex) {
+            // Snapshot is best-effort. If relevance indexing fails, fall back to deterministic v0 snapshot.
+            return buildWorkspaceSnapshot(worktree, taskPackage.readScope(), taskPackage.writeScope());
+        }
+    }
+
+    private static String buildWorkspaceQuery(TaskPackage taskPackage, String taskSkillText) {
+        StringBuilder builder = new StringBuilder();
+        appendQueryLine(builder, taskPackage.taskTitle());
+        appendQueryLine(builder, taskPackage.taskTemplateId());
+        if (taskPackage.taskContext() != null) {
+            for (String ref : defaultList(taskPackage.taskContext().architectureRefs())) {
+                if (ref == null) {
+                    continue;
+                }
+                String trimmed = ref.trim();
+                if (trimmed.startsWith("ticket-summary:")) {
+                    appendQueryLine(builder, trimmed);
+                }
+            }
+            for (String ref : defaultList(taskPackage.taskContext().priorRunRefs())) {
+                appendQueryLine(builder, extractPriorRunSummary(ref));
+            }
+        }
+        appendQueryLine(builder, extractSourceFragmentsSection(taskSkillText));
+        String query = builder.toString().trim();
+        if (query.length() <= MAX_WORKSPACE_QUERY_CHARS) {
+            return query;
+        }
+        return query.substring(0, MAX_WORKSPACE_QUERY_CHARS);
+    }
+
+    private static void appendQueryLine(StringBuilder builder, String value) {
+        if (builder == null || value == null) {
+            return;
+        }
+        String normalized = value.trim();
+        if (normalized.isBlank()) {
+            return;
+        }
+        builder.append(normalized).append('\n');
+    }
+
+    private static String extractPriorRunSummary(String rawRef) {
+        if (rawRef == null || rawRef.isBlank()) {
+            return "";
+        }
+        String ref = rawRef.trim();
+        int summaryIndex = ref.indexOf("|summary=");
+        if (summaryIndex < 0) {
+            return "";
+        }
+        return ref.substring(summaryIndex + "|summary=".length()).trim();
+    }
+
+    private static String extractSourceFragmentsSection(String taskSkillText) {
+        if (taskSkillText == null || taskSkillText.isBlank()) {
+            return "";
+        }
+        String normalized = taskSkillText.replace("\r\n", "\n");
+        int start = normalized.indexOf("## Source Fragments");
+        if (start < 0) {
+            return "";
+        }
+        int end = normalized.indexOf("\n## ", start + 1);
+        String section = end < 0 ? normalized.substring(start) : normalized.substring(start, end);
+        if (section.length() > 6_000) {
+            section = section.substring(0, 6_000);
+        }
+        return section;
+    }
+
+    private static List<String> extractWorkspaceQueryTokens(String query) {
+        if (query == null || query.isBlank()) {
+            return List.of();
+        }
+        LinkedHashSet<String> tokens = new LinkedHashSet<>();
+        String normalized = query.toLowerCase(Locale.ROOT);
+
+        Matcher identifierMatcher = QUERY_IDENTIFIER_PATTERN.matcher(normalized);
+        while (identifierMatcher.find()) {
+            tokens.add(identifierMatcher.group());
+            if (tokens.size() >= MAX_WORKSPACE_RELEVANCE_HINT_TERMS) {
+                break;
+            }
+        }
+
+        if (tokens.size() < MAX_WORKSPACE_RELEVANCE_HINT_TERMS) {
+            Matcher chineseMatcher = QUERY_CHINESE_PHRASE_PATTERN.matcher(normalized);
+            while (chineseMatcher.find()) {
+                String token = chineseMatcher.group();
+                if (token.length() > 20) {
+                    token = token.substring(0, 20);
+                }
+                tokens.add(token);
+                if (tokens.size() >= MAX_WORKSPACE_RELEVANCE_HINT_TERMS) {
+                    break;
+                }
+            }
+        }
+
+        return List.copyOf(tokens);
+    }
+
+    private static List<String> defaultList(List<String> value) {
+        return value == null ? List.of() : value;
+    }
+
+    private static String buildWorkspaceSnapshotWithLexicalIndex(
+        Path worktree,
+        List<String> readScope,
+        List<String> writeScope,
+        List<String> queryTokens,
+        String outputLanguage
+    ) {
+        if (worktree == null || !Files.exists(worktree)) {
+            return "";
+        }
+
+        List<String> allVisibleFiles = new ArrayList<>();
+        try (Stream<Path> stream = Files.walk(worktree)) {
+            allVisibleFiles = stream
+                .filter(Files::isRegularFile)
+                .map(path -> normalizePath(worktree.relativize(path).toString()))
+                .filter(path -> !path.isBlank())
+                .filter(path -> !isPromptIgnoredPath(path))
+                .filter(path -> isPathVisibleInSnapshot(path, readScope, writeScope))
+                .limit(MAX_WORKSPACE_FILES_TO_SCORE)
+                .toList();
+        } catch (IOException ex) {
+            return "workspace_snapshot_unavailable:" + ex.getMessage();
+        }
+        if (allVisibleFiles.isEmpty()) {
+            return "workspace_snapshot_empty";
+        }
+
+        List<ScoredPath> scoredPaths = new ArrayList<>(allVisibleFiles.size());
+        for (String path : allVisibleFiles) {
+            int score = scorePathLexical(path, queryTokens, writeScope);
+            scoredPaths.add(new ScoredPath(path, score));
+        }
+        scoredPaths.sort(Comparator
+            .comparingInt(ScoredPath::score).reversed()
+            .thenComparing(ScoredPath::path));
+
+        List<ScoredPath> contentCandidates = new ArrayList<>();
+        int taken = 0;
+        for (ScoredPath scored : scoredPaths) {
+            contentCandidates.add(scored);
+            taken++;
+            if (taken >= MAX_WORKSPACE_PATH_CANDIDATES_FOR_CONTENT) {
+                break;
+            }
+        }
+
+        List<ScoredPath> rescored = new ArrayList<>(contentCandidates.size());
+        for (ScoredPath scored : contentCandidates) {
+            int score = scored.score();
+            if (isTextFileForPrompt(scored.path())) {
+                score += scorePathContent(worktree, scored.path(), queryTokens);
+            }
+            rescored.add(new ScoredPath(scored.path(), score));
+        }
+        rescored.sort(Comparator
+            .comparingInt(ScoredPath::score).reversed()
+            .thenComparing(ScoredPath::path));
+
+        List<String> selectedPaths = new ArrayList<>();
+        for (ScoredPath scored : rescored) {
+            if (selectedPaths.size() >= 40) {
+                break;
+            }
+            selectedPaths.add(scored.path());
+        }
+        if (selectedPaths.isEmpty()) {
+            return "workspace_snapshot_empty";
+        }
+
+        StringBuilder builder = new StringBuilder();
+        builder.append("relevance_index: lexical_v0\n");
+        builder.append("query_terms: ");
+        builder.append(String.join(", ", queryTokens));
+        builder.append("\n\nfiles:\n");
+        for (String path : selectedPaths) {
+            builder.append("- ").append(path).append('\n');
+        }
+        builder.append("\nfile_excerpts:\n");
+
+        int excerptCount = 0;
+        int remainingChars = 12_000;
+        for (String relativePath : selectedPaths) {
+            if (excerptCount >= 8 || remainingChars <= 0 || !isTextFileForPrompt(relativePath)) {
+                continue;
+            }
+            String excerpt = excerptRelevantText(worktree, relativePath, queryTokens);
+            if (excerpt.isBlank()) {
+                continue;
+            }
+            if (excerpt.length() > remainingChars) {
+                excerpt = excerpt.substring(0, remainingChars);
+            }
+            builder.append("[FILE ").append(relativePath).append("]\n");
+            builder.append(excerpt).append("\n\n");
+            remainingChars -= excerpt.length();
+            excerptCount++;
+        }
+        if (excerptCount == 0) {
+            builder.append(localize(
+                outputLanguage,
+                "<no text excerpts selected>",
+                "<no text excerpts selected>"
+            ));
+        }
+        return builder.toString().trim();
+    }
+
+    private static int scorePathLexical(String relativePath, List<String> queryTokens, List<String> writeScope) {
+        String normalizedPath = normalizePath(relativePath).toLowerCase(Locale.ROOT);
+        int score = 0;
+        if (isImportantWorkspaceFile(normalizedPath)) {
+            score += 1000;
+        }
+        if (isScopeAllowed(normalizedPath, writeScope)) {
+            score += 250;
+        }
+        if (queryTokens == null || queryTokens.isEmpty()) {
+            return score;
+        }
+        for (String token : queryTokens) {
+            if (token == null || token.isBlank()) {
+                continue;
+            }
+            String needle = token.toLowerCase(Locale.ROOT);
+            if (needle.length() < 3) {
+                continue;
+            }
+            int index = normalizedPath.indexOf(needle);
+            if (index < 0) {
+                continue;
+            }
+            score += 40;
+            if (index == 0 || normalizedPath.charAt(Math.max(0, index - 1)) == '/' || normalizedPath.charAt(index) == '/') {
+                score += 10;
+            }
+        }
+        if (normalizedPath.endsWith(".md")) {
+            score += 5;
+        }
+        if (normalizedPath.endsWith(".java") || normalizedPath.endsWith(".kt")) {
+            score += 5;
+        }
+        return score;
+    }
+
+    private static int scorePathContent(Path worktree, String relativePath, List<String> queryTokens) {
+        Path file = worktree.resolve(relativePath);
+        try {
+            if (!Files.exists(file)) {
+                return 0;
+            }
+            String raw = Files.readString(file, StandardCharsets.UTF_8);
+            if (raw.isBlank()) {
+                return 0;
+            }
+            String content = raw.length() > 30_000 ? raw.substring(0, 30_000) : raw;
+            String lower = content.toLowerCase(Locale.ROOT);
+            int score = 0;
+            for (String token : queryTokens) {
+                if (token == null || token.isBlank()) {
+                    continue;
+                }
+                String needle = token.toLowerCase(Locale.ROOT);
+                if (needle.length() < 3) {
+                    continue;
+                }
+                int found = 0;
+                int from = 0;
+                while (true) {
+                    int idx = lower.indexOf(needle, from);
+                    if (idx < 0) {
+                        break;
+                    }
+                    found++;
+                    from = idx + needle.length();
+                    if (found >= 6) {
+                        break;
+                    }
+                }
+                if (found > 0) {
+                    score += Math.min(40, found * 8);
+                }
+            }
+            return score;
+        } catch (Exception ex) {
+            return 0;
+        }
+    }
+
+    private static String excerptRelevantText(Path worktree, String relativePath, List<String> queryTokens) {
+        Path file = worktree.resolve(relativePath);
+        try {
+            if (!Files.exists(file)) {
+                return "";
+            }
+            String raw = Files.readString(file, StandardCharsets.UTF_8).trim();
+            if (raw.isEmpty()) {
+                return "";
+            }
+            String content = raw.length() > 50_000 ? raw.substring(0, 50_000) : raw;
+            String lower = content.toLowerCase(Locale.ROOT);
+            int bestIndex = -1;
+            int bestTokenLength = 0;
+            for (String token : queryTokens) {
+                if (token == null || token.isBlank()) {
+                    continue;
+                }
+                String needle = token.toLowerCase(Locale.ROOT);
+                if (needle.length() < 3) {
+                    continue;
+                }
+                int idx = lower.indexOf(needle);
+                if (idx < 0) {
+                    continue;
+                }
+                if (bestIndex < 0 || idx < bestIndex) {
+                    bestIndex = idx;
+                    bestTokenLength = needle.length();
+                }
+            }
+            if (bestIndex < 0) {
+                return content.length() > 1_500 ? content.substring(0, 1_500) : content;
+            }
+            int start = Math.max(0, bestIndex - 220);
+            int end = Math.min(content.length(), start + 1_500);
+            String excerpt = content.substring(start, end);
+            if (start > 0) {
+                excerpt = "... " + excerpt;
+            }
+            if (end < content.length()) {
+                excerpt = excerpt + " ...";
+            }
+            if (bestTokenLength > 0 && excerpt.length() < 200 && content.length() > end) {
+                // When a very short excerpt would be unhelpful, prefer the head to preserve structure.
+                return content.length() > 1_500 ? content.substring(0, 1_500) : content;
+            }
+            return excerpt;
+        } catch (Exception ex) {
+            return "";
+        }
+    }
+
+    private record ScoredPath(String path, int score) {
     }
 
     static String buildWorkspaceSnapshot(Path worktree, List<String> readScope, List<String> writeScope) {
@@ -1423,13 +1926,22 @@ public class LocalWorkerTaskExecutor implements WorkerTaskExecutorPort {
     private static boolean isPromptIgnoredPath(String relativePath) {
         String normalizedPath = normalizePath(relativePath);
         return normalizedPath.startsWith(".git/")
+            || normalizedPath.startsWith(".agentx/")
             || normalizedPath.startsWith("target/")
             || normalizedPath.startsWith("node_modules/")
             || normalizedPath.startsWith("dist/")
             || normalizedPath.startsWith("build/")
             || normalizedPath.startsWith("worktrees/")
+            || normalizedPath.startsWith("runtime-data/")
+            || normalizedPath.startsWith("runtime-projects/")
             || normalizedPath.startsWith(".idea/")
-            || normalizedPath.startsWith(".vscode/");
+            || normalizedPath.startsWith(".vscode/")
+            || normalizedPath.equals(".env")
+            || normalizedPath.startsWith(".env.")
+            || normalizedPath.endsWith(".pem")
+            || normalizedPath.endsWith(".p12")
+            || normalizedPath.endsWith(".pfx")
+            || normalizedPath.endsWith(".key");
     }
 
     private static boolean isTextFileForPrompt(String relativePath) {

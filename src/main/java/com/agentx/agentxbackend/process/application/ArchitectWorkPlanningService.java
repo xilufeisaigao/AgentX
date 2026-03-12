@@ -49,6 +49,13 @@ public class ArchitectWorkPlanningService {
         if (ticket == null) {
             throw new IllegalArgumentException("ticket must not be null");
         }
+        String roleContextPackJson = "";
+        try {
+            Object rolePack = contextCompileUseCase.compileRolePack(ticket.sessionId(), "architect_agent");
+            roleContextPackJson = objectMapper.writeValueAsString(rolePack);
+        } catch (Exception ignored) {
+            roleContextPackJson = "";
+        }
         ArchitectTaskBreakdownGeneratorPort.GenerateInput input = new ArchitectTaskBreakdownGeneratorPort.GenerateInput(
             ticket.ticketId(),
             ticket.sessionId(),
@@ -58,6 +65,7 @@ public class ArchitectWorkPlanningService {
             ticket.requirementDocVer(),
             ticket.payloadJson(),
             nullSafe(requirementDocContent),
+            roleContextPackJson,
             recentEvents == null ? List.of() : recentEvents
         );
         ArchitectTaskBreakdownGeneratorPort.BreakdownPlan plan = breakdownGeneratorPort.generate(input);

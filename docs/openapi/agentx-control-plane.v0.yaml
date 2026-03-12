@@ -1768,6 +1768,7 @@ components:
       required:
         - run_id
         - task_id
+        - task_title
         - module_id
         - context_snapshot_id
         - run_kind
@@ -1782,6 +1783,7 @@ components:
       properties:
         run_id: { type: string }
         task_id: { type: string }
+        task_title: { type: string }
         module_id: { type: string }
         context_snapshot_id: { type: string }
         run_kind: { $ref: '#/components/schemas/RunKind' }
@@ -1790,6 +1792,9 @@ components:
           type: array
           items: { type: string }
         task_skill_ref:
+          type: string
+          nullable: true
+        task_context_ref:
           type: string
           nullable: true
         task_context: { $ref: '#/components/schemas/TaskContext' }

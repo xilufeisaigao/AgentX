@@ -212,6 +212,7 @@ class WorkerRuntimeAutoRunServiceTest {
             runKind == RunKind.VERIFY ? "tmpl.verify.v0" : "tmpl.impl.v0",
             List.of("TP-GIT-2"),
             "file:.agentx/context/task-skills/mock.md",
+            "file:.agentx/context/task-context-packs/mock.json",
             new TaskContext("task:" + taskId, List.of(), List.of(), "git:BASE"),
             List.of("./"),
             runKind == RunKind.VERIFY ? List.of() : List.of("./"),

@@ -12,6 +12,7 @@ public record TaskPackage(
     String taskTemplateId,
     List<String> requiredToolpacks,
     String taskSkillRef,
+    String taskContextRef,
     TaskContext taskContext,
     List<String> readScope,
     List<String> writeScope,

@@ -1,6 +1,7 @@
 package com.agentx.agentxbackend.process.application;
 
 import com.agentx.agentxbackend.process.application.port.out.ArchitectTicketProposalGeneratorPort;
+import com.agentx.agentxbackend.contextpack.application.port.in.ContextCompileUseCase;
 import com.agentx.agentxbackend.requirement.application.port.in.RequirementCurrentDoc;
 import com.agentx.agentxbackend.requirement.application.port.in.RequirementDocQueryUseCase;
 import com.agentx.agentxbackend.session.application.port.in.SessionHistoryQueryUseCase;
@@ -44,6 +45,8 @@ class ArchitectTicketAutoProcessorServiceTest {
     @Mock
     private TicketCommandUseCase ticketCommandUseCase;
     @Mock
+    private ContextCompileUseCase contextCompileUseCase;
+    @Mock
     private ArchitectTicketProposalGeneratorPort proposalGeneratorPort;
     @Mock
     private ArchitectWorkPlanningService architectWorkPlanningService;
@@ -55,6 +58,7 @@ class ArchitectTicketAutoProcessorServiceTest {
             requirementDocQueryUseCase,
             ticketQueryUseCase,
             ticketCommandUseCase,
+            contextCompileUseCase,
             proposalGeneratorPort,
             architectWorkPlanningService,
             new ObjectMapper(),
@@ -181,6 +185,7 @@ class ArchitectTicketAutoProcessorServiceTest {
             requirementDocQueryUseCase,
             ticketQueryUseCase,
             ticketCommandUseCase,
+            contextCompileUseCase,
             proposalGeneratorPort,
             architectWorkPlanningService,
             new ObjectMapper(),
@@ -259,6 +264,7 @@ class ArchitectTicketAutoProcessorServiceTest {
             requirementDocQueryUseCase,
             ticketQueryUseCase,
             ticketCommandUseCase,
+            contextCompileUseCase,
             proposalGeneratorPort,
             architectWorkPlanningService,
             new ObjectMapper(),
@@ -344,6 +350,7 @@ class ArchitectTicketAutoProcessorServiceTest {
             requirementDocQueryUseCase,
             ticketQueryUseCase,
             ticketCommandUseCase,
+            contextCompileUseCase,
             proposalGeneratorPort,
             architectWorkPlanningService,
             new ObjectMapper(),
@@ -371,6 +378,7 @@ class ArchitectTicketAutoProcessorServiceTest {
             requirementDocQueryUseCase,
             ticketQueryUseCase,
             ticketCommandUseCase,
+            contextCompileUseCase,
             proposalGeneratorPort,
             architectWorkPlanningService,
             new ObjectMapper(),
@@ -402,6 +410,7 @@ class ArchitectTicketAutoProcessorServiceTest {
             requirementDocQueryUseCase,
             ticketQueryUseCase,
             ticketCommandUseCase,
+            contextCompileUseCase,
             proposalGeneratorPort,
             architectWorkPlanningService,
             new ObjectMapper(),
@@ -473,6 +482,7 @@ class ArchitectTicketAutoProcessorServiceTest {
             requirementDocQueryUseCase,
             ticketQueryUseCase,
             ticketCommandUseCase,
+            contextCompileUseCase,
             proposalGeneratorPort,
             architectWorkPlanningService,
             new ObjectMapper(),
@@ -563,6 +573,7 @@ class ArchitectTicketAutoProcessorServiceTest {
             requirementDocQueryUseCase,
             ticketQueryUseCase,
             ticketCommandUseCase,
+            contextCompileUseCase,
             proposalGeneratorPort,
             architectWorkPlanningService,
             new ObjectMapper(),
@@ -641,6 +652,7 @@ class ArchitectTicketAutoProcessorServiceTest {
             requirementDocQueryUseCase,
             ticketQueryUseCase,
             ticketCommandUseCase,
+            contextCompileUseCase,
             proposalGeneratorPort,
             architectWorkPlanningService,
             new ObjectMapper(),
@@ -717,6 +729,7 @@ class ArchitectTicketAutoProcessorServiceTest {
             requirementDocQueryUseCase,
             ticketQueryUseCase,
             ticketCommandUseCase,
+            contextCompileUseCase,
             proposalGeneratorPort,
             architectWorkPlanningService,
             new ObjectMapper(),
@@ -791,6 +804,7 @@ class ArchitectTicketAutoProcessorServiceTest {
             requirementDocQueryUseCase,
             ticketQueryUseCase,
             ticketCommandUseCase,
+            contextCompileUseCase,
             proposalGeneratorPort,
             architectWorkPlanningService,
             new ObjectMapper(),
@@ -830,6 +844,7 @@ class ArchitectTicketAutoProcessorServiceTest {
             requirementDocQueryUseCase,
             ticketQueryUseCase,
             ticketCommandUseCase,
+            contextCompileUseCase,
             proposalGeneratorPort,
             architectWorkPlanningService,
             new ObjectMapper(),
@@ -884,6 +899,7 @@ class ArchitectTicketAutoProcessorServiceTest {
             requirementDocQueryUseCase,
             ticketQueryUseCase,
             ticketCommandUseCase,
+            contextCompileUseCase,
             proposalGeneratorPort,
             architectWorkPlanningService,
             new ObjectMapper(),

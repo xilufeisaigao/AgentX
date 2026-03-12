@@ -2,11 +2,13 @@ package com.agentx.agentxbackend.contextpack.application;
 
 import com.agentx.agentxbackend.contextpack.application.port.out.ArtifactStorePort;
 import com.agentx.agentxbackend.contextpack.application.port.out.ContextFactsQueryPort;
+import com.agentx.agentxbackend.contextpack.application.port.out.RepoContextQueryPort;
 import com.agentx.agentxbackend.contextpack.application.port.out.TaskContextSnapshotRepository;
 import com.agentx.agentxbackend.contextpack.domain.model.TaskContextPack;
 import com.agentx.agentxbackend.contextpack.domain.model.TaskContextSnapshot;
 import com.agentx.agentxbackend.contextpack.domain.model.TaskContextSnapshotStatus;
 import com.agentx.agentxbackend.contextpack.domain.model.TaskContextSnapshotStatusView;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -40,6 +42,25 @@ class ContextCompileServiceTest {
     private ArtifactStorePort artifactStorePort;
     @Mock
     private TaskContextSnapshotRepository snapshotRepository;
+    @Mock
+    private RepoContextQueryPort repoContextQueryPort;
+
+    @BeforeEach
+    void setUp() {
+        org.mockito.Mockito.lenient().when(repoContextQueryPort.query(any()))
+            .thenReturn(
+                new RepoContextQueryPort.RepoContext(
+                    "lexical_v1",
+                    ".",
+                    "git:HEAD_UNKNOWN",
+                    List.of(),
+                    List.of(),
+                    List.of(),
+                    List.of(),
+                    List.of()
+                )
+            );
+    }
 
     @Test
     void compileTaskContextPackShouldPersistSnapshotToReady() {
@@ -47,6 +68,7 @@ class ContextCompileServiceTest {
             factsQueryPort,
             artifactStorePort,
             snapshotRepository,
+            repoContextQueryPort,
             new ObjectMapper(),
             180,
             20,
@@ -79,6 +101,7 @@ class ContextCompileServiceTest {
             factsQueryPort,
             artifactStorePort,
             snapshotRepository,
+            repoContextQueryPort,
             new ObjectMapper(),
             180,
             20,
@@ -170,6 +193,7 @@ class ContextCompileServiceTest {
             factsQueryPort,
             artifactStorePort,
             snapshotRepository,
+            repoContextQueryPort,
             new ObjectMapper(),
             180,
             20,
@@ -229,6 +253,7 @@ class ContextCompileServiceTest {
             factsQueryPort,
             artifactStorePort,
             snapshotRepository,
+            repoContextQueryPort,
             new ObjectMapper(),
             180,
             20,
@@ -299,6 +324,7 @@ class ContextCompileServiceTest {
             factsQueryPort,
             artifactStorePort,
             snapshotRepository,
+            repoContextQueryPort,
             new ObjectMapper(),
             180,
             20,
@@ -357,6 +383,7 @@ class ContextCompileServiceTest {
             factsQueryPort,
             artifactStorePort,
             snapshotRepository,
+            repoContextQueryPort,
             new ObjectMapper(),
             180,
             20,
@@ -387,6 +414,7 @@ class ContextCompileServiceTest {
             factsQueryPort,
             artifactStorePort,
             snapshotRepository,
+            repoContextQueryPort,
             new ObjectMapper(),
             180,
             20,
@@ -425,6 +453,7 @@ class ContextCompileServiceTest {
             factsQueryPort,
             artifactStorePort,
             snapshotRepository,
+            repoContextQueryPort,
             new ObjectMapper(),
             180,
             20,
@@ -451,6 +480,7 @@ class ContextCompileServiceTest {
             factsQueryPort,
             artifactStorePort,
             snapshotRepository,
+            repoContextQueryPort,
             new ObjectMapper(),
             180,
             20,
@@ -503,6 +533,7 @@ class ContextCompileServiceTest {
             factsQueryPort,
             artifactStorePort,
             snapshotRepository,
+            repoContextQueryPort,
             new ObjectMapper(),
             180,
             20,
@@ -521,6 +552,7 @@ class ContextCompileServiceTest {
             factsQueryPort,
             artifactStorePort,
             snapshotRepository,
+            repoContextQueryPort,
             new ObjectMapper(),
             180,
             20,
@@ -560,6 +592,7 @@ class ContextCompileServiceTest {
             factsQueryPort,
             artifactStorePort,
             snapshotRepository,
+            repoContextQueryPort,
             new ObjectMapper(),
             180,
             20,

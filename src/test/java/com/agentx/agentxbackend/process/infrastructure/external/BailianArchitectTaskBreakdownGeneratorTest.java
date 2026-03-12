@@ -28,6 +28,7 @@ class BailianArchitectTaskBreakdownGeneratorTest {
                 1,
                 "{\"kind\":\"handoff_packet\"}",
                 "requirement markdown content",
+                "",
                 List.of()
             )
         );
@@ -54,6 +55,7 @@ class BailianArchitectTaskBreakdownGeneratorTest {
                     1,
                     "{}",
                     "content",
+                    "",
                     List.of()
                 )
             )

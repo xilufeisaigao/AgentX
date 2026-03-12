@@ -1,6 +1,7 @@
 package com.agentx.agentxbackend.contextpack.application;
 
 import com.agentx.agentxbackend.contextpack.domain.model.TaskSkill;
+import com.agentx.agentxbackend.contextpack.application.port.out.RepoContextQueryPort;
 
 import java.util.List;
 import java.util.Locale;
@@ -145,6 +146,10 @@ final class TaskSkillTemplateSupport {
     }
 
     static String renderTaskSkillMarkdown(TaskSkill skill) {
+        return renderTaskSkillMarkdown(skill, null);
+    }
+
+    static String renderTaskSkillMarkdown(TaskSkill skill, RepoContextQueryPort.RepoContext repoContext) {
         StringBuilder sb = new StringBuilder();
         sb.append("# Task Skill\n\n");
         sb.append("- skill_id: ").append(nullSafe(skill.skillId())).append('\n');
@@ -158,7 +163,68 @@ final class TaskSkillTemplateSupport {
         appendSection(sb, "Pitfalls", skill.pitfalls());
         appendSection(sb, "Stop Rules", skill.stopRules());
         appendSection(sb, "Expected Outputs", skill.expectedOutputs());
+        appendRepoContextSection(sb, repoContext);
         return sb.toString();
+    }
+
+    private static void appendRepoContextSection(StringBuilder sb, RepoContextQueryPort.RepoContext repoContext) {
+        sb.append("## Repo Context (Baseline)\n");
+        if (repoContext == null) {
+            sb.append("- <none>\n\n");
+            return;
+        }
+        if (repoContext.indexKind() != null && !repoContext.indexKind().isBlank()) {
+            sb.append("- index_kind: ").append(repoContext.indexKind().trim()).append('\n');
+        }
+        if (repoContext.repoHeadRef() != null && !repoContext.repoHeadRef().isBlank()) {
+            sb.append("- repo_head_ref: ").append(repoContext.repoHeadRef().trim()).append('\n');
+        }
+        if (repoContext.queryTerms() != null && !repoContext.queryTerms().isEmpty()) {
+            sb.append("- query_terms: ").append(String.join(", ", repoContext.queryTerms())).append('\n');
+        }
+        if (repoContext.topLevelEntries() != null && !repoContext.topLevelEntries().isEmpty()) {
+            sb.append("- top_level: ").append(String.join(", ", repoContext.topLevelEntries())).append('\n');
+        }
+        sb.append('\n');
+
+        sb.append("### Relevant Files\n");
+        if (repoContext.relevantFiles() == null || repoContext.relevantFiles().isEmpty()) {
+            sb.append("- <none>\n\n");
+        } else {
+            int limit = Math.min(18, repoContext.relevantFiles().size());
+            for (int i = 0; i < limit; i++) {
+                RepoContextQueryPort.ScoredPath file = repoContext.relevantFiles().get(i);
+                if (file == null || file.path() == null || file.path().isBlank()) {
+                    continue;
+                }
+                sb.append("- ").append(file.path().trim());
+                if (file.score() > 0) {
+                    sb.append(" (score=").append(file.score()).append(')');
+                }
+                if (file.reason() != null && !file.reason().isBlank()) {
+                    sb.append(" reason=").append(file.reason().trim());
+                }
+                sb.append('\n');
+            }
+            sb.append('\n');
+        }
+
+        sb.append("### Relevant Excerpts\n");
+        if (repoContext.excerpts() == null || repoContext.excerpts().isEmpty()) {
+            sb.append("- <none>\n\n");
+            return;
+        }
+        for (RepoContextQueryPort.FileExcerpt excerpt : repoContext.excerpts()) {
+            if (excerpt == null || excerpt.path() == null || excerpt.path().isBlank()) {
+                continue;
+            }
+            String text = excerpt.excerpt() == null ? "" : excerpt.excerpt().trim();
+            if (text.isBlank()) {
+                continue;
+            }
+            sb.append("[FILE ").append(excerpt.path().trim()).append("]\n");
+            sb.append(text).append("\n\n");
+        }
     }
 
     private static void appendSection(StringBuilder sb, String title, List<String> lines) {
