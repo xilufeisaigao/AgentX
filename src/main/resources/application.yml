@@ -142,6 +142,7 @@ agentx:
     git:
       executable: ${AGENTX_WORKSPACE_GIT_EXECUTABLE:git}
       repo-root: ${AGENTX_WORKSPACE_GIT_REPO_ROOT:.}
+      session-repo-prefix: ${AGENTX_WORKSPACE_GIT_SESSION_REPO_PREFIX:sessions}
       command-timeout-ms: ${AGENTX_WORKSPACE_GIT_COMMAND_TIMEOUT_MS:120000}
   mergegate:
     lock:
@@ -167,6 +168,21 @@ agentx:
   contextpack:
     artifact-root: ${AGENTX_CONTEXTPACK_ARTIFACT_ROOT:.agentx}
     snapshot-retention-days: ${AGENTX_CONTEXTPACK_SNAPSHOT_RETENTION_DAYS:180}
+    repo-context:
+      index-ttl-seconds: ${AGENTX_CONTEXTPACK_REPO_CONTEXT_INDEX_TTL_SECONDS:600}
+      rag:
+        enabled: ${AGENTX_CONTEXTPACK_REPO_CONTEXT_RAG_ENABLED:true}
+        base-url: ${AGENTX_CONTEXTPACK_REPO_CONTEXT_RAG_BASE_URL:${OPENAI_BASE_URL:https://api.openai.com/v1}}
+        api-key: ${AGENTX_CONTEXTPACK_REPO_CONTEXT_RAG_API_KEY:${OPENAI_API_KEY:}}
+        model: ${AGENTX_CONTEXTPACK_REPO_CONTEXT_RAG_MODEL:text-embedding-3-small}
+        timeout-ms: ${AGENTX_CONTEXTPACK_REPO_CONTEXT_RAG_TIMEOUT_MS:60000}
+        max-indexed-files: ${AGENTX_CONTEXTPACK_REPO_CONTEXT_RAG_MAX_INDEXED_FILES:2000}
+        max-file-chars: ${AGENTX_CONTEXTPACK_REPO_CONTEXT_RAG_MAX_FILE_CHARS:24000}
+        max-total-chars: ${AGENTX_CONTEXTPACK_REPO_CONTEXT_RAG_MAX_TOTAL_CHARS:2000000}
+        segment-chars: ${AGENTX_CONTEXTPACK_REPO_CONTEXT_RAG_SEGMENT_CHARS:1000}
+        segment-overlap-chars: ${AGENTX_CONTEXTPACK_REPO_CONTEXT_RAG_SEGMENT_OVERLAP_CHARS:120}
+        max-search-results: ${AGENTX_CONTEXTPACK_REPO_CONTEXT_RAG_MAX_SEARCH_RESULTS:24}
+        min-score: ${AGENTX_CONTEXTPACK_REPO_CONTEXT_RAG_MIN_SCORE:0.55}
     refresh:
       enabled: ${AGENTX_CONTEXTPACK_REFRESH_ENABLED:true}
       max-session-tasks-per-refresh: ${AGENTX_CONTEXTPACK_REFRESH_MAX_SESSION_TASKS:512}

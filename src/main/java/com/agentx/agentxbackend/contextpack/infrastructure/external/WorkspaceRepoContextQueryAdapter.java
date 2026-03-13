@@ -16,9 +16,11 @@ import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -38,13 +40,56 @@ public class WorkspaceRepoContextQueryAdapter implements RepoContextQueryPort {
     private final String gitExecutable;
     private final Path repoRoot;
     private final Duration indexTtl;
+    private final LangChain4jSemanticRepoIndexSupport semanticSupport;
 
-    private volatile RepoIndex cachedIndex;
+    private final Map<String, RepoIndex> cachedIndexes = new ConcurrentHashMap<>();
 
     public WorkspaceRepoContextQueryAdapter(
         @Value("${agentx.workspace.git.executable:git}") String gitExecutable,
         @Value("${agentx.workspace.git.repo-root:.}") String repoRoot,
-        @Value("${agentx.contextpack.repo-context.index-ttl-seconds:600}") long indexTtlSeconds
+        @Value("${agentx.contextpack.repo-context.index-ttl-seconds:600}") long indexTtlSeconds,
+        @Value("${agentx.contextpack.repo-context.rag.enabled:true}") boolean semanticEnabled,
+        @Value("${agentx.contextpack.repo-context.rag.base-url:https://api.openai.com/v1}") String semanticBaseUrl,
+        @Value("${agentx.contextpack.repo-context.rag.api-key:}") String semanticApiKey,
+        @Value("${agentx.contextpack.repo-context.rag.model:text-embedding-3-small}") String semanticModel,
+        @Value("${agentx.contextpack.repo-context.rag.timeout-ms:60000}") long semanticTimeoutMs,
+        @Value("${agentx.contextpack.repo-context.rag.max-indexed-files:2000}") int semanticMaxIndexedFiles,
+        @Value("${agentx.contextpack.repo-context.rag.max-file-chars:24000}") int semanticMaxFileChars,
+        @Value("${agentx.contextpack.repo-context.rag.max-total-chars:2000000}") int semanticMaxTotalChars,
+        @Value("${agentx.contextpack.repo-context.rag.segment-chars:1000}") int semanticSegmentChars,
+        @Value("${agentx.contextpack.repo-context.rag.segment-overlap-chars:120}") int semanticSegmentOverlapChars,
+        @Value("${agentx.contextpack.repo-context.rag.max-search-results:24}") int semanticMaxSearchResults,
+        @Value("${agentx.contextpack.repo-context.rag.min-score:0.55}") double semanticMinScore
+    ) {
+        this(
+            gitExecutable,
+            repoRoot,
+            indexTtlSeconds,
+            new LangChain4jSemanticRepoIndexSupport(
+                new LangChain4jSemanticRepoIndexSupport.SemanticConfig(
+                    semanticEnabled,
+                    semanticBaseUrl,
+                    semanticApiKey,
+                    semanticModel,
+                    semanticTimeoutMs,
+                    indexTtlSeconds,
+                    semanticMaxIndexedFiles,
+                    semanticMaxFileChars,
+                    semanticMaxTotalChars,
+                    semanticSegmentChars,
+                    semanticSegmentOverlapChars,
+                    semanticMaxSearchResults,
+                    semanticMinScore
+                )
+            )
+        );
+    }
+
+    WorkspaceRepoContextQueryAdapter(
+        String gitExecutable,
+        String repoRoot,
+        long indexTtlSeconds,
+        LangChain4jSemanticRepoIndexSupport semanticSupport
     ) {
         this.gitExecutable = (gitExecutable == null || gitExecutable.isBlank()) ? "git" : gitExecutable.trim();
         this.repoRoot = Path.of(repoRoot == null || repoRoot.isBlank() ? "." : repoRoot.trim())
@@ -52,6 +97,9 @@ public class WorkspaceRepoContextQueryAdapter implements RepoContextQueryPort {
             .normalize();
         long cappedSeconds = Math.max(30L, Math.min(3600L, indexTtlSeconds));
         this.indexTtl = Duration.ofSeconds(cappedSeconds);
+        this.semanticSupport = semanticSupport == null
+            ? new LangChain4jSemanticRepoIndexSupport(LangChain4jSemanticRepoIndexSupport.SemanticConfig.disabled())
+            : semanticSupport;
     }
 
     @Override
@@ -60,43 +108,76 @@ public class WorkspaceRepoContextQueryAdapter implements RepoContextQueryPort {
             throw new IllegalArgumentException("query must not be null");
         }
         String queryText = query.queryText() == null ? "" : query.queryText().trim();
+        QueryTarget target = resolveQueryTarget(query.includeRoots());
+        RepoIndex index = resolveIndex(target.effectiveRepoRoot());
+
         if (queryText.isBlank()) {
             return new RepoContext(
                 "lexical_v1",
-                repoRoot.toString().replace('\\', '/'),
-                resolveRepoHeadRef().orElse("git:HEAD_UNKNOWN"),
+                index.repoRoot(),
+                index.repoHeadRef(),
                 List.of(),
-                buildTopLevelEntries(repoRoot),
+                index.topLevelEntries(),
                 List.of(),
                 List.of(),
                 List.of("empty_query_text")
             );
         }
 
-        RepoIndex index = resolveIndex();
         List<String> queryTerms = extractQueryTerms(queryText);
-        List<String> includeRoots = normalizeIncludeRoots(query.includeRoots());
+        List<String> includeRoots = target.localIncludeRoots();
         int maxFiles = cap(query.maxFiles(), 1, 60, 24);
         int maxExcerpts = cap(query.maxExcerpts(), 0, 20, 6);
         int maxExcerptChars = cap(query.maxExcerptChars(), 200, 2400, 900);
         int maxTotalExcerptChars = cap(query.maxTotalExcerptChars(), 500, 20_000, 6_000);
+        LinkedHashSet<String> warnings = new LinkedHashSet<>(index.warnings());
 
-        List<RepoContextQueryPort.ScoredPath> scored = scorePaths(index.files(), includeRoots, queryTerms);
+        if (semanticSupport.isEnabled()) {
+            LangChain4jSemanticRepoIndexSupport.SemanticQueryResult semanticResult = semanticSupport.query(
+                target.effectiveRepoRoot(),
+                index.repoHeadRef(),
+                index.files(),
+                queryText,
+                includeRoots,
+                maxFiles,
+                maxExcerpts,
+                maxExcerptChars,
+                maxTotalExcerptChars
+            );
+            warnings.addAll(semanticResult.warnings());
+            if (semanticResult.hasMatches()) {
+                return new RepoContext(
+                    semanticResult.indexKind(),
+                    index.repoRoot(),
+                    index.repoHeadRef(),
+                    queryTerms,
+                    index.topLevelEntries(),
+                    semanticResult.relevantFiles(),
+                    semanticResult.excerpts(),
+                    List.copyOf(warnings)
+                );
+            }
+            warnings.add("semantic_fallback_to_lexical");
+        }
+
+        List<ScoredPath> scored = scorePaths(index.files(), includeRoots, queryTerms);
         if (scored.isEmpty()) {
+            warnings.add("no_visible_files");
             return new RepoContext(
-                index.indexKind(),
+                "lexical_v1",
                 index.repoRoot(),
                 index.repoHeadRef(),
                 queryTerms,
                 index.topLevelEntries(),
                 List.of(),
                 List.of(),
-                List.of("no_visible_files")
+                List.copyOf(warnings)
             );
         }
 
-        List<RepoContextQueryPort.ScoredPath> topFiles = scored.subList(0, Math.min(maxFiles, scored.size()));
-        List<RepoContextQueryPort.FileExcerpt> excerpts = buildExcerpts(
+        List<ScoredPath> topFiles = scored.subList(0, Math.min(maxFiles, scored.size()));
+        List<FileExcerpt> excerpts = buildExcerpts(
+            target.effectiveRepoRoot(),
             topFiles,
             queryTerms,
             maxExcerpts,
@@ -105,46 +186,47 @@ public class WorkspaceRepoContextQueryAdapter implements RepoContextQueryPort {
         );
 
         return new RepoContext(
-            index.indexKind(),
+            "lexical_v1",
             index.repoRoot(),
             index.repoHeadRef(),
             queryTerms,
             index.topLevelEntries(),
             topFiles,
             excerpts,
-            index.warnings()
+            List.copyOf(warnings)
         );
     }
 
-    private RepoIndex resolveIndex() {
-        RepoIndex current = cachedIndex;
-        if (current != null && current.isFresh(indexTtl) && current.matchesRepo(resolveRepoHeadRef().orElse(null))) {
+    private RepoIndex resolveIndex(Path effectiveRepoRoot) {
+        String currentHeadRef = resolveRepoHeadRef(effectiveRepoRoot).orElse("git:HEAD_UNKNOWN");
+        String cacheKey = effectiveRepoRoot.toAbsolutePath().normalize().toString();
+        RepoIndex current = cachedIndexes.get(cacheKey);
+        if (current != null && current.isFresh(indexTtl) && current.matchesRepo(currentHeadRef)) {
             return current;
         }
-        synchronized (this) {
-            RepoIndex refreshed = cachedIndex;
-            if (refreshed != null && refreshed.isFresh(indexTtl) && refreshed.matchesRepo(resolveRepoHeadRef().orElse(null))) {
+        synchronized (cachedIndexes) {
+            RepoIndex refreshed = cachedIndexes.get(cacheKey);
+            if (refreshed != null && refreshed.isFresh(indexTtl) && refreshed.matchesRepo(currentHeadRef)) {
                 return refreshed;
             }
-            RepoIndex rebuilt = buildIndex();
-            cachedIndex = rebuilt;
+            RepoIndex rebuilt = buildIndex(effectiveRepoRoot, currentHeadRef);
+            cachedIndexes.put(cacheKey, rebuilt);
             return rebuilt;
         }
     }
 
-    private RepoIndex buildIndex() {
-        String repoHeadRef = resolveRepoHeadRef().orElse("git:HEAD_UNKNOWN");
+    private RepoIndex buildIndex(Path effectiveRepoRoot, String repoHeadRef) {
         List<String> warnings = new ArrayList<>();
-        List<String> topLevel = buildTopLevelEntries(repoRoot);
-        if (!Files.exists(repoRoot)) {
-            warnings.add("repo_root_missing:" + repoRoot);
+        List<String> topLevel = buildTopLevelEntries(effectiveRepoRoot);
+        if (!Files.exists(effectiveRepoRoot)) {
+            warnings.add("repo_root_missing:" + effectiveRepoRoot);
         }
 
         List<String> files = new ArrayList<>();
-        try (Stream<Path> stream = Files.walk(repoRoot)) {
+        try (Stream<Path> stream = Files.walk(effectiveRepoRoot)) {
             files = stream
                 .filter(Files::isRegularFile)
-                .map(path -> normalizePath(repoRoot.relativize(path).toString()))
+                .map(path -> normalizePath(effectiveRepoRoot.relativize(path).toString()))
                 .filter(path -> !path.isBlank())
                 .filter(path -> !isIgnoredPath(path))
                 .limit(MAX_INDEXED_FILES)
@@ -158,7 +240,7 @@ public class WorkspaceRepoContextQueryAdapter implements RepoContextQueryPort {
         }
         return new RepoIndex(
             "lexical_v1",
-            repoRoot.toString().replace('\\', '/'),
+            effectiveRepoRoot.toString().replace('\\', '/'),
             repoHeadRef,
             Instant.now(),
             topLevel,
@@ -167,14 +249,14 @@ public class WorkspaceRepoContextQueryAdapter implements RepoContextQueryPort {
         );
     }
 
-    private Optional<String> resolveRepoHeadRef() {
-        Path gitDir = repoRoot.resolve(".git");
+    private Optional<String> resolveRepoHeadRef(Path effectiveRepoRoot) {
+        Path gitDir = effectiveRepoRoot.resolve(".git");
         if (!Files.exists(gitDir)) {
             return Optional.empty();
         }
         try {
             ProcessBuilder pb = new ProcessBuilder(List.of(gitExecutable, "rev-parse", "HEAD"));
-            pb.directory(repoRoot.toFile());
+            pb.directory(effectiveRepoRoot.toFile());
             pb.redirectErrorStream(true);
             Process proc = pb.start();
             boolean finished = proc.waitFor(5, TimeUnit.SECONDS);
@@ -195,6 +277,67 @@ public class WorkspaceRepoContextQueryAdapter implements RepoContextQueryPort {
         }
     }
 
+    private QueryTarget resolveQueryTarget(List<String> includeRoots) {
+        List<String> normalizedRoots = normalizeIncludeRoots(includeRoots);
+        if (normalizedRoots.isEmpty() || normalizedRoots.contains("./")) {
+            return new QueryTarget(repoRoot, List.of("./"));
+        }
+        for (String includeRoot : normalizedRoots) {
+            Path candidate = repoRoot.resolve(normalizePath(includeRoot)).toAbsolutePath().normalize();
+            if (!candidate.startsWith(repoRoot)) {
+                continue;
+            }
+            Path nestedRepoRoot = findEnclosingGitRepoRoot(candidate);
+            if (nestedRepoRoot != null && !nestedRepoRoot.equals(repoRoot)) {
+                return new QueryTarget(
+                    nestedRepoRoot,
+                    relativizeIncludeRoots(normalizedRoots, nestedRepoRoot)
+                );
+            }
+        }
+        return new QueryTarget(repoRoot, normalizedRoots);
+    }
+
+    private Path findEnclosingGitRepoRoot(Path candidate) {
+        Path current = candidate;
+        if (!Files.exists(current)) {
+            current = current.getParent();
+        }
+        while (current != null && current.startsWith(repoRoot)) {
+            if (Files.exists(current.resolve(".git"))) {
+                return current;
+            }
+            current = current.getParent();
+        }
+        return null;
+    }
+
+    private List<String> relativizeIncludeRoots(List<String> includeRoots, Path nestedRepoRoot) {
+        LinkedHashSet<String> relativized = new LinkedHashSet<>();
+        for (String includeRoot : includeRoots) {
+            if (includeRoot == null || includeRoot.isBlank() || "./".equals(includeRoot)) {
+                return List.of("./");
+            }
+            Path absolute = repoRoot.resolve(normalizePath(includeRoot)).toAbsolutePath().normalize();
+            if (!absolute.startsWith(nestedRepoRoot)) {
+                continue;
+            }
+            Path relative = nestedRepoRoot.relativize(absolute);
+            String normalizedRelative = normalizePath(relative.toString());
+            if (normalizedRelative.isBlank()) {
+                return List.of("./");
+            }
+            if (!normalizedRelative.endsWith("/")) {
+                normalizedRelative = normalizedRelative + "/";
+            }
+            relativized.add(normalizedRelative);
+        }
+        if (relativized.isEmpty()) {
+            return List.of("./");
+        }
+        return List.copyOf(relativized);
+    }
+
     private static String readProcessOutput(Process proc, int maxChars) {
         if (proc == null) {
             return "";
@@ -212,12 +355,12 @@ public class WorkspaceRepoContextQueryAdapter implements RepoContextQueryPort {
         }
     }
 
-    private static List<String> buildTopLevelEntries(Path repoRoot) {
-        if (repoRoot == null || !Files.isDirectory(repoRoot)) {
+    private static List<String> buildTopLevelEntries(Path effectiveRepoRoot) {
+        if (effectiveRepoRoot == null || !Files.isDirectory(effectiveRepoRoot)) {
             return List.of();
         }
         List<String> entries = new ArrayList<>();
-        try (DirectoryStream<Path> stream = Files.newDirectoryStream(repoRoot)) {
+        try (DirectoryStream<Path> stream = Files.newDirectoryStream(effectiveRepoRoot)) {
             for (Path child : stream) {
                 if (child == null) {
                     continue;
@@ -263,7 +406,7 @@ public class WorkspaceRepoContextQueryAdapter implements RepoContextQueryPort {
 
     private static List<String> normalizeIncludeRoots(List<String> roots) {
         if (roots == null || roots.isEmpty()) {
-            return List.of();
+            return List.of("./");
         }
         LinkedHashSet<String> normalized = new LinkedHashSet<>();
         for (String root : roots) {
@@ -277,7 +420,10 @@ public class WorkspaceRepoContextQueryAdapter implements RepoContextQueryPort {
             if (!value.endsWith("/")) {
                 value = value + "/";
             }
-            normalized.add(value);
+            normalized.add(normalizePath(value));
+        }
+        if (normalized.isEmpty()) {
+            return List.of("./");
         }
         return List.copyOf(normalized);
     }
@@ -311,7 +457,7 @@ public class WorkspaceRepoContextQueryAdapter implements RepoContextQueryPort {
         return List.copyOf(tokens);
     }
 
-    private static List<RepoContextQueryPort.ScoredPath> scorePaths(
+    private static List<ScoredPath> scorePaths(
         List<String> files,
         List<String> includeRoots,
         List<String> queryTerms
@@ -319,7 +465,7 @@ public class WorkspaceRepoContextQueryAdapter implements RepoContextQueryPort {
         if (files == null || files.isEmpty()) {
             return List.of();
         }
-        List<RepoContextQueryPort.ScoredPath> scored = new ArrayList<>();
+        List<ScoredPath> scored = new ArrayList<>();
         int remaining = MAX_FILES_TO_SCORE;
         for (String rawPath : files) {
             if (rawPath == null || rawPath.isBlank()) {
@@ -349,20 +495,21 @@ public class WorkspaceRepoContextQueryAdapter implements RepoContextQueryPort {
                     }
                 }
             }
-            scored.add(new RepoContextQueryPort.ScoredPath(path, score, String.join(", ", reasons)));
+            scored.add(new ScoredPath(path, score, String.join(", ", reasons)));
             remaining--;
             if (remaining <= 0) {
                 break;
             }
         }
         scored.sort(Comparator
-            .comparingInt(RepoContextQueryPort.ScoredPath::score).reversed()
-            .thenComparing(RepoContextQueryPort.ScoredPath::path));
+            .comparingInt(ScoredPath::score).reversed()
+            .thenComparing(ScoredPath::path));
         return scored;
     }
 
-    private List<RepoContextQueryPort.FileExcerpt> buildExcerpts(
-        List<RepoContextQueryPort.ScoredPath> candidates,
+    private List<FileExcerpt> buildExcerpts(
+        Path effectiveRepoRoot,
+        List<ScoredPath> candidates,
         List<String> queryTerms,
         int maxExcerpts,
         int maxExcerptChars,
@@ -372,14 +519,14 @@ public class WorkspaceRepoContextQueryAdapter implements RepoContextQueryPort {
             return List.of();
         }
         List<ScoredCandidate> rescored = new ArrayList<>();
-        for (RepoContextQueryPort.ScoredPath candidate : candidates) {
+        for (ScoredPath candidate : candidates) {
             if (candidate == null || candidate.path() == null) {
                 continue;
             }
             String path = candidate.path();
             int score = candidate.score();
             if (isTextFileCandidate(path)) {
-                ContentMatch match = scoreByContent(path, queryTerms);
+                ContentMatch match = scoreByContent(effectiveRepoRoot, path, queryTerms);
                 if (match != null) {
                     score += match.score();
                 }
@@ -393,7 +540,7 @@ public class WorkspaceRepoContextQueryAdapter implements RepoContextQueryPort {
             .comparingInt(ScoredCandidate::score).reversed()
             .thenComparing(ScoredCandidate::path));
 
-        List<RepoContextQueryPort.FileExcerpt> excerpts = new ArrayList<>();
+        List<FileExcerpt> excerpts = new ArrayList<>();
         int remainingChars = maxTotalChars;
         for (ScoredCandidate candidate : rescored) {
             if (excerpts.size() >= maxExcerpts || remainingChars <= 0) {
@@ -402,21 +549,26 @@ public class WorkspaceRepoContextQueryAdapter implements RepoContextQueryPort {
             if (!isTextFileCandidate(candidate.path())) {
                 continue;
             }
-            String excerpt = excerptRelevantText(candidate.path(), queryTerms, Math.min(maxExcerptChars, remainingChars));
+            String excerpt = excerptRelevantText(
+                effectiveRepoRoot,
+                candidate.path(),
+                queryTerms,
+                Math.min(maxExcerptChars, remainingChars)
+            );
             if (excerpt.isBlank()) {
                 continue;
             }
-            excerpts.add(new RepoContextQueryPort.FileExcerpt(candidate.path(), candidate.score(), excerpt));
+            excerpts.add(new FileExcerpt(candidate.path(), candidate.score(), excerpt));
             remainingChars -= excerpt.length();
         }
         return List.copyOf(excerpts);
     }
 
-    private ContentMatch scoreByContent(String relativePath, List<String> queryTerms) {
+    private ContentMatch scoreByContent(Path effectiveRepoRoot, String relativePath, List<String> queryTerms) {
         if (queryTerms == null || queryTerms.isEmpty()) {
             return new ContentMatch(0);
         }
-        Path file = repoRoot.resolve(relativePath);
+        Path file = effectiveRepoRoot.resolve(relativePath);
         try {
             if (!Files.exists(file) || !Files.isRegularFile(file)) {
                 return new ContentMatch(0);
@@ -455,8 +607,8 @@ public class WorkspaceRepoContextQueryAdapter implements RepoContextQueryPort {
         }
     }
 
-    private String excerptRelevantText(String relativePath, List<String> queryTerms, int maxChars) {
-        Path file = repoRoot.resolve(relativePath);
+    private String excerptRelevantText(Path effectiveRepoRoot, String relativePath, List<String> queryTerms, int maxChars) {
+        Path file = effectiveRepoRoot.resolve(relativePath);
         try {
             if (!Files.exists(file) || !Files.isRegularFile(file)) {
                 return "";
@@ -468,7 +620,7 @@ public class WorkspaceRepoContextQueryAdapter implements RepoContextQueryPort {
             String content = raw.length() > MAX_CONTENT_CHARS_FOR_EXCERPT ? raw.substring(0, MAX_CONTENT_CHARS_FOR_EXCERPT) : raw;
             String lower = content.toLowerCase(Locale.ROOT);
             int bestIndex = -1;
-            for (String term : defaultList(queryTerms)) {
+            for (String term : defaultStrings(queryTerms)) {
                 if (term == null || term.isBlank() || term.length() < 3) {
                     continue;
                 }
@@ -572,7 +724,7 @@ public class WorkspaceRepoContextQueryAdapter implements RepoContextQueryPort {
             || "docker-compose.yml".equals(normalized);
     }
 
-    private static List<String> defaultList(List<String> value) {
+    private static List<String> defaultStrings(List<String> value) {
         return value == null ? List.of() : value;
     }
 
@@ -599,7 +751,14 @@ public class WorkspaceRepoContextQueryAdapter implements RepoContextQueryPort {
         if (raw == null) {
             return "";
         }
-        return raw.replace('\\', '/').trim();
+        String normalized = raw.replace('\\', '/').trim();
+        while (normalized.startsWith("./")) {
+            normalized = normalized.substring(2);
+        }
+        while (normalized.startsWith("/")) {
+            normalized = normalized.substring(1);
+        }
+        return normalized;
     }
 
     private record RepoIndex(
@@ -624,6 +783,9 @@ public class WorkspaceRepoContextQueryAdapter implements RepoContextQueryPort {
             }
             return Objects.equals(repoHeadRef, currentHeadRef);
         }
+    }
+
+    private record QueryTarget(Path effectiveRepoRoot, List<String> localIncludeRoots) {
     }
 
     private record ScoredCandidate(String path, int score) {

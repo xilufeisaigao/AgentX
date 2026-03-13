@@ -1,9 +1,11 @@
 package com.agentx.agentxbackend.process.infrastructure.external;
 
+import com.agentx.agentxbackend.contextpack.application.port.in.ContextCompileUseCase;
 import com.agentx.agentxbackend.execution.domain.model.RunKind;
 import com.agentx.agentxbackend.execution.domain.model.TaskPackage;
 import com.agentx.agentxbackend.process.application.port.in.RuntimeLlmConfigUseCase;
 import com.agentx.agentxbackend.process.application.port.out.WorkerTaskExecutorPort;
+import org.springframework.beans.factory.ObjectProvider;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.request.ChatRequest;
@@ -50,9 +52,14 @@ public class LocalWorkerTaskExecutor implements WorkerTaskExecutorPort {
     private static final int MAX_WORKSPACE_PATH_CANDIDATES_FOR_CONTENT = 240;
     private static final int MAX_WORKSPACE_QUERY_CHARS = 2_200;
     private static final int MAX_WORKSPACE_RELEVANCE_HINT_TERMS = 24;
+    private static final int MAX_RUNTIME_REPO_CONTEXT_FILES = 40;
+    private static final int MAX_RUNTIME_REPO_CONTEXT_EXCERPTS = 8;
+    private static final int MAX_RUNTIME_REPO_CONTEXT_EXCERPT_CHARS = 1_500;
+    private static final int MAX_RUNTIME_REPO_CONTEXT_TOTAL_EXCERPT_CHARS = 14_000;
     private static final Pattern QUERY_IDENTIFIER_PATTERN = Pattern.compile("[A-Za-z_][A-Za-z0-9_]{2,}");
     private static final Pattern QUERY_CHINESE_PHRASE_PATTERN = Pattern.compile("[\\p{IsHan}]{2,}");
 
+    private final ContextCompileUseCase contextCompileUseCase;
     private final ObjectMapper objectMapper;
     private final RuntimeLlmConfigUseCase runtimeLlmConfigUseCase;
     private final String gitExecutable;
@@ -69,6 +76,7 @@ public class LocalWorkerTaskExecutor implements WorkerTaskExecutorPort {
     private final int verifyDockerPidsLimit;
 
     public LocalWorkerTaskExecutor(
+        ObjectProvider<ContextCompileUseCase> contextCompileUseCaseProvider,
         RuntimeLlmConfigUseCase runtimeLlmConfigUseCase,
         ObjectMapper objectMapper,
         @Value("${agentx.worker-runtime.git.executable:git}") String gitExecutable,
@@ -84,6 +92,7 @@ public class LocalWorkerTaskExecutor implements WorkerTaskExecutorPort {
         @Value("${agentx.worker-runtime.verify.docker.cpus:1.0}") String verifyDockerCpus,
         @Value("${agentx.worker-runtime.verify.docker.pids-limit:256}") int verifyDockerPidsLimit
     ) {
+        this.contextCompileUseCase = contextCompileUseCaseProvider == null ? null : contextCompileUseCaseProvider.getIfAvailable();
         this.runtimeLlmConfigUseCase = runtimeLlmConfigUseCase;
         this.objectMapper = objectMapper;
         this.gitExecutable = gitExecutable == null || gitExecutable.isBlank() ? "git" : gitExecutable.trim();
@@ -108,6 +117,85 @@ public class LocalWorkerTaskExecutor implements WorkerTaskExecutorPort {
             ? "1.0"
             : verifyDockerCpus.trim();
         this.verifyDockerPidsLimit = Math.max(32, verifyDockerPidsLimit);
+    }
+
+    LocalWorkerTaskExecutor(
+        ContextCompileUseCase contextCompileUseCase,
+        RuntimeLlmConfigUseCase runtimeLlmConfigUseCase,
+        ObjectMapper objectMapper,
+        String gitExecutable,
+        String repoRoot,
+        String sessionRepoPrefix,
+        int commandTimeoutMs,
+        int maxEditsPerRun,
+        String verifyAllowedCommandPrefixes,
+        boolean verifyUseDocker,
+        String verifyDockerExecutable,
+        String verifyDockerImage,
+        String verifyDockerMemory,
+        String verifyDockerCpus,
+        int verifyDockerPidsLimit
+    ) {
+        this.contextCompileUseCase = contextCompileUseCase;
+        this.runtimeLlmConfigUseCase = runtimeLlmConfigUseCase;
+        this.objectMapper = objectMapper;
+        this.gitExecutable = gitExecutable == null || gitExecutable.isBlank() ? "git" : gitExecutable.trim();
+        this.repoRoot = Path.of(repoRoot == null || repoRoot.isBlank() ? "." : repoRoot.trim())
+            .toAbsolutePath()
+            .normalize();
+        this.sessionRepoPrefix = normalizeRelativePrefix(sessionRepoPrefix, "sessions");
+        this.commandTimeoutMs = Math.max(5_000, commandTimeoutMs);
+        this.maxEditsPerRun = Math.max(1, maxEditsPerRun);
+        this.verifyCommandPrefixAllowlist = parseVerifyCommandAllowlist(verifyAllowedCommandPrefixes);
+        this.verifyUseDocker = verifyUseDocker;
+        this.verifyDockerExecutable = verifyDockerExecutable == null || verifyDockerExecutable.isBlank()
+            ? "docker"
+            : verifyDockerExecutable.trim();
+        this.verifyDockerImage = verifyDockerImage == null || verifyDockerImage.isBlank()
+            ? "maven:3.9.11-eclipse-temurin-21"
+            : verifyDockerImage.trim();
+        this.verifyDockerMemory = verifyDockerMemory == null || verifyDockerMemory.isBlank()
+            ? "1g"
+            : verifyDockerMemory.trim();
+        this.verifyDockerCpus = verifyDockerCpus == null || verifyDockerCpus.isBlank()
+            ? "1.0"
+            : verifyDockerCpus.trim();
+        this.verifyDockerPidsLimit = Math.max(32, verifyDockerPidsLimit);
+    }
+
+    LocalWorkerTaskExecutor(
+        RuntimeLlmConfigUseCase runtimeLlmConfigUseCase,
+        ObjectMapper objectMapper,
+        String gitExecutable,
+        String repoRoot,
+        String sessionRepoPrefix,
+        int commandTimeoutMs,
+        int maxEditsPerRun,
+        String verifyAllowedCommandPrefixes,
+        boolean verifyUseDocker,
+        String verifyDockerExecutable,
+        String verifyDockerImage,
+        String verifyDockerMemory,
+        String verifyDockerCpus,
+        int verifyDockerPidsLimit
+    ) {
+        this(
+            (ContextCompileUseCase) null,
+            runtimeLlmConfigUseCase,
+            objectMapper,
+            gitExecutable,
+            repoRoot,
+            sessionRepoPrefix,
+            commandTimeoutMs,
+            maxEditsPerRun,
+            verifyAllowedCommandPrefixes,
+            verifyUseDocker,
+            verifyDockerExecutable,
+            verifyDockerImage,
+            verifyDockerMemory,
+            verifyDockerCpus,
+            verifyDockerPidsLimit
+        );
     }
 
     @Override
@@ -212,11 +300,13 @@ public class LocalWorkerTaskExecutor implements WorkerTaskExecutorPort {
         String outputLanguage = resolveOutputLanguage();
         String taskSkillText = readTaskSkill(taskPackage.taskSkillRef());
         JsonNode taskContextPack = readTaskContextPack(taskPackage.taskContextRef());
+        String evidenceSnapshot = buildEvidenceSnapshotForWorker(taskPackage, taskContextPack, outputLanguage);
         String workspaceSnapshot = buildWorkspaceSnapshotForWorker(taskPackage, worktree, taskSkillText, outputLanguage);
         PlannerResult plannerResult = proposePlan(
             taskPackage,
             taskSkillText,
             taskContextPack,
+            evidenceSnapshot,
             outputLanguage,
             workspaceSnapshot,
             false,
@@ -227,6 +317,7 @@ public class LocalWorkerTaskExecutor implements WorkerTaskExecutorPort {
                 taskPackage,
                 taskSkillText,
                 taskContextPack,
+                evidenceSnapshot,
                 outputLanguage,
                 workspaceSnapshot,
                 true,
@@ -238,6 +329,7 @@ public class LocalWorkerTaskExecutor implements WorkerTaskExecutorPort {
                 taskPackage,
                 taskSkillText,
                 taskContextPack,
+                evidenceSnapshot,
                 outputLanguage,
                 workspaceSnapshot,
                 localize(
@@ -320,6 +412,7 @@ public class LocalWorkerTaskExecutor implements WorkerTaskExecutorPort {
                 taskPackage,
                 taskSkillText,
                 taskContextPack,
+                evidenceSnapshot,
                 outputLanguage,
                 workspaceSnapshot,
                 localize(
@@ -484,15 +577,17 @@ public class LocalWorkerTaskExecutor implements WorkerTaskExecutorPort {
         TaskPackage taskPackage,
         String taskSkillText,
         JsonNode taskContextPack,
+        String evidenceSnapshot,
         String outputLanguage
     ) {
-        return proposePlan(taskPackage, taskSkillText, taskContextPack, outputLanguage, "", false, null);
+        return proposePlan(taskPackage, taskSkillText, taskContextPack, evidenceSnapshot, outputLanguage, "", false, null);
     }
 
     private PlannerResult proposePlan(
         TaskPackage taskPackage,
         String taskSkillText,
         JsonNode taskContextPack,
+        String evidenceSnapshot,
         String outputLanguage,
         String workspaceSnapshot,
         boolean forceExecutionMode,
@@ -543,6 +638,7 @@ public class LocalWorkerTaskExecutor implements WorkerTaskExecutorPort {
                         taskPackage,
                         taskSkillText,
                         taskContextPack,
+                        evidenceSnapshot,
                         llmConfig.outputLanguage(),
                         workspaceSnapshot,
                         forceExecutionMode,
@@ -604,6 +700,7 @@ public class LocalWorkerTaskExecutor implements WorkerTaskExecutorPort {
         TaskPackage taskPackage,
         String taskSkillText,
         JsonNode taskContextPack,
+        String evidenceSnapshot,
         String outputLanguage,
         String workspaceSnapshot,
         String reason
@@ -612,6 +709,7 @@ public class LocalWorkerTaskExecutor implements WorkerTaskExecutorPort {
             taskPackage,
             taskSkillText,
             taskContextPack,
+            evidenceSnapshot,
             outputLanguage,
             workspaceSnapshot,
             true,
@@ -1248,7 +1346,9 @@ public class LocalWorkerTaskExecutor implements WorkerTaskExecutorPort {
             - Never return SUCCEEDED with an empty edits array.
             - Each SUCCEEDED edit must change current file contents or create a missing file.
             - Use workspace_snapshot as the authoritative source for existing project structure, package names, and build setup.
+            - Use task_evidence_snapshot as the authoritative curated summary of confirmed requirement baseline, resolved clarifications, decisions, and prior run evidence.
             - If workspace_snapshot already shows the answer, do not ask clarification about project structure or dependencies again.
+            - If task_evidence_snapshot already explains the latest blocker, do not ask the same question again.
             - If task_context.prior_run_refs mentions a failed VERIFY or FAILED run, treat that failure summary as authoritative evidence of what must be fixed next.
             - If a prior run already has a delivery_commit, do not claim the task is complete unless this run also returns the concrete edits required to resolve the latest blocker.
             - Never emit edits outside write_scope. If requirements mention out-of-scope files, leave them to other tasks instead of failing the current task.
@@ -1289,6 +1389,7 @@ public class LocalWorkerTaskExecutor implements WorkerTaskExecutorPort {
         TaskPackage taskPackage,
         String taskSkillText,
         JsonNode taskContextPack,
+        String evidenceSnapshot,
         String outputLanguage,
         String workspaceSnapshot,
         boolean forceExecutionMode,
@@ -1324,6 +1425,7 @@ public class LocalWorkerTaskExecutor implements WorkerTaskExecutorPort {
             previousClarificationQuestion == null ? "" : previousClarificationQuestion
         );
         root.put("task_skill_excerpt", taskSkillText == null ? "" : taskSkillText);
+        root.put("task_evidence_snapshot", evidenceSnapshot == null ? "" : evidenceSnapshot);
         root.put("workspace_snapshot", workspaceSnapshot == null ? "" : workspaceSnapshot);
         return root.toString();
     }
@@ -1339,6 +1441,10 @@ public class LocalWorkerTaskExecutor implements WorkerTaskExecutorPort {
         }
         String query = buildWorkspaceQuery(taskPackage, taskSkillText);
         List<String> queryTokens = extractWorkspaceQueryTokens(query);
+        String repoContextPrompt = buildSemanticWorkspaceSnapshot(worktree, query);
+        if (repoContextPrompt != null && !repoContextPrompt.isBlank()) {
+            return repoContextPrompt;
+        }
         if (queryTokens.isEmpty()) {
             return buildWorkspaceSnapshot(worktree, taskPackage.readScope(), taskPackage.writeScope());
         }
@@ -1354,6 +1460,44 @@ public class LocalWorkerTaskExecutor implements WorkerTaskExecutorPort {
             // Snapshot is best-effort. If relevance indexing fails, fall back to deterministic v0 snapshot.
             return buildWorkspaceSnapshot(worktree, taskPackage.readScope(), taskPackage.writeScope());
         }
+    }
+
+    private String buildSemanticWorkspaceSnapshot(Path worktree, String query) {
+        if (contextCompileUseCase == null || worktree == null || !Files.exists(worktree)) {
+            return "";
+        }
+        List<String> includeRoots = buildRepoPromptIncludeRoots(worktree);
+        ContextCompileUseCase.RepoContextPrompt prompt = contextCompileUseCase.buildRepoContextPrompt(
+            query,
+            includeRoots,
+            MAX_RUNTIME_REPO_CONTEXT_FILES,
+            MAX_RUNTIME_REPO_CONTEXT_EXCERPTS,
+            MAX_RUNTIME_REPO_CONTEXT_EXCERPT_CHARS,
+            MAX_RUNTIME_REPO_CONTEXT_TOTAL_EXCERPT_CHARS
+        );
+        if (prompt == null || prompt.promptText() == null || prompt.promptText().isBlank()) {
+            return "";
+        }
+        return prompt.promptText().trim();
+    }
+
+    private List<String> buildRepoPromptIncludeRoots(Path worktree) {
+        if (worktree == null) {
+            return List.of("./");
+        }
+        Path normalizedWorktree = worktree.toAbsolutePath().normalize();
+        if (!normalizedWorktree.startsWith(repoRoot)) {
+            return List.of("./");
+        }
+        Path relative = repoRoot.relativize(normalizedWorktree);
+        String normalized = normalizePath(relative.toString());
+        if (normalized.isBlank()) {
+            return List.of("./");
+        }
+        if (!normalized.endsWith("/")) {
+            normalized = normalized + "/";
+        }
+        return List.of(normalized);
     }
 
     private static String buildWorkspaceQuery(TaskPackage taskPackage, String taskSkillText) {
@@ -1763,6 +1907,120 @@ public class LocalWorkerTaskExecutor implements WorkerTaskExecutorPort {
         return builder.toString().trim();
     }
 
+    private String buildEvidenceSnapshotForWorker(
+        TaskPackage taskPackage,
+        JsonNode taskContextPack,
+        String outputLanguage
+    ) {
+        if (taskPackage == null) {
+            return "";
+        }
+        com.agentx.agentxbackend.execution.domain.model.TaskContext taskContext = taskPackage.taskContext();
+        List<ResolvedClarification> resolvedClarifications = extractResolvedClarifications(taskContext);
+        List<PriorRunEvidence> priorRunEvidence = extractPriorRunEvidence(taskContext == null ? null : taskContext.priorRunRefs());
+        List<String> decisionRefs = extractDecisionRefs(taskContext);
+
+        String requirementRef = taskContext == null ? "" : defaultText(taskContext.requirementRef(), "");
+        String repoBaselineRef = taskContext == null ? "" : defaultText(taskContext.repoBaselineRef(), "");
+        String moduleRef = taskContextPack == null ? "" : readTextOrEmpty(taskContextPack, "module_ref", "moduleRef");
+        String snapshotId = taskContextPack == null ? "" : readTextOrEmpty(taskContextPack, "snapshot_id", "snapshotId");
+
+        StringBuilder builder = new StringBuilder();
+        builder.append(isChinese(outputLanguage) ? "# 执行事实摘要\n" : "# Execution Evidence Snapshot\n");
+        builder.append("- ")
+            .append(isChinese(outputLanguage) ? "上下文快照: " : "context_snapshot: ")
+            .append(defaultText(snapshotId, defaultText(taskPackage.contextSnapshotId(), "N/A")))
+            .append('\n');
+        builder.append("- ")
+            .append(isChinese(outputLanguage) ? "需求基线: " : "requirement_baseline: ")
+            .append(defaultText(requirementRef, "N/A"))
+            .append('\n');
+        builder.append("- ")
+            .append(isChinese(outputLanguage) ? "模块边界: " : "module_boundary: ")
+            .append(defaultText(moduleRef, defaultText(taskPackage.moduleId(), "N/A")))
+            .append('\n');
+        builder.append("- ")
+            .append(isChinese(outputLanguage) ? "代码基线: " : "repo_baseline: ")
+            .append(defaultText(repoBaselineRef, "N/A"))
+            .append("\n\n");
+
+        builder.append(isChinese(outputLanguage) ? "## 已确认的澄清与决策\n" : "## Resolved Clarifications And Decisions\n");
+        if (resolvedClarifications.isEmpty() && decisionRefs.isEmpty()) {
+            builder.append("- ").append(isChinese(outputLanguage) ? "<无>" : "<none>").append("\n\n");
+        } else {
+            for (ResolvedClarification clarification : resolvedClarifications) {
+                builder.append("- ");
+                if (clarification.ticketId() != null && !clarification.ticketId().isBlank()) {
+                    builder.append('[').append(clarification.ticketId().trim()).append("] ");
+                }
+                if (isChinese(outputLanguage)) {
+                    builder.append("问: ").append(abbreviateForPrompt(clarification.question(), 180))
+                        .append("；答: ").append(abbreviateForPrompt(clarification.answer(), 240))
+                        .append('\n');
+                } else {
+                    builder.append("Q: ").append(abbreviateForPrompt(clarification.question(), 180))
+                        .append("; A: ").append(abbreviateForPrompt(clarification.answer(), 240))
+                        .append('\n');
+                }
+            }
+            int renderedDecisions = 0;
+            for (String decisionRef : decisionRefs) {
+                if (decisionRef == null || decisionRef.isBlank() || decisionRef.startsWith("ticket-summary:")) {
+                    continue;
+                }
+                builder.append("- ").append(abbreviateForPrompt(decisionRef.trim(), 260)).append('\n');
+                renderedDecisions++;
+                if (renderedDecisions >= 6) {
+                    break;
+                }
+            }
+            builder.append('\n');
+        }
+
+        builder.append(isChinese(outputLanguage) ? "## 最近运行证据\n" : "## Recent Run Evidence\n");
+        if (priorRunEvidence.isEmpty()) {
+            builder.append("- ").append(isChinese(outputLanguage) ? "<无>" : "<none>").append("\n\n");
+        } else {
+            for (PriorRunEvidence evidence : priorRunEvidence) {
+                builder.append("- ").append(defaultText(evidence.runId(), "RUN-UNKNOWN"));
+                if (evidence.status() != null && !evidence.status().isBlank()) {
+                    builder.append(" [").append(evidence.status().trim());
+                    if (evidence.runKind() != null && !evidence.runKind().isBlank()) {
+                        builder.append('/').append(evidence.runKind().trim());
+                    }
+                    builder.append(']');
+                }
+                if (evidence.summary() != null && !evidence.summary().isBlank()) {
+                    builder.append(": ").append(abbreviateForPrompt(evidence.summary(), 320));
+                }
+                if (evidence.deliveryCommit() != null && !evidence.deliveryCommit().isBlank()) {
+                    builder.append(isChinese(outputLanguage) ? "；交付提交=" : "; delivery_commit=")
+                        .append(evidence.deliveryCommit().trim());
+                }
+                builder.append('\n');
+            }
+            builder.append('\n');
+        }
+
+        builder.append(isChinese(outputLanguage) ? "## 执行约束提醒\n" : "## Execution Constraints\n");
+        builder.append("- ")
+            .append(isChinese(outputLanguage)
+                ? "只允许在 write_scope 内返回 edits，超出范围的工作必须说明但不能越界修改。"
+                : "Return edits only within write_scope. Mention out-of-scope work, but do not modify it.")
+            .append('\n');
+        builder.append("- ")
+            .append(isChinese(outputLanguage)
+                ? "如果最近一次 VERIFY 或 prior run 已给出失败原因，应优先修复那个阻塞点。"
+                : "If the latest VERIFY or prior run already exposed a failure reason, fix that blocker first.")
+            .append('\n');
+        builder.append("- ")
+            .append(isChinese(outputLanguage)
+                ? "如果已确认的澄清里已经回答了问题，不要再次提出相同问题。"
+                : "Do not ask again for facts already answered in resolved clarifications.")
+            .append('\n');
+        return builder.toString().trim();
+    }
+
     private String resolveOutputLanguage() {
         RuntimeLlmConfigUseCase.RuntimeConfigView runtimeConfig = runtimeLlmConfigUseCase.getCurrentConfig();
         if (runtimeConfig == null) {
@@ -1786,6 +2044,68 @@ public class LocalWorkerTaskExecutor implements WorkerTaskExecutorPort {
             }
         }
         return List.copyOf(refs);
+    }
+
+    private static List<PriorRunEvidence> extractPriorRunEvidence(List<String> priorRunRefs) {
+        if (priorRunRefs == null || priorRunRefs.isEmpty()) {
+            return List.of();
+        }
+        List<PriorRunEvidence> evidence = new ArrayList<>();
+        Set<String> dedup = new LinkedHashSet<>();
+        for (String ref : priorRunRefs) {
+            PriorRunEvidence parsed = parsePriorRunEvidence(ref);
+            if (parsed == null) {
+                continue;
+            }
+            String key = defaultText(parsed.runId(), "")
+                + "|" + defaultText(parsed.status(), "")
+                + "|" + defaultText(parsed.runKind(), "");
+            if (!dedup.add(key)) {
+                continue;
+            }
+            evidence.add(parsed);
+            if (evidence.size() >= 6) {
+                break;
+            }
+        }
+        return List.copyOf(evidence);
+    }
+
+    private static PriorRunEvidence parsePriorRunEvidence(String rawRef) {
+        if (rawRef == null || rawRef.isBlank()) {
+            return null;
+        }
+        String ref = rawRef.trim();
+        if (!ref.startsWith("run:")) {
+            return null;
+        }
+        String payload = ref.substring("run:".length());
+        String[] parts = payload.split("\\|");
+        if (parts.length == 0) {
+            return null;
+        }
+        String runId = parts[0].trim();
+        String status = parts.length > 1 ? parts[1].trim() : "";
+        String runKind = parts.length > 2 ? parts[2].trim() : "";
+        String summary = readPriorRunSummary(ref);
+        String deliveryCommit = readRunRefAttribute(ref, "delivery_commit");
+        return new PriorRunEvidence(runId, status, runKind, summary, deliveryCommit);
+    }
+
+    private static String readRunRefAttribute(String runRef, String key) {
+        if (runRef == null || runRef.isBlank() || key == null || key.isBlank()) {
+            return null;
+        }
+        String marker = "|" + key + "=";
+        int startIndex = runRef.indexOf(marker);
+        if (startIndex < 0) {
+            return null;
+        }
+        int valueStart = startIndex + marker.length();
+        int nextSeparator = runRef.indexOf('|', valueStart);
+        String value = nextSeparator < 0 ? runRef.substring(valueStart) : runRef.substring(valueStart, nextSeparator);
+        value = value.trim();
+        return value.isBlank() ? null : value;
     }
 
     private static boolean hasResolvedClarifications(
@@ -2009,6 +2329,17 @@ public class LocalWorkerTaskExecutor implements WorkerTaskExecutorPort {
             return "";
         }
         return value.replaceAll("\\s+", " ").trim().toLowerCase(Locale.ROOT);
+    }
+
+    private static String abbreviateForPrompt(String value, int maxChars) {
+        if (value == null) {
+            return "";
+        }
+        String normalized = value.replaceAll("\\s+", " ").trim();
+        if (normalized.length() <= maxChars) {
+            return normalized;
+        }
+        return normalized.substring(0, maxChars);
     }
 
     private static String buildTaskContextSummary(
@@ -2446,6 +2777,15 @@ public class LocalWorkerTaskExecutor implements WorkerTaskExecutorPort {
     }
 
     private record ResolvedClarification(String ticketId, String question, String answer) {
+    }
+
+    private record PriorRunEvidence(
+        String runId,
+        String status,
+        String runKind,
+        String summary,
+        String deliveryCommit
+    ) {
     }
 
     private record ActiveWorkerLlmConfig(

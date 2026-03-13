@@ -4,6 +4,30 @@
 
 这篇文档在面试里主要回答一个问题：**当 LLM 在边界处不确定时，系统怎么“把猜测变成流程”，并且做到可恢复、可审计、可交付**。
 
+## 当前真实实现补充（2026-03）
+
+这篇文档对应的主链路现在已经在代码里闭环，不是只停留在“理论上的 HITL”。
+
+当前真实实现里，关键闭环包括：
+1. `RunNeedsInputProcessManager` 会把执行层发出的 `NEED_DECISION / NEED_CLARIFICATION` 转成 ticket。
+2. 同类 run-level 工单会做去重与 supersede：
+   - 同 task、同类型、旧 run 的票会被标记为 superseded
+   - 同 run 的重复提请会被合并，避免一轮错误触发多张重复工单
+3. 对“planner 连续两次没有产生真实 edits”的情况，系统已经有动态保护：
+   - 把该类 CLARIFICATION 标记为 planner no-op guard
+   - 超过阈值后自动升级为 `ARCH_REVIEW`
+   - 进入重新梳理已完成/未完成任务和重新拆解的链路
+4. `ContextRefreshProcessManager` 在 `USER_RESPONDED` 后会：
+   - 触发相关 task 的上下文重编译
+   - 让旧 waiting run 失效
+   - 关闭旧 need-input ticket
+   - 让后续重新 dispatch 绑定新的 READY 快照
+
+所以面试里可以非常明确地说：
+1. HITL 不是“聊天框提问”，而是结构化 ticket + append-only event chain。
+2. 用户回应不会直接让旧 run 盲目恢复，而是优先保证上下文刷新和审计一致性。
+3. 系统已经开始处理“任务过宽 / 反复空转”这类真实工程问题，而不只是处理字段缺失这种简单澄清。
+
 ## 对齐项目原始设计的关键约束（建议在回答里顺口带出）
 
 1. **外部输入只走决策面**：用户不直接改数据库/不直接干预 Worker 运行态；所有反馈通过 API 写入 `ticket_events` 形成审计链（append-only）。

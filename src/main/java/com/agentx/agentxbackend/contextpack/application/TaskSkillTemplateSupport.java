@@ -163,15 +163,17 @@ final class TaskSkillTemplateSupport {
         appendSection(sb, "Pitfalls", skill.pitfalls());
         appendSection(sb, "Stop Rules", skill.stopRules());
         appendSection(sb, "Expected Outputs", skill.expectedOutputs());
-        appendRepoContextSection(sb, repoContext);
+        sb.append(renderRepoContextMarkdown("Repo Context (Baseline)", repoContext));
         return sb.toString();
     }
 
-    private static void appendRepoContextSection(StringBuilder sb, RepoContextQueryPort.RepoContext repoContext) {
-        sb.append("## Repo Context (Baseline)\n");
+    static String renderRepoContextMarkdown(String title, RepoContextQueryPort.RepoContext repoContext) {
+        StringBuilder sb = new StringBuilder();
+        String resolvedTitle = title == null || title.isBlank() ? "Repo Context" : title.trim();
+        sb.append("## ").append(resolvedTitle).append('\n');
         if (repoContext == null) {
             sb.append("- <none>\n\n");
-            return;
+            return sb.toString();
         }
         if (repoContext.indexKind() != null && !repoContext.indexKind().isBlank()) {
             sb.append("- index_kind: ").append(repoContext.indexKind().trim()).append('\n');
@@ -184,6 +186,9 @@ final class TaskSkillTemplateSupport {
         }
         if (repoContext.topLevelEntries() != null && !repoContext.topLevelEntries().isEmpty()) {
             sb.append("- top_level: ").append(String.join(", ", repoContext.topLevelEntries())).append('\n');
+        }
+        if (repoContext.warnings() != null && !repoContext.warnings().isEmpty()) {
+            sb.append("- warnings: ").append(String.join(", ", repoContext.warnings())).append('\n');
         }
         sb.append('\n');
 
@@ -212,7 +217,7 @@ final class TaskSkillTemplateSupport {
         sb.append("### Relevant Excerpts\n");
         if (repoContext.excerpts() == null || repoContext.excerpts().isEmpty()) {
             sb.append("- <none>\n\n");
-            return;
+            return sb.toString();
         }
         for (RepoContextQueryPort.FileExcerpt excerpt : repoContext.excerpts()) {
             if (excerpt == null || excerpt.path() == null || excerpt.path().isBlank()) {
@@ -225,6 +230,7 @@ final class TaskSkillTemplateSupport {
             sb.append("[FILE ").append(excerpt.path().trim()).append("]\n");
             sb.append(text).append("\n\n");
         }
+        return sb.toString();
     }
 
     private static void appendSection(StringBuilder sb, String title, List<String> lines) {

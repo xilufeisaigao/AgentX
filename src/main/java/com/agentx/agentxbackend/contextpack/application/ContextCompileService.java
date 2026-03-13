@@ -54,6 +54,30 @@ public class ContextCompileService implements ContextCompileUseCase {
     private final int retentionDays;
     private final int recentTicketLimit;
     private final int recentRunLimit;
+    private final String sessionRepoPrefix;
+
+    ContextCompileService(
+        ContextFactsQueryPort contextFactsQueryPort,
+        ArtifactStorePort artifactStorePort,
+        TaskContextSnapshotRepository snapshotRepository,
+        RepoContextQueryPort repoContextQueryPort,
+        ObjectMapper objectMapper,
+        int retentionDays,
+        int recentTicketLimit,
+        int recentRunLimit
+    ) {
+        this(
+            contextFactsQueryPort,
+            artifactStorePort,
+            snapshotRepository,
+            repoContextQueryPort,
+            objectMapper,
+            retentionDays,
+            recentTicketLimit,
+            recentRunLimit,
+            "sessions"
+        );
+    }
 
     public ContextCompileService(
         ContextFactsQueryPort contextFactsQueryPort,
@@ -63,7 +87,8 @@ public class ContextCompileService implements ContextCompileUseCase {
         ObjectMapper objectMapper,
         @Value("${agentx.contextpack.snapshot-retention-days:180}") int retentionDays,
         @Value("${agentx.contextpack.facts.recent-ticket-limit:20}") int recentTicketLimit,
-        @Value("${agentx.contextpack.facts.recent-run-limit:8}") int recentRunLimit
+        @Value("${agentx.contextpack.facts.recent-run-limit:8}") int recentRunLimit,
+        @Value("${agentx.workspace.git.session-repo-prefix:sessions}") String sessionRepoPrefix
     ) {
         this.contextFactsQueryPort = contextFactsQueryPort;
         this.artifactStorePort = artifactStorePort;
@@ -73,6 +98,7 @@ public class ContextCompileService implements ContextCompileUseCase {
         this.retentionDays = Math.max(30, retentionDays);
         this.recentTicketLimit = Math.max(1, Math.min(100, recentTicketLimit));
         this.recentRunLimit = Math.max(1, Math.min(100, recentRunLimit));
+        this.sessionRepoPrefix = normalizeSessionRepoPrefix(sessionRepoPrefix);
     }
 
     @Override
@@ -99,7 +125,7 @@ public class ContextCompileService implements ContextCompileUseCase {
 
         RepoContextQueryPort.RepoContext repoContext = safeQueryRepoContext(
             buildRepoQueryForRolePack(requirementOptional, tickets),
-            List.of("./"),
+            buildSessionRepoIncludeRoots(normalizedSessionId),
             18,
             3,
             900,
@@ -265,6 +291,37 @@ public class ContextCompileService implements ContextCompileUseCase {
         return beforeSnapshotId == null || !beforeSnapshotId.equals(refreshed.snapshotId());
     }
 
+    @Override
+    public ContextCompileUseCase.RepoContextPrompt buildRepoContextPrompt(
+        String queryText,
+        List<String> includeRoots,
+        int maxFiles,
+        int maxExcerpts,
+        int maxExcerptChars,
+        int maxTotalExcerptChars
+    ) {
+        RepoContextQueryPort.RepoContext repoContext = safeQueryRepoContext(
+            queryText,
+            includeRoots,
+            maxFiles,
+            maxExcerpts,
+            maxExcerptChars,
+            maxTotalExcerptChars
+        );
+        if (repoContext == null) {
+            return new ContextCompileUseCase.RepoContextPrompt(
+                "",
+                "repo_context_prompt_v1",
+                List.of("repo_context_unavailable")
+            );
+        }
+        return new ContextCompileUseCase.RepoContextPrompt(
+            TaskSkillTemplateSupport.renderRepoContextMarkdown("Repo Context (Runtime)", repoContext),
+            repoContext.indexKind(),
+            nullSafeList(repoContext.warnings())
+        );
+    }
+
     private CompileArtifactsResult compileTaskArtifacts(
         String taskId,
         String runKind,
@@ -396,7 +453,7 @@ public class ContextCompileService implements ContextCompileUseCase {
             TaskSkill taskSkill = withSnapshotId(draftTaskSkill, snapshotId);
             RepoContextQueryPort.RepoContext repoContext = safeQueryRepoContext(
                 buildRepoQueryForTask(taskPlanning, taskContextPack, taskSkill),
-                List.of("./"),
+                buildSessionRepoIncludeRoots(taskPlanning.sessionId()),
                 26,
                 4,
                 900,
@@ -584,6 +641,43 @@ public class ContextCompileService implements ContextCompileUseCase {
         if (!normalized.isBlank()) {
             query.append(normalized).append('\n');
         }
+    }
+
+    private List<String> buildSessionRepoIncludeRoots(String sessionId) {
+        String normalizedSessionId = normalizeSafeSessionId(sessionId);
+        if (normalizedSessionId == null) {
+            return List.of("./");
+        }
+        return List.of(sessionRepoPrefix + "/" + normalizedSessionId + "/repo/");
+    }
+
+    private static String normalizeSessionRepoPrefix(String prefix) {
+        String normalized = prefix == null || prefix.isBlank() ? "sessions" : prefix.trim();
+        normalized = normalized.replace('\\', '/');
+        while (normalized.startsWith("./")) {
+            normalized = normalized.substring(2);
+        }
+        while (normalized.startsWith("/")) {
+            normalized = normalized.substring(1);
+        }
+        while (normalized.endsWith("/")) {
+            normalized = normalized.substring(0, normalized.length() - 1);
+        }
+        if (normalized.isBlank()) {
+            return "sessions";
+        }
+        return normalized;
+    }
+
+    private static String normalizeSafeSessionId(String sessionId) {
+        if (sessionId == null || sessionId.isBlank()) {
+            return null;
+        }
+        String normalized = sessionId.trim()
+            .toLowerCase(Locale.ROOT)
+            .replaceAll("[^a-z0-9._\\-]+", "-")
+            .replaceAll("^-+|-+$", "");
+        return normalized.isBlank() ? null : normalized;
     }
 
     private static List<String> nullSafeList(List<String> value) {
@@ -935,7 +1029,7 @@ public class ContextCompileService implements ContextCompileUseCase {
         List<ContextFactsQueryPort.ToolpackFact> toolpacks
     ) {
         LinkedHashSet<String> fragments = new LinkedHashSet<>();
-        fragments.add("contextpack_v1:repo_context=lexical_v1");
+        fragments.add("contextpack_v1:repo_context=semantic_rag_with_lexical_fallback");
         fragments.add("template:" + nullSafe(taskTemplateId));
         if (taskTitle != null && !taskTitle.isBlank()) {
             fragments.add("task_title:" + abbreviate(normalizeFreeText(taskTitle), 220));

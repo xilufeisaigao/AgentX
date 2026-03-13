@@ -96,6 +96,38 @@ class ContextCompileServiceTest {
     }
 
     @Test
+    void compileTaskContextPackShouldScopeRepoQueryToSessionRepo() {
+        ContextCompileService service = new ContextCompileService(
+            factsQueryPort,
+            artifactStorePort,
+            snapshotRepository,
+            repoContextQueryPort,
+            new ObjectMapper(),
+            180,
+            20,
+            8
+        );
+        stubTaskFacts();
+        when(snapshotRepository.findLatestReadyByFingerprint(anyString(), anyString(), anyString()))
+            .thenReturn(Optional.empty());
+        when(snapshotRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(snapshotRepository.transitionStatus(anyString(), eq(TaskContextSnapshotStatus.PENDING), eq(TaskContextSnapshotStatus.COMPILING), any()))
+            .thenReturn(true);
+        when(artifactStorePort.store(anyString(), anyString()))
+            .thenReturn("file:.agentx/context/task-context-packs/TASK-1/IMPL/CTXS-SCOPE.json")
+            .thenReturn("file:.agentx/context/task-skills/TASK-1/IMPL/CTXS-SCOPE.md");
+        when(snapshotRepository.markReady(anyString(), anyString(), anyString(), any(), any())).thenReturn(true);
+
+        service.compileTaskContextPack("TASK-1", "IMPL");
+
+        ArgumentCaptor<RepoContextQueryPort.RepoContextQuery> queryCaptor = ArgumentCaptor.forClass(
+            RepoContextQueryPort.RepoContextQuery.class
+        );
+        verify(repoContextQueryPort).query(queryCaptor.capture());
+        assertEquals(List.of("sessions/ses-1/repo/"), queryCaptor.getValue().includeRoots());
+    }
+
+    @Test
     void compileTaskContextPackShouldDeduplicateRepeatedTicketSummariesAndEmbedRequirementHighlights() throws Exception {
         ContextCompileService service = new ContextCompileService(
             factsQueryPort,

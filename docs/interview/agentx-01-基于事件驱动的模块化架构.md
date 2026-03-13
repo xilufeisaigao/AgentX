@@ -4,6 +4,19 @@
 
 面试里这篇建议用一句话打底：**“AgentX 不是写脚本，而是管长流程状态机；所以我们用模块化单体 + DDD 分包把‘谁能改什么状态’写死，再用事件与流程编排把跨域链路切片，可恢复、可审计、可演进。”**
 
+## 当前真实实现补充（2026-03）
+
+这篇文档对应的设计，在当前代码里已经不是“空架子”，而是有一套明确的 process managers 在驱动：
+1. `RunNeedsInputProcessManager`：把执行层抛出的 `NEED_DECISION / NEED_CLARIFICATION` 转成 ticket，并做去重、旧 run supersede、planner no-op 升级保护。
+2. `ContextRefreshProcessManager`：监听 `RequirementConfirmedEvent`、ticket 用户回复/完成事件、`RunFinishedEvent`，重新编译上下文，并在必要时让 waiting run 失效，强制走新快照。
+3. `ArchitectTicketAutoProcessorService`：自动 claim 架构类 ticket，先生成 DECISION/CLARIFICATION 请求，再在用户回应后继续自动拆解成 modules/tasks。
+4. `WorkerRuntimeAutoRunService` 与 `WorkerAutoProvisionService`：分别负责 worker 自动执行与 worker 自动补足。
+
+因此，面试里更准确的说法是：
+1. 当前系统还处在**模块化单体阶段**，主要依赖 Spring Event + 数据库状态机补偿，不是 MQ 驱动的分布式 Saga。
+2. 但跨域 orchestration 已经明确落在 process 层，而不是散落在各个 service 里。
+3. 未来如果要升级到 outbox/MQ，更多是发布机制替换，不是业务边界重画。
+
 ## 对齐项目原始设计的关键约束（可作为“我不是瞎设计”的证据）
 
 1. **模块化单体 + DDD 分包**：按业务边界拆模块；模块内统一四层：`api -> application -> domain <- infrastructure`。

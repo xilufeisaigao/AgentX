@@ -2,6 +2,20 @@
 
 这份文档建议作为面试的“破冰 + 定调”素材：先用 30 秒讲清价值，再用 2–3 分钟讲清为什么这套机制能落地（可控、可审计、可交付）。
 
+## 0.1 当前真实实现补充（2026-03）
+
+这份总纲最需要和真实代码对齐的地方，是不要把 AgentX 说成“纯概念设计”或者“已经是超大规模分布式平台”。
+
+目前更准确的表述是：
+1. **架构范式已经比较成熟**：代码里已经有模块化单体 + DDD 分包、`work_tasks / task_runs / tickets` 三条状态机、Spring Event + process managers、Git worktree、Merge Gate、HITL、上下文快照门禁。
+2. **控制面闭环已经落地**：不是只有文档。像 `RunCommandService`、`ContextCompileService`、`RunNeedsInputProcessManager`、`ContextRefreshProcessManager`、`WorkerRuntimeAutoRunService`、`ArchitectTicketAutoProcessorService` 都已经把主链路串起来了。
+3. **实现上仍然是 v1 工程化阶段**：还没有走到“重型工业平台”的程度，比如没有 outbox/MQ、没有完整策略引擎、没有真正的语义向量检索、没有更强的多租户执行沙箱和全链路 tracing。
+
+面试时建议这样说：
+1. 这套系统已经用了工业界主流的控制面思路，而不是 prompt 堆砌。
+2. 当前实现是“模块化单体 + 受控执行层 + 可审计上下文”的工程版本。
+3. 后续增强点主要在分布式可靠性、检索质量、执行隔离和可观测性，不在核心范式本身。
+
 ## 0. 30 秒版本（电梯陈述）
 
 AgentX 是一个面向“长流程软件交付”的控制面系统：**用模块化单体 + 明确状态机 + Git worktree 沙箱 + 合并门禁（VERIFY）+ 工单化 HITL**，把 LLM 从“会写代码的助手”变成“可被约束、可被验证、可被追责的工程执行单元”。它解决的是长流程场景里最难的三件事：**幻觉/遗忘/越权**。

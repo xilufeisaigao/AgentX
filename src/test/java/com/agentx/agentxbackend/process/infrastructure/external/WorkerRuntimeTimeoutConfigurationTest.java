@@ -18,14 +18,21 @@ class WorkerRuntimeTimeoutConfigurationTest {
         .withBean(ObjectMapper.class, ObjectMapper::new)
         .withBean(LlmConnectivityTesterPort.class, MockConnectivityTester::new)
         .withBean(RuntimeLlmConfigStorePort.class, InMemoryStore::new)
-        .withBean(RuntimeLlmConfigService.class)
-        .withBean(LocalWorkerTaskExecutor.class);
+        .withBean(RuntimeLlmConfigService.class);
 
     @Test
     void shouldUseSeparateDefaultTimeoutsForLlmAndExecution() {
         contextRunner.run(context -> {
             RuntimeLlmConfigService configService = context.getBean(RuntimeLlmConfigService.class);
-            LocalWorkerTaskExecutor executor = context.getBean(LocalWorkerTaskExecutor.class);
+            LocalWorkerTaskExecutor executor = buildExecutorForTest(
+                configService,
+                context.getBean(ObjectMapper.class),
+                context.getEnvironment().getProperty(
+                    "agentx.worker-runtime.execution.command-timeout-ms",
+                    Integer.class,
+                    600_000
+                )
+            );
 
             assertEquals(120_000L, configService.getCurrentConfig().workerRuntimeLlm().timeoutMs());
             assertEquals(600_000, readExecutionTimeout(executor));
@@ -41,11 +48,42 @@ class WorkerRuntimeTimeoutConfigurationTest {
             )
             .run(context -> {
                 RuntimeLlmConfigService configService = context.getBean(RuntimeLlmConfigService.class);
-                LocalWorkerTaskExecutor executor = context.getBean(LocalWorkerTaskExecutor.class);
+                LocalWorkerTaskExecutor executor = buildExecutorForTest(
+                    configService,
+                    context.getBean(ObjectMapper.class),
+                    context.getEnvironment().getProperty(
+                        "agentx.worker-runtime.execution.command-timeout-ms",
+                        Integer.class,
+                        600_000
+                    )
+                );
 
                 assertEquals(45_000L, configService.getCurrentConfig().workerRuntimeLlm().timeoutMs());
                 assertEquals(240_000, readExecutionTimeout(executor));
             });
+    }
+
+    private static LocalWorkerTaskExecutor buildExecutorForTest(
+        RuntimeLlmConfigService configService,
+        ObjectMapper objectMapper,
+        int executionTimeoutMs
+    ) {
+        return new LocalWorkerTaskExecutor(
+            configService,
+            objectMapper,
+            "git",
+            ".",
+            "sessions",
+            executionTimeoutMs,
+            20,
+            "mvn,./mvnw,gradle,./gradlew,python,pytest,git",
+            false,
+            "docker",
+            "maven:3.9.11-eclipse-temurin-21",
+            "1g",
+            "1.0",
+            256
+        );
     }
 
     private static int readExecutionTimeout(LocalWorkerTaskExecutor executor) throws Exception {

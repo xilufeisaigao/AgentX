@@ -1,5 +1,6 @@
 package com.agentx.agentxbackend.process.infrastructure.external;
 
+import com.agentx.agentxbackend.contextpack.application.port.in.ContextCompileUseCase;
 import com.agentx.agentxbackend.execution.domain.model.GitAlloc;
 import com.agentx.agentxbackend.execution.domain.model.RunKind;
 import com.agentx.agentxbackend.execution.domain.model.TaskContext;
@@ -18,6 +19,7 @@ import java.lang.reflect.RecordComponent;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -279,6 +281,183 @@ class LocalWorkerTaskExecutorTest {
         assertTrue(snapshot.contains("pom.xml"));
         assertTrue(snapshot.contains("src/main/java/com/example/VerifyMavenApplication.java"));
         assertTrue(snapshot.contains("<artifactId>verify-maven</artifactId>"));
+    }
+
+    @Test
+    void buildWorkspaceSnapshotForWorkerShouldPreferUnifiedRepoContextPrompt() throws Exception {
+        Path repoRoot = tempDir.resolve("repo-root");
+        Path worktree = repoRoot.resolve("sessions/ses-alpha/repo/worktrees/SES-ALPHA/RUN-IMPL-SEM-1");
+        Files.createDirectories(worktree);
+        Files.writeString(worktree.resolve("README.md"), "# runtime", StandardCharsets.UTF_8);
+        AtomicReference<List<String>> includeRootsRef = new AtomicReference<>(List.of());
+        AtomicReference<String> queryTextRef = new AtomicReference<>("");
+        ContextCompileUseCase contextCompileUseCase = new ContextCompileUseCase() {
+            @Override
+            public com.agentx.agentxbackend.contextpack.domain.model.RoleContextPack compileRolePack(String sessionId, String role) {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public com.agentx.agentxbackend.contextpack.domain.model.TaskContextPack compileTaskContextPack(String taskId, String runKind) {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public com.agentx.agentxbackend.contextpack.domain.model.TaskSkill compileTaskSkill(String taskId) {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public com.agentx.agentxbackend.contextpack.domain.model.TaskContextSnapshotStatusView getTaskContextStatus(String taskId, int limit) {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public int refreshTaskContextsBySession(String sessionId, String triggerType, int limit) {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public int refreshTaskContextsByTicket(String ticketId, String triggerType, int limit) {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public boolean refreshTaskContextByTask(String taskId, String triggerType) {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public RepoContextPrompt buildRepoContextPrompt(
+                String queryText,
+                List<String> includeRoots,
+                int maxFiles,
+                int maxExcerpts,
+                int maxExcerptChars,
+                int maxTotalExcerptChars
+            ) {
+                queryTextRef.set(queryText);
+                includeRootsRef.set(includeRoots);
+                return new RepoContextPrompt(
+                    "## Repo Context (Runtime)\n- index_kind: langchain4j_semantic_v1\n- repo_head_ref: git:test\n",
+                    "langchain4j_semantic_v1",
+                    List.of()
+                );
+            }
+        };
+        LocalWorkerTaskExecutor executor = new LocalWorkerTaskExecutor(
+            contextCompileUseCase,
+            buildRuntimeConfigUseCase("mock", ""),
+            new ObjectMapper(),
+            "git",
+            repoRoot.toString(),
+            "sessions",
+            120000,
+            20,
+            "mvn,./mvnw,gradle,./gradlew,python,pytest,git",
+            false,
+            "docker",
+            "maven:3.9.11-eclipse-temurin-21",
+            "1g",
+            "1.0",
+            256
+        );
+        Method method = LocalWorkerTaskExecutor.class.getDeclaredMethod(
+            "buildWorkspaceSnapshotForWorker",
+            TaskPackage.class,
+            Path.class,
+            String.class,
+            String.class
+        );
+        method.setAccessible(true);
+
+        String snapshot = (String) method.invoke(
+            executor,
+            buildImplPackage("RUN-IMPL-SEM-1", "TASK-IMPL-SEM-1", "worktrees/SES-ALPHA/RUN-IMPL-SEM-1"),
+            worktree,
+            "",
+            "zh-CN"
+        );
+
+        assertTrue(snapshot.contains("langchain4j_semantic_v1"));
+        assertEquals(List.of("sessions/ses-alpha/repo/worktrees/SES-ALPHA/RUN-IMPL-SEM-1/"), includeRootsRef.get());
+        assertTrue(queryTextRef.get().contains("Implement mock task for TASK-IMPL-SEM-1"));
+    }
+
+    @Test
+    void buildEvidenceSnapshotForWorkerShouldSummarizeClarificationsAndPriorRunFailures() throws Exception {
+        LocalWorkerTaskExecutor executor = new LocalWorkerTaskExecutor(
+            buildRuntimeConfigUseCase("mock", ""),
+            new ObjectMapper(),
+            "git",
+            tempDir.toString(),
+            "sessions",
+            120000,
+            20,
+            "mvn,./mvnw,gradle,./gradlew,python,pytest,git",
+            false,
+            "docker",
+            "maven:3.9.11-eclipse-temurin-21",
+            "1g",
+            "1.0",
+            256
+        );
+        Method method = LocalWorkerTaskExecutor.class.getDeclaredMethod(
+            "buildEvidenceSnapshotForWorker",
+            TaskPackage.class,
+            tools.jackson.databind.JsonNode.class,
+            String.class
+        );
+        method.setAccessible(true);
+        TaskPackage taskPackage = new TaskPackage(
+            "RUN-EVIDENCE-1",
+            "TASK-EVIDENCE-1",
+            "Fix verify blocker",
+            "MOD-ORDER",
+            "CTXS-EVIDENCE-1",
+            RunKind.IMPL,
+            "tmpl.bugfix.v0",
+            List.of("TP-JAVA-21", "TP-MAVEN-3"),
+            null,
+            null,
+            new TaskContext(
+                "req:REQ-1@v2",
+                List.of(
+                    "ticket-summary:TCK-1|Q=接口路径要不要保留/api/orders|A=保留/api/orders，不允许改成/api/order。",
+                    "ticket:TCK-2|DECISION|req=REQ-1@v2"
+                ),
+                List.of(
+                    "run:RUN-OLD-1|FAILED|VERIFY|RUN_FINISHED|summary=MockMvc plain text assertion failed|delivery_commit=abc123"
+                ),
+                "git:main-head-1"
+            ),
+            List.of("./"),
+            List.of("src/main/java/"),
+            List.of(),
+            List.of("Need clarification if missing facts."),
+            List.of("work_report", "delivery_commit"),
+            new GitAlloc("main-head-1", "run/RUN-EVIDENCE-1", ".")
+        );
+        ObjectMapper objectMapper = new ObjectMapper();
+        String snapshot = (String) method.invoke(
+            executor,
+            taskPackage,
+            objectMapper.readTree(
+                """
+                {
+                  "snapshot_id":"CTXS-EVIDENCE-1",
+                  "module_ref":"module:MOD-ORDER"
+                }
+                """
+            ),
+            "zh-CN"
+        );
+
+        assertTrue(snapshot.contains("需求基线: req:REQ-1@v2"));
+        assertTrue(snapshot.contains("保留/api/orders"));
+        assertTrue(snapshot.contains("RUN-OLD-1 [FAILED/VERIFY]"));
+        assertTrue(snapshot.contains("MockMvc plain text assertion failed"));
+        assertTrue(snapshot.contains("交付提交=abc123"));
     }
 
     @Test

@@ -1,6 +1,6 @@
 # 模块 08：上下文管理与技能编译（Context Packs + Task Skill）
 
-更新时间：2026-02-20
+更新时间：2026-03-12
 
 范围说明：
 本模块定义 AgentX 在“多角色 + 多任务 + 可审计交付”场景下的上下文治理方案，重点解决两类问题：
@@ -8,6 +8,11 @@
 2. Worker 的 `task_skill` 如何生成、归一化、去重与可追溯（避免每个 Worker 重复发明“怎么做”）
 
 本模块不要求你现在决定数据库与向量库落地方式；它只把“应该有哪些上下文包、如何生成、硬约束是什么”定死。
+
+实现说明：
+1. 本文仍然保持“设计约束优先、实现细节后置”的写法。
+2. 截至 2026-03，工程实现已经在 `docs/12-context-plan-v1.md` 中落地为 `LangChain4j semantic indexing + lexical fallback`，但不改变本设计文档的控制面边界。
+3. 当前真实代码已经进一步把同一套 Repo Context 检索能力复用到 worker runtime：worker 除了拿到 `task_context_pack` / `task_skill` 外，还会额外拿到 `task_evidence_snapshot` 与统一生成的 `workspace_snapshot`。
 
 术语引用：
 1. 角色与职责：见 `docs/02-concepts-and-roles.md`

@@ -4,6 +4,22 @@
 
 面试里这篇建议一句话定调：**“LLM 只给方案，真正的执行必须在可隔离、可回收、可审计的沙箱里跑；调度用租约/心跳保证可恢复；交付用门禁保证验证过的就是合入的。”**
 
+## 当前真实实现补充（2026-03）
+
+这篇文档在表述时最需要补一句“当前落地是 hybrid runtime，而不是纯 Docker worker 池”。
+
+当前代码里的真实情况是：
+1. 主执行器是 `LocalWorkerTaskExecutor`，默认在本地 worktree 上执行实现型任务。
+2. VERIFY 已经支持可选 Docker 模式，通过 `agentx.worker-runtime.verify.use-docker` 控制；不开启时也可本地执行。
+3. 自动执行链路是 `WorkerRuntimeAutoRunService`：扫描 READY worker，claim task/run，启动心跳，调用执行器，按结果回写 `RUN_FINISHED / NEED_* / FAILED`。
+4. 自动供给链路是 `WorkerAutoProvisionService`：如果等待任务长期没有匹配 worker，就自动 provision；如果缺 toolpack，会自动发 CLARIFICATION ticket，而不是静默卡死。
+5. 运行时的 repo 上下文和工作区快照不是预先写死的，而是执行前按 task/context 现算。
+
+所以面试时建议这样说：
+1. **设计目标**是“容器化 worker 池 + toolpack + worktree + lease/heartbeat”。
+2. **当前实现**已经落地了 toolpack、租约、心跳、auto-run、auto-provision、worktree、可选 VERIFY Docker。
+3. **仍待增强**的是更强的 IMPL 容器隔离、网络策略和多租户执行环境，而不是调度范式本身。
+
 ## 对齐项目原始设计的关键约束
 
 1. **Worker 状态最小化**：`workers.status` 只保留 `PROVISIONING | READY | DISABLED`；`BUSY/UNHEALTHY` 等是运行视图（由租约/心跳派生），不写进表。

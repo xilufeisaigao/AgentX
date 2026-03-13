@@ -4,6 +4,48 @@
 
 这篇文档面试里建议抓住一句话：**RAG 解决“找得到”，上下文编译解决“只给唯一事实 + 版本一致 + 可审计可恢复”。**
 
+> **建议更新版简历写法**：上下文编译中心（Context Processor）：以确认版需求、工单事件链、运行证据和 Git 基线为事实来源，编译 `task_context/task_skill` 快照并强绑定到每次 run；同时接入 LangChain4j 语义检索，为 worker 在执行前提供当前代码与历史阻塞点的精简上下文，降低长会话遗忘、重复提问与事实漂移。
+
+## 当前真实实现补充（2026-03）
+
+这篇文档现在需要和真实代码同步的重点，是上下文系统已经不只是“快照概念”，而是已经进入工程化 v1。
+
+当前代码里已经落地的关键点：
+1. `ContextCompileService` 会真实编译 `task_context_pack`、`task_skill`，落 artifact，并驱动 `task_context_snapshots` 的 `PENDING -> COMPILING -> READY / FAILED / STALE`。
+2. 仓库上下文检索已经接入 `RepoContextQueryPort + WorkspaceRepoContextQueryAdapter`，当前采用 **LangChain4j 语义检索优先 + lexical fallback**：
+   - 在发任务前，由 `ContextCompileService` 先为会话仓库构建 Repo Context
+   - 对候选文本文件做 chunking 和 embedding，优先返回 semantic relevant files + excerpts
+   - 若 embedding 配置缺失、检索失败或未命中，再自动退回 lexical scoring
+   - 全过程受文件数、excerpt 数、单文件字符数、总字符数预算限制
+   - 检索范围优先锁定在 `sessions/<sessionId>/repo/`，避免把控制面仓库噪声带给 worker
+3. worker 侧已经不是只拿 refs：
+   - `TaskPackage` 新增 `task_context_ref`
+   - worker prompt 会读取 compact 的 `task_context_pack`
+   - 执行器还会额外构建 `task_evidence_snapshot`，压缩已确认澄清、决策与最近失败证据
+   - 执行器还会构建 `workspace_snapshot`，并优先复用统一 Repo Context 检索结果来表达当前 worktree 现实
+4. architect 侧也已经开始吃结构化上下文：
+   - `ArchitectTicketAutoProcessorService` 会把 `role_context_pack` 注入 ticket proposal payload，减少架构师 prompt 漂移。
+5. 因此，当前更准确的实现表述是：
+   - **结构化事实层 + LangChain4j 语义检索 + lexical 兜底 + 快照门禁 + worker 执行事实摘要**
+
+需要诚实说明的边界：
+1. 当前已经有真实的 **embedding indexing + RAG 检索**，但仍然是进程内索引，还不是外部持久化向量库。
+2. LangChain4j 在这里承担的是“repo semantic retrieval 工具层”，不是控制面本身；事实裁决、快照状态机、run 门禁仍由 AgentX 自己掌控。
+3. 当前还没做完的重点不再是“让 worker 也接入统一检索”，因为这一步已经完成；真正的后续重点是 `.agentx` 运行证据的独立 semantic index、持久化索引和多源分层预算。
+
+## Worker 真正拿到什么（建议这样解释，不要背字段名）
+
+如果面试官追问“你们到底把什么上下文发给 worker”，建议不要回答成一串 JSON 字段，而是按下面这套工程语言来讲：
+
+1. worker 先拿到的是**任务边界**，也就是这次到底是在做实现、验证还是修 bug，它允许动哪些目录、预期交付什么结果、什么情况下必须停下来提请，而不是自己扩 scope。
+2. 接着它拿到的是**当前唯一生效的需求基线**。这里给的不是整段聊天，而是已经确认过的需求版本、和这个任务直接相关的模块边界、以及当前代码应该对齐到哪个 Git 基线。
+3. 然后它会拿到**已经解决过的问题**。也就是前面用户已经回答过的澄清、已经做过的架构取舍、已经被接受的决策结论，这样 worker 就不会在下一轮又把同一个问题重新问一遍。
+4. 再往下是一层**最近运行证据**。如果上一次 VERIFY 已经告诉你测试为什么失败、上一次实现 run 已经写明阻塞点是什么、甚至已经产生过 delivery commit，这些信息会先被压缩成执行事实摘要，让 worker 优先修最新、最确定的 blocker。
+5. 在代码现实这一层，worker 不是盲读整个仓库，而是拿到一份**当前 worktree 的精简快照**：哪些文件最相关、哪些代码片段最值得先看。现在这份快照优先来自 LangChain4j 语义检索，检索失败时再退回 lexical 召回。
+6. 最后它还会拿到**怎么工作的项目内指导**。这不是业务事实，而是结合任务模板、工具包和工程约束生成的 task skill，例如推荐命令、常见坑、验证方式、停止规则。
+
+一句话概括就是：**worker 拿到的不是“历史聊天”，而是“可执行任务边界 + 当前唯一有效事实 + 最近失败证据 + 当前代码现实 + 本任务做法指导”这五层上下文。**
+
 ## 对齐项目原始设计的关键约束（建议先说清楚，显得你不是“编故事”）
 
 1. **事实来源（Fact Source）写死**：确认版需求、`tickets + ticket_events`、`task_run_events`、Git commit/tag；聊天记录不是事实来源。

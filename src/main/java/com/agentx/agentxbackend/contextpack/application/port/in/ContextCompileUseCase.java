@@ -5,6 +5,8 @@ import com.agentx.agentxbackend.contextpack.domain.model.TaskContextPack;
 import com.agentx.agentxbackend.contextpack.domain.model.TaskContextSnapshotStatusView;
 import com.agentx.agentxbackend.contextpack.domain.model.TaskSkill;
 
+import java.util.List;
+
 public interface ContextCompileUseCase {
 
     RoleContextPack compileRolePack(String sessionId, String role);
@@ -24,4 +26,22 @@ public interface ContextCompileUseCase {
     int refreshTaskContextsByTicket(String ticketId, String triggerType, int limit);
 
     boolean refreshTaskContextByTask(String taskId, String triggerType);
+
+    default RepoContextPrompt buildRepoContextPrompt(
+        String queryText,
+        List<String> includeRoots,
+        int maxFiles,
+        int maxExcerpts,
+        int maxExcerptChars,
+        int maxTotalExcerptChars
+    ) {
+        return new RepoContextPrompt("", "repo_context_prompt_v1", List.of("repo_context_prompt_not_supported"));
+    }
+
+    record RepoContextPrompt(
+        String promptText,
+        String indexKind,
+        List<String> warnings
+    ) {
+    }
 }
