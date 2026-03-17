@@ -63,6 +63,14 @@ execution 连接了 planning、workspace、worker executor 和 process：
 4. 交给 executor 真实执行
 5. 通过 run event 把结果再回送给 process 做编排
 
+当前实现里有两个容易查错的细节：
+
+1. `RunCommandService` 会先按 `worktrees/<SESSION_ID>/<RUN_ID>` 生成候选路径，但真正持久化到 `task_runs.worktree_path` 的值以后端 `WorkspaceService.allocate` 返回的实际 worktree 路径为准，回写入口在 `claimTask` / `createVerifyRun` 里的 `syncAllocatedWorktreePath`。
+2. VERIFY 命令有明确优先级：
+   `resolveVerifyCommands` 先读 task skill 推荐命令；
+   如果没有，再根据真实 worktree 内容做仓库探测；
+   还没有命中时，才退回 toolpack 默认命令。
+
 ## 想查什么就看哪里
 
 - 为什么某个 task 没有 run
@@ -74,6 +82,15 @@ execution 连接了 planning、workspace、worker executor 和 process：
 - 为什么 verify run 会再次出现
   - 看 `createVerifyRun`
   - 再看 mergegate 触发链
+- 为什么 `task_runs.worktree_path` 不是一开始拼出来的那个路径
+  - 看 `claimTask` / `createVerifyRun`
+  - 再看 `syncAllocatedWorktreePath`
+  - 最后看 `WorkspaceService.allocate`
+- 为什么 VERIFY 最后跑的是 `mvn` / `gradle` / `pytest`
+  - 看 `pickupRunningVerifyRun`
+  - 看 `resolveVerifyCommands`
+  - 看 `detectRepositoryVerifyCommands`
+  - 最后看 `fallbackVerifyCommands`
 
 ## 调试入口
 

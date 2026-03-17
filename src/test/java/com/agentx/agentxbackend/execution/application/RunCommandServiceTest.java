@@ -1062,6 +1062,70 @@ class RunCommandServiceTest {
     }
 
     @Test
+    void pickupRunningVerifyRunShouldDetectGradleCommandFromWorkspaceWhenWrapperMissing() throws Exception {
+        Path repoRoot = Files.createTempDirectory("agentx-run-command-gradle-");
+        Path worktree = repoRoot.resolve("sessions/ses-test/repo/worktrees/SES-TEST/RUN-VERIFY-GRADLE-1");
+        Files.createDirectories(worktree);
+        Files.writeString(
+            worktree.resolve("build.gradle"),
+            """
+                plugins {
+                    id 'java'
+                }
+                """,
+            StandardCharsets.UTF_8
+        );
+
+        RunCommandService localService = new RunCommandService(
+            taskRunRepository,
+            taskRunEventRepository,
+            taskAllocationPort,
+            workspacePort,
+            contextSnapshotReadPort,
+            workerRuntimePort,
+            domainEventPublisher,
+            new ObjectMapper(),
+            300,
+            "BASELINE_UNAVAILABLE",
+            3,
+            "WRK-VERIFY",
+            repoRoot.toString(),
+            repoRoot.resolve(".agentx").toString()
+        );
+
+        Instant now = Instant.parse("2026-02-22T00:00:00Z");
+        TaskRun verifyRun = new TaskRun(
+            "RUN-VERIFY-GRADLE-1",
+            "TASK-VERIFY-GRADLE-1",
+            "WRK-VERIFY",
+            RunStatus.RUNNING,
+            RunKind.VERIFY,
+            "CTXS-VERIFY-GRADLE-1",
+            now.plusSeconds(300),
+            now,
+            now,
+            null,
+            null,
+            "[\"TP-JAVA-21\"]",
+            "abc123",
+            "run/RUN-VERIFY-GRADLE-1",
+            "worktrees/SES-TEST/RUN-VERIFY-GRADLE-1",
+            now,
+            now
+        );
+        when(workerRuntimePort.workerExists("WRK-VERIFY")).thenReturn(true);
+        when(workerRuntimePort.isWorkerReady("WRK-VERIFY")).thenReturn(true);
+        when(taskRunRepository.findOldestRunningVerifyRunByWorker("WRK-VERIFY")).thenReturn(Optional.of(verifyRun));
+        when(contextSnapshotReadPort.findLatestReadySnapshot("TASK-VERIFY-GRADLE-1", RunKind.VERIFY))
+            .thenReturn(Optional.empty());
+
+        Optional<TaskPackage> picked = localService.pickupRunningVerifyRun("WRK-VERIFY");
+
+        assertTrue(picked.isPresent());
+        assertEquals(List.of("gradle test"), picked.get().verifyCommands());
+    }
+
+    @Test
     void finishRunShouldUpdateTaskBranchWhenImplSucceeded() {
         Instant startedAt = Instant.parse("2026-02-22T00:00:00Z");
         TaskRun running = new TaskRun(

@@ -46,12 +46,19 @@
 1. 读取 session repo
 2. 创建 `run/*` 分支
 3. 创建 worktree 目录
-4. 把 worktree 路径写入 `task_runs.worktree_path`
+4. 把 `WorkspaceService.allocate` 返回的真实 worktree 路径写入 `task_runs.worktree_path`
+
+这里要注意：
+
+- `RunCommandService` 在 claim / create verify run 时会先生成一个候选相对路径。
+- 真正可信的路径以后端分配结果为准，回写入口是 `syncAllocatedWorktreePath`。
+- 当前 docker 运行时常见落盘位置是 `runtime-projects/default-repo/sessions/<session-id-lowercase>/repo/worktrees/...`。
 
 ## 想查什么就看哪里
 
 - 为什么这个 run 的 worktree 路径是这个
   - 看 `WorkspaceService.allocate`
+  - 再看 `RunCommandService.syncAllocatedWorktreePath`
 - 为什么 session 完成后 worktree 不见了
   - 看 runtime cleanup 和 release 流程
 - 为什么 task branch 指到某个 commit

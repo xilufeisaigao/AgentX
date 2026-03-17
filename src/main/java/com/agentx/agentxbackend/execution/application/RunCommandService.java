@@ -49,6 +49,7 @@ import java.util.UUID;
 public class RunCommandService implements RunCommandUseCase, RunInternalUseCase, RunLeaseRecoveryUseCase, RunQueryUseCase {
 
     private static final Logger log = LoggerFactory.getLogger(RunCommandService.class);
+    private static final String WORKTREES_PREFIX = "worktrees/";
     private static final Set<String> VERIFY_COMMAND_PREFIX_ALLOWLIST = Set.of(
         "mvn",
         "./mvnw",
@@ -83,6 +84,8 @@ public class RunCommandService implements RunCommandUseCase, RunInternalUseCase,
     private final String verifyWorkerId;
     private final Path repoRoot;
     private final List<Path> artifactReadRoots;
+    @Value("${agentx.workspace.git.session-repo-prefix:sessions}")
+    private String sessionRepoPrefix = "sessions";
 
     public RunCommandService(
         TaskRunRepository taskRunRepository,
@@ -264,7 +267,7 @@ public class RunCommandService implements RunCommandUseCase, RunInternalUseCase,
                 run.taskSkillRef()
             ));
         TaskContext taskContext = resolveTaskContext(run, readySnapshot);
-        List<String> verifyCommands = resolveVerifyCommands(run.taskSkillRef(), requiredToolpacks);
+        List<String> verifyCommands = resolveVerifyCommands(run.taskSkillRef(), requiredToolpacks, run.worktreePath());
         return Optional.of(new TaskPackage(
             run.runId(),
             run.taskId(),
@@ -736,7 +739,7 @@ public class RunCommandService implements RunCommandUseCase, RunInternalUseCase,
             hasPendingDependentTestTask
         );
         List<String> verifyCommands = run.runKind() == RunKind.VERIFY
-            ? resolveVerifyCommands(readySnapshot.taskSkillRef(), requiredToolpacks)
+            ? resolveVerifyCommands(readySnapshot.taskSkillRef(), requiredToolpacks, run.worktreePath())
             : List.of();
         List<String> expectedOutputs = new ArrayList<>();
         expectedOutputs.add("work_report");
@@ -963,10 +966,10 @@ public class RunCommandService implements RunCommandUseCase, RunInternalUseCase,
         return List.copyOf(scopes);
     }
 
-    private List<String> resolveVerifyCommands(String taskSkillRef, List<String> requiredToolpacks) {
+    private List<String> resolveVerifyCommands(String taskSkillRef, List<String> requiredToolpacks, String worktreePath) {
         LinkedHashSet<String> commands = new LinkedHashSet<>(readRecommendedCommands(taskSkillRef));
         if (commands.isEmpty()) {
-            commands.addAll(fallbackVerifyCommands(requiredToolpacks));
+            commands.addAll(fallbackVerifyCommands(requiredToolpacks, worktreePath));
         }
         return List.copyOf(commands);
     }
@@ -1032,7 +1035,11 @@ public class RunCommandService implements RunCommandUseCase, RunInternalUseCase,
         return false;
     }
 
-    private List<String> fallbackVerifyCommands(List<String> requiredToolpacks) {
+    private List<String> fallbackVerifyCommands(List<String> requiredToolpacks, String worktreePath) {
+        List<String> detected = detectRepositoryVerifyCommands(worktreePath);
+        if (!detected.isEmpty()) {
+            return detected;
+        }
         if (hasToolpack(requiredToolpacks, "TP-MAVEN-3")) {
             return List.of("mvn -q test");
         }
@@ -1044,6 +1051,34 @@ public class RunCommandService implements RunCommandUseCase, RunInternalUseCase,
             return List.of("./gradlew test");
         }
         return List.of("git status --porcelain");
+    }
+
+    private List<String> detectRepositoryVerifyCommands(String worktreePath) {
+        Path worktree = tryResolveWorktree(worktreePath);
+        if (worktree == null || !Files.isDirectory(worktree)) {
+            return List.of();
+        }
+        if (Files.exists(worktree.resolve("pom.xml"))) {
+            return Files.exists(worktree.resolve("mvnw"))
+                ? List.of("./mvnw -q test")
+                : List.of("mvn -q test");
+        }
+        if (Files.exists(worktree.resolve("build.gradle")) || Files.exists(worktree.resolve("build.gradle.kts"))) {
+            return Files.exists(worktree.resolve("gradlew"))
+                ? List.of("./gradlew test")
+                : List.of("gradle test");
+        }
+        if (
+            Files.isDirectory(worktree.resolve("tests"))
+                && (
+                    Files.exists(worktree.resolve("pyproject.toml"))
+                        || Files.exists(worktree.resolve("requirements.txt"))
+                        || Files.exists(worktree.resolve("setup.py"))
+                )
+        ) {
+            return List.of("python -m pytest -q");
+        }
+        return List.of();
     }
 
     private static boolean looksLikeCommand(String value) {
@@ -1294,6 +1329,83 @@ public class RunCommandService implements RunCommandUseCase, RunInternalUseCase,
     }
 
     private static String buildWorktreePath(String sessionId, String runId) {
-        return "worktrees/" + requireNotBlank(sessionId, "sessionId") + "/" + runId;
+        return WORKTREES_PREFIX + requireNotBlank(sessionId, "sessionId") + "/" + runId;
+    }
+
+    private Path tryResolveWorktree(String worktreePath) {
+        if (worktreePath == null || worktreePath.isBlank()) {
+            return null;
+        }
+        try {
+            String normalized = normalizeWorktreePath(worktreePath);
+            Path sessionScoped = tryResolveSessionScopedWorktree(normalized, worktreePath);
+            if (sessionScoped != null) {
+                return sessionScoped;
+            }
+            Path legacy = repoRoot.resolve(normalized).toAbsolutePath().normalize();
+            if (!legacy.startsWith(repoRoot)) {
+                throw new IllegalArgumentException("worktreePath escapes repo root: " + worktreePath);
+            }
+            return legacy;
+        } catch (RuntimeException ex) {
+            return null;
+        }
+    }
+
+    private Path tryResolveSessionScopedWorktree(String normalizedWorktreePath, String rawWorktreePath) {
+        if (!normalizedWorktreePath.startsWith(WORKTREES_PREFIX)) {
+            return null;
+        }
+        String suffix = normalizedWorktreePath.substring(WORKTREES_PREFIX.length());
+        int separatorIndex = suffix.indexOf('/');
+        if (separatorIndex <= 0) {
+            throw new IllegalArgumentException("worktreePath must include sessionId and runId: " + rawWorktreePath);
+        }
+        String sessionId = suffix.substring(0, separatorIndex);
+        Path sessionRepoRoot = resolveSessionRepoPath(sessionId);
+        Path resolved = sessionRepoRoot.resolve(normalizedWorktreePath).toAbsolutePath().normalize();
+        if (!resolved.startsWith(sessionRepoRoot)) {
+            throw new IllegalArgumentException("worktreePath escapes session repo root: " + rawWorktreePath);
+        }
+        return resolved;
+    }
+
+    private Path resolveSessionRepoPath(String sessionId) {
+        String normalizedSessionId = requireNotBlank(sessionId, "sessionId");
+        String normalizedSessionRepoPrefix = normalizeRelativePrefix(sessionRepoPrefix, "sessions");
+        String safeSessionId = normalizedSessionId
+            .toLowerCase(Locale.ROOT)
+            .replaceAll("[^a-z0-9._\\-]+", "-")
+            .replaceAll("^-+|-+$", "");
+        if (safeSessionId.isBlank()) {
+            throw new IllegalArgumentException("sessionId has no safe characters: " + sessionId);
+        }
+        Path sessionRepoPath = repoRoot
+            .resolve(normalizedSessionRepoPrefix)
+            .resolve(safeSessionId)
+            .resolve("repo")
+            .toAbsolutePath()
+            .normalize();
+        if (!sessionRepoPath.startsWith(repoRoot)) {
+            throw new IllegalArgumentException("session repo path escapes repo root: " + sessionId);
+        }
+        return sessionRepoPath;
+    }
+
+    private static String normalizeWorktreePath(String worktreePath) {
+        String normalized = requireNotBlank(worktreePath, "worktreePath").replace('\\', '/');
+        return normalized.startsWith("./") ? normalized.substring(2) : normalized;
+    }
+
+    private static String normalizeRelativePrefix(String value, String defaultValue) {
+        String raw = value == null || value.isBlank() ? defaultValue : value.trim();
+        String normalized = raw.replace('\\', '/');
+        while (normalized.startsWith("/")) {
+            normalized = normalized.substring(1);
+        }
+        while (normalized.endsWith("/")) {
+            normalized = normalized.substring(0, normalized.length() - 1);
+        }
+        return normalized.isBlank() ? defaultValue : normalized;
     }
 }

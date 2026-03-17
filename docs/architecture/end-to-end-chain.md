@@ -152,6 +152,7 @@ flowchart LR
 
 - 分配 `git_workspaces`
 - 创建 `run/*` 分支和 worktree
+- 用 workspace 返回的真实路径回写 `task_runs.worktree_path`
 - 执行 IMPL
 - 写 `task_runs`
 - 写 `task_run_events`
@@ -185,6 +186,7 @@ flowchart LR
 - 读取 `main` 当前 head
 - rebase task branch 形成 merge candidate
 - 创建 VERIFY run
+- VERIFY 命令优先读 task skill；缺失时按真实 worktree 内容探测；最后才退回 toolpack 默认
 - VERIFY 成功后 fast-forward `main`
 - 打 `delivery/*` tag
 - 任务从 `DELIVERED` 进入 `DONE`

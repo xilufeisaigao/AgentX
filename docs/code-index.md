@@ -120,6 +120,8 @@
   [RunCommandService](../src/main/java/com/agentx/agentxbackend/execution/application/RunCommandService.java)
   - `claimTask`
   - `pickupRunningVerifyRun`
+  - `resolveVerifyCommands`
+  - `syncAllocatedWorktreePath`
   - `heartbeat`
   - `appendEvent`
   - `finishRun`
@@ -148,6 +150,13 @@
 - 本地执行器:
   [LocalWorkerTaskExecutor](../src/main/java/com/agentx/agentxbackend/process/infrastructure/external/LocalWorkerTaskExecutor.java)
   - `execute`
+
+如果你是在追一个“为什么 VERIFY 跑了这个命令”的问题，再补看：
+
+- [RunCommandService](../src/main/java/com/agentx/agentxbackend/execution/application/RunCommandService.java)
+  - `resolveVerifyCommands`
+  - `detectRepositoryVerifyCommands`
+  - `fallbackVerifyCommands`
 
 ## 我想看为什么 DELIVERED 会变成 DONE
 
