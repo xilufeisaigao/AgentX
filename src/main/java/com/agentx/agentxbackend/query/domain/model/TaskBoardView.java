@@ -1,12 +1,8 @@
 package com.agentx.agentxbackend.query.domain.model;
 
-import com.fasterxml.jackson.databind.PropertyNamingStrategies;
-import com.fasterxml.jackson.databind.annotation.JsonNaming;
-
 import java.time.Instant;
 import java.util.List;
 
-@JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
 public record TaskBoardView(
     String sessionId,
     int totalTasks,
@@ -14,7 +10,6 @@ public record TaskBoardView(
     List<ModuleLane> modules
 ) {
 
-    @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
     public record ModuleLane(
         String moduleId,
         String moduleName,
@@ -23,7 +18,6 @@ public record TaskBoardView(
     ) {
     }
 
-    @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
     public record TaskCard(
         String taskId,
         String title,

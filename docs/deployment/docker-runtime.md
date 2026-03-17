@@ -93,10 +93,12 @@ Services:
 3. `redis` at `127.0.0.1:${AGENTX_REDIS_PORT}` (default `16379`)
 4. `git-export` at `git://127.0.0.1:${AGENTX_GIT_EXPORT_PORT}` (default `19418`)
 
-Validated on 2026-03-09:
-1. `SES-365c1b01de6a44bfadc5bc0ae499bed2` reached `complete` and published a clone repo.
-2. `SES-8c9b63dae1454b43ad435e3c2cdbe155` reached `complete` and published a clone repo.
-3. Both published repos were cloned on the host, passed `mvn test`, and returned the expected HTTP response after startup.
+Validated on 2026-03-17:
+1. One validated minimal session reached `COMPLETED` after a full requirement -> planning -> execution -> verify -> delivery flow.
+2. `POST /api/v0/sessions/{sessionId}/delivery/clone-repo` published a clone repo at `git://127.0.0.1:19418/agentx-session-<session-id>.git`.
+3. The published project passed `mvn -q test` inside Docker.
+4. The generated app was started inside Docker and returned the expected response from `GET /api/healthz`.
+5. The same session showed intermediate failed runs in `run-timeline`, followed by successful recovery and final delivery.
 
 ## 3. Check Health
 

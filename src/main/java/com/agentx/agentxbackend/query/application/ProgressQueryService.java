@@ -143,12 +143,7 @@ public class ProgressQueryService implements ProgressQueryUseCase {
         if (!"CONFIRMED".equalsIgnoreCase(requirement.status()) || requirement.confirmedVersion() == null) {
             return "REVIEWING";
         }
-        if (readiness.canComplete()
-            || delivery.deliveryTagPresent()
-            || (snapshot.taskCounts().total() > 0
-                && snapshot.taskCounts().done() == snapshot.taskCounts().total()
-                && snapshot.runCounts().running() == 0
-                && snapshot.runCounts().waitingForeman() == 0)) {
+        if (hasReachedDeliveryState(snapshot, delivery, readiness)) {
             return "DELIVERED";
         }
         return "EXECUTING";
@@ -224,13 +219,24 @@ public class ProgressQueryService implements ProgressQueryUseCase {
             || snapshot.taskCounts().assigned() > 0) {
             return "Review task progress";
         }
-        if (delivery.deliveryTagPresent()
-            || snapshot.taskCounts().delivered() > 0
-            || snapshot.taskCounts().done() > 0
-            || readiness.canComplete()) {
+        if (hasReachedDeliveryState(snapshot, delivery, readiness)) {
             return "Review delivery";
         }
         return "Review overview";
+    }
+
+    private static boolean hasReachedDeliveryState(
+        SessionProgressSnapshot snapshot,
+        SessionProgressView.DeliverySummary delivery,
+        SessionCompletionReadiness readiness
+    ) {
+        return readiness.canComplete()
+            || delivery.deliveryTagPresent()
+            || snapshot.taskCounts().delivered() > 0
+            || (snapshot.taskCounts().total() > 0
+                && snapshot.taskCounts().done() == snapshot.taskCounts().total()
+                && snapshot.runCounts().running() == 0
+                && snapshot.runCounts().waitingForeman() == 0);
     }
 
     private static String normalizeTicketStatus(String status) {

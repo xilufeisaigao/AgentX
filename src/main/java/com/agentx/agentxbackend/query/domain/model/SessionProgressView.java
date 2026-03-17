@@ -1,12 +1,8 @@
 package com.agentx.agentxbackend.query.domain.model;
 
-import com.fasterxml.jackson.databind.PropertyNamingStrategies;
-import com.fasterxml.jackson.databind.annotation.JsonNaming;
-
 import java.time.Instant;
 import java.util.List;
 
-@JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
 public record SessionProgressView(
     String sessionId,
     String title,
@@ -26,7 +22,6 @@ public record SessionProgressView(
     Instant updatedAt
 ) {
 
-    @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
     public record RequirementSummary(
         String docId,
         int currentVersion,
@@ -37,7 +32,6 @@ public record SessionProgressView(
     ) {
     }
 
-    @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
     public record TaskCounts(
         int total,
         int planned,
@@ -50,7 +44,6 @@ public record SessionProgressView(
     ) {
     }
 
-    @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
     public record TicketCounts(
         int total,
         int open,
@@ -61,7 +54,6 @@ public record SessionProgressView(
     ) {
     }
 
-    @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
     public record RunCounts(
         int total,
         int running,
@@ -72,7 +64,6 @@ public record SessionProgressView(
     ) {
     }
 
-    @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
     public record LatestRun(
         String runId,
         String taskId,
@@ -91,7 +82,6 @@ public record SessionProgressView(
     ) {
     }
 
-    @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
     public record DeliverySummary(
         boolean deliveryTagPresent,
         int deliveredTaskCount,

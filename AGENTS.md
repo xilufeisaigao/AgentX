@@ -15,9 +15,9 @@ Goal: keep global consistency while preventing every agent from loading the full
 ## 2. Minimal Context Intake (Do Not Load Everything)
 
 When working on one module, only load:
-1. `docs/10-class-structure-and-dependency-design.md` (global class/dependency baseline)
-2. `docs/schema/agentx_schema_v0.sql` (table truth for owned tables)
-3. `docs/09-control-plane-api-contract.md` (API semantics relevant to the module)
+1. `docs/architecture/end-to-end-chain.md` (global runtime chain and module handoff baseline)
+2. `docs/reference/truth-sources.md` (source-of-truth priority and common pitfalls)
+3. `docs/schema/agentx_schema_v0.sql` (table truth for owned tables)
 4. The module-specific docs listed in section 4 of this file.
 
 Only load additional docs if blocked by ambiguity.
@@ -26,8 +26,9 @@ Only load additional docs if blocked by ambiguity.
 
 1. Source of truth priority:
    - Table truth: `docs/schema/agentx_schema_v0.sql`
-   - Semantic truth: `docs/09-control-plane-api-contract.md`
    - Shape truth: `docs/openapi/agentx-control-plane.v0.yaml`
+   - Runtime/flow truth: `docs/architecture/end-to-end-chain.md`
+   - Current operational truth: `docs/current-state/runtime-audit-2026-03-17.md`
 2. Process managers in `process` own cross-module orchestration.
 3. `DELIVERED != DONE` is non-negotiable.
 4. `RUN_FINISHED` payload is persisted via `task_run_events.data_json`.
@@ -38,81 +39,82 @@ Only load additional docs if blocked by ambiguity.
 
 ### session
 Read first:
-1. `docs/10-class-structure-and-dependency-design.md` section `3.1`
-2. `docs/09-control-plane-api-contract.md` session endpoints
+1. `docs/modules/session.md`
+2. `docs/code-index.md` session section
 3. `docs/schema/agentx_schema_v0.sql` table `sessions`
-4. `docs/07-definition-of-done.md` delivery/tag semantics
+4. `docs/modules/query.md` completion/readiness notes
 
 ### requirement
 Read first:
-1. `docs/10-class-structure-and-dependency-design.md` section `3.2`
-2. `docs/03-project-design-module.md` requirement lifecycle
-3. `docs/09-control-plane-api-contract.md` requirement endpoints
+1. `docs/modules/requirement.md`
+2. `docs/architecture/end-to-end-chain.md`
+3. `docs/code-index.md` requirement section
 4. `docs/schema/agentx_schema_v0.sql` tables `requirement_docs`, `requirement_doc_versions`
 
 ### ticket
 Read first:
-1. `docs/10-class-structure-and-dependency-design.md` section `3.3`
-2. `docs/03-project-design-module.md` ticket semantics
-3. `docs/09-control-plane-api-contract.md` ticket endpoints
+1. `docs/modules/ticket.md`
+2. `docs/modules/process.md`
+3. `docs/code-index.md` ticket/process sections
 4. `docs/schema/agentx_schema_v0.sql` tables `tickets`, `ticket_events`
 
 ### workforce
 Read first:
-1. `docs/10-class-structure-and-dependency-design.md` section `3.4`
-2. `docs/04-foreman-worker-module.md`
+1. `docs/modules/workforce.md`
+2. `docs/modules/execution.md`
 3. `docs/schema/agentx_schema_v0.sql` tables `workers`, `toolpacks`, `worker_toolpacks`
+4. `docs/current-state/runtime-audit-2026-03-17.md` runtime worker facts
 
 ### planning
 Read first:
-1. `docs/10-class-structure-and-dependency-design.md` section `3.5`
-2. `docs/04-foreman-worker-module.md`
-3. `docs/06-git-worktree-workflow.md` task state transitions
+1. `docs/modules/planning.md`
+2. `docs/modules/process.md`
+3. `docs/architecture/end-to-end-chain.md` planning stage
 4. `docs/schema/agentx_schema_v0.sql` tables `work_modules`, `work_tasks`
 
 ### execution
 Read first:
-1. `docs/10-class-structure-and-dependency-design.md` section `3.6`
-2. `docs/05-worker-execution-and-monitoring.md`
-3. `docs/07-definition-of-done.md` run evidence rules
+1. `docs/modules/execution.md`
+2. `docs/modules/workspace.md`
+3. `docs/modules/mergegate.md`
 4. `docs/schema/agentx_schema_v0.sql` tables `task_context_snapshots`, `task_runs`, `task_run_events`
 
 ### workspace
 Read first:
-1. `docs/10-class-structure-and-dependency-design.md` section `3.7`
-2. `docs/06-git-worktree-workflow.md` workspace contract
+1. `docs/modules/workspace.md`
+2. `docs/architecture/runtime-artifacts.md`
 3. `docs/schema/agentx_schema_v0.sql` table `git_workspaces`
 
 ### mergegate
 Read first:
-1. `docs/10-class-structure-and-dependency-design.md` section `3.8`
-2. `docs/06-git-worktree-workflow.md` merge-gate sequence
-3. `docs/07-definition-of-done.md` VERIFY gate constraints
+1. `docs/modules/mergegate.md`
+2. `docs/architecture/end-to-end-chain.md`
+3. `docs/architecture/runtime-artifacts.md`
 
 ### contextpack
 Read first:
-1. `docs/10-class-structure-and-dependency-design.md` section `3.9`
-2. `docs/08-context-management-module.md`
-3. `docs/09-control-plane-api-contract.md` context compile endpoints
+1. `docs/modules/contextpack.md`
+2. `docs/modules/process.md`
+3. `docs/code-index.md` context section
 4. `docs/schema/agentx_schema_v0.sql` table `task_context_snapshots`
 
 ### delivery
 Read first:
-1. `docs/10-class-structure-and-dependency-design.md` section `3.10`
-2. `docs/07-definition-of-done.md` delivery tag convention
-3. `docs/schema/agentx_schema_v0.sql` session completion note
+1. `docs/modules/delivery.md`
+2. `docs/architecture/runtime-artifacts.md`
+3. `docs/current-state/runtime-audit-2026-03-17.md`
 
 ### process
 Read first:
-1. `docs/10-class-structure-and-dependency-design.md` section `3.11` and section `4`
-2. `docs/03-project-design-module.md` ticket transitions
-3. `docs/05-worker-execution-and-monitoring.md` NEED_* semantics
-4. `docs/06-git-worktree-workflow.md` DELIVERED->DONE pipeline
+1. `docs/modules/process.md`
+2. `docs/architecture/end-to-end-chain.md`
+3. `docs/current-state/runtime-audit-2026-03-17.md`
+4. `docs/code-index.md`
 
 ### query
 Read first:
-1. `docs/10-class-structure-and-dependency-design.md` section `3.12`
-2. `docs/09-control-plane-api-contract.md` user-visible progress scope
+1. `docs/modules/query.md`
+2. `docs/reference/truth-sources.md`
 3. Related table schemas for requested views
 
 ## 5. Human Intervention Triggers (Decision Surface)

@@ -154,4 +154,51 @@ class ProgressQueryServiceTest {
         assertEquals(timeline, result);
         verify(progressReadRepository).getRunTimeline("SES-4", 200);
     }
+
+    @Test
+    void getSessionProgressShouldNotTreatPartialDoneTasksAsDeliveryReady() {
+        SessionHistoryView history = new SessionHistoryView(
+            "SES-5",
+            "Session 5",
+            "ACTIVE",
+            Instant.parse("2026-03-08T00:00:00Z"),
+            Instant.parse("2026-03-08T01:00:00Z"),
+            new SessionHistoryView.CurrentRequirementDoc(
+                "REQ-5",
+                1,
+                1,
+                "CONFIRMED",
+                "Requirement",
+                "markdown",
+                Instant.parse("2026-03-08T00:30:00Z")
+            )
+        );
+        SessionProgressSnapshot snapshot = new SessionProgressSnapshot(
+            new SessionProgressView.TaskCounts(4, 0, 0, 1, 0, 0, 0, 1),
+            new SessionProgressView.TicketCounts(0, 0, 0, 0, 0, 0),
+            new SessionProgressView.RunCounts(0, 0, 0, 0, 0, 0),
+            null,
+            new SessionProgressView.DeliverySummary(false, 0, 1, null, null, null, null)
+        );
+        SessionCompletionReadiness readiness = new SessionCompletionReadiness(
+            "SES-5",
+            "ACTIVE",
+            false,
+            true,
+            false,
+            false,
+            false,
+            List.of("Session has unfinished tasks.")
+        );
+
+        when(sessionHistoryQueryUseCase.findSessionWithCurrentRequirementDoc("SES-5")).thenReturn(Optional.of(history));
+        when(progressReadRepository.getSessionProgressSnapshot("SES-5")).thenReturn(snapshot);
+        when(sessionCompletionReadinessUseCase.getCompletionReadiness("SES-5")).thenReturn(readiness);
+
+        SessionProgressView view = service.getSessionProgress("SES-5");
+
+        assertEquals("EXECUTING", view.phase());
+        assertEquals("Tasks are waiting for eligible workers.", view.blockerSummary());
+        assertEquals("Review overview", view.primaryAction());
+    }
 }
