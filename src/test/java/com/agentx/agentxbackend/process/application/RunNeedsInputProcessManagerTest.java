@@ -276,7 +276,8 @@ class RunNeedsInputProcessManagerTest {
             "architect_agent",
             null,
             null,
-            "{\"kind\":\"run_need_input\",\"run_id\":\"RUN-EXIST\",\"task_id\":\"TASK-EXIST\",\"ticket_type\":\"DECISION\"}",
+            "{\"kind\":\"run_need_input\",\"run_id\":\"RUN-EXIST\",\"task_id\":\"TASK-EXIST\",\"ticket_type\":\"DECISION\","
+                + "\"summary\":\"Need user choice\",\"run_data_json\":\"{\\\"options\\\":[\\\"A\\\",\\\"B\\\"]}\"}",
             "architect-agent-auto",
             Instant.parse("2026-02-23T00:05:00Z"),
             Instant.parse("2026-02-23T00:00:00Z"),
@@ -299,6 +300,143 @@ class RunNeedsInputProcessManagerTest {
             eq("TCK-EXISTING"),
             eq("architect_agent"),
             eq("COMMENT"),
+            any(),
+            any()
+        );
+        verify(ticketCommandUseCase, never()).appendEvent(
+            eq("TCK-EXISTING"),
+            eq("architect_agent"),
+            eq("DECISION_REQUESTED"),
+            any(),
+            any()
+        );
+    }
+
+    @Test
+    void handleDecisionShouldRefreshWaitingUserTicketWhenQuestionChanges() {
+        RunNeedsInputProcessManager manager = new RunNeedsInputProcessManager(
+            ticketCommandUseCase,
+            ticketQueryUseCase,
+            waitingTaskQueryUseCase,
+            requirementDocQueryUseCase,
+            new ObjectMapper(),
+            "architect-agent-auto",
+            300,
+            3
+        );
+        Ticket existing = new Ticket(
+            "TCK-REFRESH",
+            "SES-1",
+            TicketType.DECISION,
+            TicketStatus.WAITING_USER,
+            "Existing",
+            "architect_agent",
+            "architect_agent",
+            null,
+            null,
+            "{\"kind\":\"run_need_input\",\"run_id\":\"RUN-REFRESH\",\"task_id\":\"TASK-REFRESH\",\"ticket_type\":\"DECISION\","
+                + "\"summary\":\"Need original choice\",\"run_data_json\":\"{\\\"options\\\":[\\\"A\\\",\\\"B\\\"]}\"}",
+            "architect-agent-auto",
+            Instant.parse("2026-02-23T00:05:00Z"),
+            Instant.parse("2026-02-23T00:00:00Z"),
+            Instant.parse("2026-02-23T00:00:00Z")
+        );
+        when(waitingTaskQueryUseCase.findSessionIdByTaskId("TASK-REFRESH")).thenReturn(Optional.of("SES-1"));
+        when(ticketQueryUseCase.listBySession("SES-1", null, "architect_agent", "DECISION"))
+            .thenReturn(List.of(existing));
+        when(requirementDocQueryUseCase.findCurrentBySessionId("SES-1")).thenReturn(Optional.empty());
+        when(ticketQueryUseCase.listEvents("TCK-REFRESH")).thenReturn(List.of());
+
+        manager.handle(new RunNeedsDecisionEvent(
+            "RUN-REFRESH",
+            "TASK-REFRESH",
+            "Need updated user choice after new findings",
+            "{\"options\":[\"B\",\"C\"]}"
+        ));
+
+        verify(ticketCommandUseCase, never()).createTicket(any(), any(), any(), any(), any(), any(), any(), any());
+        verify(ticketCommandUseCase).appendEvent(
+            eq("TCK-REFRESH"),
+            eq("architect_agent"),
+            eq("COMMENT"),
+            any(),
+            any()
+        );
+        verify(ticketCommandUseCase).appendEvent(
+            eq("TCK-REFRESH"),
+            eq("architect_agent"),
+            eq("DECISION_REQUESTED"),
+            eq("Need updated user choice after new findings"),
+            argThat(data -> data != null && data.contains("\"options\""))
+        );
+    }
+
+    @Test
+    void handleDecisionShouldNotRepeatWaitingUserRequestWhenLatestQuestionAlreadyMatches() {
+        RunNeedsInputProcessManager manager = new RunNeedsInputProcessManager(
+            ticketCommandUseCase,
+            ticketQueryUseCase,
+            waitingTaskQueryUseCase,
+            requirementDocQueryUseCase,
+            new ObjectMapper(),
+            "architect-agent-auto",
+            300,
+            3
+        );
+        Ticket existing = new Ticket(
+            "TCK-DEDUP",
+            "SES-1",
+            TicketType.DECISION,
+            TicketStatus.WAITING_USER,
+            "Existing",
+            "architect_agent",
+            "architect_agent",
+            null,
+            null,
+            "{\"kind\":\"run_need_input\",\"run_id\":\"RUN-DEDUP\",\"task_id\":\"TASK-DEDUP\",\"ticket_type\":\"DECISION\","
+                + "\"summary\":\"Need original choice\",\"run_data_json\":\"{\\\"options\\\":[\\\"A\\\",\\\"B\\\"]}\"}",
+            "architect-agent-auto",
+            Instant.parse("2026-02-23T00:05:00Z"),
+            Instant.parse("2026-02-23T00:00:00Z"),
+            Instant.parse("2026-02-23T00:00:00Z")
+        );
+        when(waitingTaskQueryUseCase.findSessionIdByTaskId("TASK-DEDUP")).thenReturn(Optional.of("SES-1"));
+        when(ticketQueryUseCase.listBySession("SES-1", null, "architect_agent", "DECISION"))
+            .thenReturn(List.of(existing));
+        when(requirementDocQueryUseCase.findCurrentBySessionId("SES-1")).thenReturn(Optional.empty());
+        when(ticketQueryUseCase.listEvents("TCK-DEDUP")).thenReturn(List.of(
+            new com.agentx.agentxbackend.ticket.domain.model.TicketEvent(
+                "TEV-DEDUP-1",
+                "TCK-DEDUP",
+                TicketEventType.DECISION_REQUESTED,
+                "architect_agent",
+                "Need updated user choice after new findings",
+                "{\"source\":\"worker_run_event\",\"run_id\":\"RUN-DEDUP\",\"task_id\":\"TASK-DEDUP\",\"ticket_type\":\"DECISION\","
+                    + "\"request_kind\":\"DECISION\",\"question\":\"Need updated user choice after new findings\","
+                    + "\"run_data_json\":\"{\\\"options\\\":[\\\"B\\\",\\\"C\\\"]}\"}",
+                Instant.parse("2026-02-23T00:01:00Z")
+            )
+        ));
+
+        manager.handle(new RunNeedsDecisionEvent(
+            "RUN-DEDUP",
+            "TASK-DEDUP",
+            "Need updated user choice after new findings",
+            "{\"options\":[\"B\",\"C\"]}"
+        ));
+
+        verify(ticketCommandUseCase, never()).createTicket(any(), any(), any(), any(), any(), any(), any(), any());
+        verify(ticketCommandUseCase).appendEvent(
+            eq("TCK-DEDUP"),
+            eq("architect_agent"),
+            eq("COMMENT"),
+            any(),
+            any()
+        );
+        verify(ticketCommandUseCase, never()).appendEvent(
+            eq("TCK-DEDUP"),
+            eq("architect_agent"),
+            eq("DECISION_REQUESTED"),
             any(),
             any()
         );

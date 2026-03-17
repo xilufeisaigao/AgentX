@@ -8,6 +8,7 @@ import com.agentx.agentxbackend.requirement.application.port.in.RequirementDocQu
 import com.agentx.agentxbackend.ticket.application.port.in.TicketCommandUseCase;
 import com.agentx.agentxbackend.ticket.application.port.in.TicketQueryUseCase;
 import com.agentx.agentxbackend.ticket.domain.model.Ticket;
+import com.agentx.agentxbackend.ticket.domain.model.TicketEvent;
 import com.agentx.agentxbackend.ticket.domain.model.TicketStatus;
 import com.agentx.agentxbackend.ticket.domain.model.TicketType;
 import org.springframework.beans.factory.annotation.Value;
@@ -187,13 +188,14 @@ public class RunNeedsInputProcessManager {
                 supersedeTicket(ticket, ref, runId);
                 continue;
             }
-            return Optional.of(promoteExistingTicket(ticket, runId, taskId, ticketType, body, dataJson));
+            return Optional.of(promoteExistingTicket(ticket, ref, runId, taskId, ticketType, body, dataJson));
         }
         return Optional.empty();
     }
 
     private Ticket promoteExistingTicket(
         Ticket ticket,
+        RunNeedInputTicketRef ref,
         String runId,
         String taskId,
         TicketType ticketType,
@@ -215,7 +217,7 @@ public class RunNeedsInputProcessManager {
             "Merged duplicated worker " + ticketType.name() + " request for run " + runId + ".",
             buildCommentDataJson(runId, taskId, ticketType, dataJson)
         );
-        if (working.status() != TicketStatus.WAITING_USER) {
+        if (working.status() != TicketStatus.WAITING_USER || shouldRefreshWaitingUserRequest(working.ticketId(), ref, body, dataJson)) {
             ticketCommandUseCase.appendEvent(
                 working.ticketId(),
                 "architect_agent",
@@ -225,6 +227,49 @@ public class RunNeedsInputProcessManager {
             );
         }
         return working;
+    }
+
+    private boolean shouldRefreshWaitingUserRequest(
+        String ticketId,
+        RunNeedInputTicketRef ref,
+        String body,
+        String dataJson
+    ) {
+        if (!ref.needsRequestRefresh(body, dataJson)) {
+            return false;
+        }
+        List<TicketEvent> events = ticketQueryUseCase.listEvents(ticketId);
+        if (events == null || events.isEmpty()) {
+            return true;
+        }
+        for (int i = events.size() - 1; i >= 0; i--) {
+            TicketEvent event = events.get(i);
+            if (event == null || event.eventType() == null) {
+                continue;
+            }
+            if (!"DECISION_REQUESTED".equals(event.eventType().name())) {
+                continue;
+            }
+            return !matchesNeedInputRequest(event, body, dataJson);
+        }
+        return true;
+    }
+
+    private boolean matchesNeedInputRequest(TicketEvent event, String body, String dataJson) {
+        if (event == null) {
+            return false;
+        }
+        String eventRunDataJson = null;
+        if (event.dataJson() != null && !event.dataJson().isBlank()) {
+            try {
+                JsonNode root = objectMapper.readTree(event.dataJson());
+                eventRunDataJson = readJsonString(root, "run_data_json");
+            } catch (Exception ignored) {
+                eventRunDataJson = null;
+            }
+        }
+        return Objects.equals(normalizeNullable(event.body()), normalizeNullable(body))
+            && Objects.equals(normalizeNullable(eventRunDataJson), normalizeNullable(dataJson));
     }
 
     private Optional<Ticket> maybeEscalatePlannerNoopClarification(
@@ -411,6 +456,7 @@ public class RunNeedsInputProcessManager {
             String payloadType = normalizeNullable(root.path("ticket_type").asText(null));
             String summary = normalizeNullable(root.path("summary").asText(null));
             String guardKind = normalizeNullable(root.path("guard_kind").asText(null));
+            String runDataJson = readJsonString(root, "run_data_json");
             if (runId == null || taskId == null) {
                 return null;
             }
@@ -420,7 +466,7 @@ public class RunNeedsInputProcessManager {
             if (ticketType == null) {
                 return null;
             }
-            return new RunNeedInputTicketRef(runId, taskId, ticketType, summary, guardKind);
+            return new RunNeedInputTicketRef(runId, taskId, ticketType, summary, guardKind, runDataJson);
         } catch (Exception ex) {
             return null;
         }
@@ -673,12 +719,27 @@ public class RunNeedsInputProcessManager {
         return value.trim();
     }
 
+    private static String readJsonString(JsonNode root, String fieldName) {
+        if (root == null || fieldName == null || fieldName.isBlank()) {
+            return null;
+        }
+        JsonNode node = root.path(fieldName);
+        if (node.isMissingNode() || node.isNull()) {
+            return null;
+        }
+        if (node.isTextual()) {
+            return normalizeNullable(node.asText(null));
+        }
+        return normalizeNullable(node.toString());
+    }
+
     private record RunNeedInputTicketRef(
         String runId,
         String taskId,
         TicketType ticketType,
         String summary,
-        String guardKind
+        String guardKind,
+        String runDataJson
     ) {
         private boolean isPlannerNoopGuard() {
             if (PLANNER_NOOP_GUARD_KIND.equalsIgnoreCase(defaultText(guardKind, ""))) {
@@ -687,6 +748,11 @@ public class RunNeedsInputProcessManager {
             String normalizedSummary = defaultText(summary, "");
             String lower = normalizedSummary.toLowerCase(Locale.ROOT);
             return lower.contains(PLANNER_NOOP_EN_MARKER) || normalizedSummary.contains(PLANNER_NOOP_ZH_MARKER);
+        }
+
+        private boolean needsRequestRefresh(String nextSummary, String nextRunDataJson) {
+            return !Objects.equals(normalizeNullable(summary), normalizeNullable(nextSummary))
+                || !Objects.equals(normalizeNullable(runDataJson), normalizeNullable(nextRunDataJson));
         }
     }
 
