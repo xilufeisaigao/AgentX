@@ -5,12 +5,13 @@ import com.agentx.agentxbackend.execution.domain.model.RunKind;
 import com.agentx.agentxbackend.execution.domain.model.TaskPackage;
 import com.agentx.agentxbackend.process.application.port.in.RuntimeLlmConfigUseCase;
 import com.agentx.agentxbackend.process.application.port.out.WorkerTaskExecutorPort;
-import org.springframework.beans.factory.ObjectProvider;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import dev.langchain4j.model.openai.OpenAiChatModel;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.JsonNode;
@@ -75,6 +76,7 @@ public class LocalWorkerTaskExecutor implements WorkerTaskExecutorPort {
     private final String verifyDockerCpus;
     private final int verifyDockerPidsLimit;
 
+    @Autowired
     public LocalWorkerTaskExecutor(
         ObjectProvider<ContextCompileUseCase> contextCompileUseCaseProvider,
         RuntimeLlmConfigUseCase runtimeLlmConfigUseCase,

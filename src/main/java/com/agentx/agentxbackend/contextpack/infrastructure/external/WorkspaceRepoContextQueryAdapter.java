@@ -1,6 +1,7 @@
 package com.agentx.agentxbackend.contextpack.infrastructure.external;
 
 import com.agentx.agentxbackend.contextpack.application.port.out.RepoContextQueryPort;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -44,6 +45,7 @@ public class WorkspaceRepoContextQueryAdapter implements RepoContextQueryPort {
 
     private final Map<String, RepoIndex> cachedIndexes = new ConcurrentHashMap<>();
 
+    @Autowired
     public WorkspaceRepoContextQueryAdapter(
         @Value("${agentx.workspace.git.executable:git}") String gitExecutable,
         @Value("${agentx.workspace.git.repo-root:.}") String repoRoot,

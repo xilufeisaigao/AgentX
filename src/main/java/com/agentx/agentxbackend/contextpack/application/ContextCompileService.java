@@ -11,6 +11,7 @@ import com.agentx.agentxbackend.contextpack.domain.model.TaskContextSnapshot;
 import com.agentx.agentxbackend.contextpack.domain.model.TaskContextSnapshotStatus;
 import com.agentx.agentxbackend.contextpack.domain.model.TaskContextSnapshotStatusView;
 import com.agentx.agentxbackend.contextpack.domain.model.TaskSkill;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.JsonNode;
@@ -79,6 +80,7 @@ public class ContextCompileService implements ContextCompileUseCase {
         );
     }
 
+    @Autowired
     public ContextCompileService(
         ContextFactsQueryPort contextFactsQueryPort,
         ArtifactStorePort artifactStorePort,
