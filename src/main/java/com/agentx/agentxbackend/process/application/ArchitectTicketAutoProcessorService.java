@@ -109,7 +109,7 @@ public class ArchitectTicketAutoProcessorService {
                 }
                 List<TicketEvent> events = ticketQueryUseCase.listEvents(ticket.ticketId());
                 RequirementCurrentDoc currentDoc = loadCurrentRequirementDoc(ticket.sessionId());
-                ProcessingStage stage = resolveProcessingStage(ticket, events, currentDoc);
+                ProcessingStage stage = resolveProcessingStage(ticket, events);
                 if (stage == ProcessingStage.NONE) {
                     continue;
                 }
@@ -287,11 +287,7 @@ public class ArchitectTicketAutoProcessorService {
             && autoAgentId.equals(ticket.claimedBy());
     }
 
-    private ProcessingStage resolveProcessingStage(
-        Ticket ticket,
-        List<TicketEvent> events,
-        RequirementCurrentDoc currentDoc
-    ) {
+    private ProcessingStage resolveProcessingStage(Ticket ticket, List<TicketEvent> events) {
         if (ticket == null || ticket.status() == null) {
             return ProcessingStage.NONE;
         }
@@ -301,10 +297,7 @@ public class ArchitectTicketAutoProcessorService {
         if (ticket.status() != TicketStatus.IN_PROGRESS) {
             return ProcessingStage.NONE;
         }
-        if (!hasEventType(events, "DECISION_REQUESTED")) {
-            return ProcessingStage.NONE;
-        }
-        if (!hasEventType(events, "USER_RESPONDED")) {
+        if (!hasSatisfiedDecisionRequest(events)) {
             return ProcessingStage.NONE;
         }
         if (hasPlannerDoneMarker(events)) {
@@ -438,20 +431,25 @@ public class ArchitectTicketAutoProcessorService {
         return contexts;
     }
 
-    private static boolean hasEventType(List<TicketEvent> events, String expectedType) {
-        if (events == null || events.isEmpty() || expectedType == null || expectedType.isBlank()) {
+    private static boolean hasSatisfiedDecisionRequest(List<TicketEvent> events) {
+        if (events == null || events.isEmpty()) {
             return false;
         }
-        String target = expectedType.trim().toUpperCase(Locale.ROOT);
-        for (TicketEvent event : events) {
+        int latestDecisionRequestIndex = -1;
+        int latestUserResponseIndex = -1;
+        for (int i = 0; i < events.size(); i++) {
+            TicketEvent event = events.get(i);
             if (event == null || event.eventType() == null) {
                 continue;
             }
-            if (target.equals(event.eventType().name())) {
-                return true;
+            String eventType = event.eventType().name();
+            if ("DECISION_REQUESTED".equals(eventType)) {
+                latestDecisionRequestIndex = i;
+            } else if ("USER_RESPONDED".equals(eventType)) {
+                latestUserResponseIndex = i;
             }
         }
-        return false;
+        return latestDecisionRequestIndex >= 0 && latestUserResponseIndex > latestDecisionRequestIndex;
     }
 
     private boolean hasPlannerDoneMarker(List<TicketEvent> events) {

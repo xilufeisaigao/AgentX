@@ -723,7 +723,7 @@ class ArchitectTicketAutoProcessorServiceTest {
     }
 
     @Test
-    void processOpenArchitectTicketsShouldProcessInProgressOwnedTicket() {
+    void processOpenArchitectTicketsShouldWaitForFreshResponseAfterFollowUpQuestion() {
         ArchitectTicketAutoProcessorService service = new ArchitectTicketAutoProcessorService(
             sessionHistoryQueryUseCase,
             requirementDocQueryUseCase,
@@ -764,37 +764,13 @@ class ArchitectTicketAutoProcessorServiceTest {
 
         when(ticketQueryUseCase.listBySession("SES-1", null, "architect_agent", null)).thenReturn(List.of(inProgress));
         when(ticketQueryUseCase.listEvents("TCK-6")).thenReturn(events);
-        when(requirementDocQueryUseCase.findCurrentBySessionId("SES-1")).thenReturn(confirmedRequirementDoc());
-        when(ticketCommandUseCase.tryMovePlanningLease(eq("TCK-6"), eq("architect-auto-test"), any(), eq(300)))
-            .thenReturn(Optional.of(
-                sampleTicket("TCK-6", TicketType.HANDOFF, TicketStatus.IN_PROGRESS, "architect-auto-test#planning#3")
-            ));
-        when(architectWorkPlanningService.planAndPersist(any(), any(), any()))
-            .thenReturn(samplePlanResult());
-        when(ticketCommandUseCase.appendEvent(any(), any(), any(), any(), any()))
-            .thenReturn(
-                new TicketEvent(
-                    "TEV-RESP-2",
-                    "TCK-6",
-                    TicketEventType.COMMENT,
-                    "architect_agent",
-                    "summary",
-                    "{}",
-                    Instant.parse("2026-02-21T00:02:00Z")
-                )
-            );
-
         ArchitectTicketAutoProcessorService.AutoProcessResult result = service.processOpenArchitectTickets("SES-1", 8);
 
-        assertEquals(1, result.processedCount());
-        verify(ticketCommandUseCase, org.mockito.Mockito.times(3)).appendEvent(
-            eq("TCK-6"),
-            eq("architect_agent"),
-            any(),
-            any(),
-            any()
-        );
+        assertEquals(0, result.processedCount());
+        verify(ticketCommandUseCase, never()).tryMovePlanningLease(any(), any(), any(), anyInt());
+        verify(ticketCommandUseCase, never()).appendEvent(any(), any(), any(), any(), any());
         verify(proposalGeneratorPort, never()).generate(any());
+        verify(architectWorkPlanningService, never()).planAndPersist(any(), any(), any());
     }
 
     @Test
