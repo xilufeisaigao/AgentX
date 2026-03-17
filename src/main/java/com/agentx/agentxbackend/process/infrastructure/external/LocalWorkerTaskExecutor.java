@@ -84,7 +84,7 @@ public class LocalWorkerTaskExecutor implements WorkerTaskExecutorPort {
         @Value("${agentx.workspace.git.session-repo-prefix:sessions}") String sessionRepoPrefix,
         @Value("${agentx.worker-runtime.execution.command-timeout-ms:${agentx.worker-runtime.command-timeout-ms:600000}}") int commandTimeoutMs,
         @Value("${agentx.worker-runtime.max-edits-per-run:20}") int maxEditsPerRun,
-        @Value("${agentx.worker-runtime.verify.allowed-command-prefixes:mvn,./mvnw,gradle,./gradlew,python,pytest,git}") String verifyAllowedCommandPrefixes,
+        @Value("${agentx.worker-runtime.verify.allowed-command-prefixes:mvn,./mvnw,gradle,./gradlew,python,pytest,npm,pnpm,yarn,go,dotnet,cargo,git,bash,sh,pwsh,powershell}") String verifyAllowedCommandPrefixes,
         @Value("${agentx.worker-runtime.verify.use-docker:false}") boolean verifyUseDocker,
         @Value("${agentx.worker-runtime.verify.docker.executable:docker}") String verifyDockerExecutable,
         @Value("${agentx.worker-runtime.verify.docker.image:maven:3.9.11-eclipse-temurin-21}") String verifyDockerImage,
@@ -1104,7 +1104,25 @@ public class LocalWorkerTaskExecutor implements WorkerTaskExecutorPort {
 
     private static Set<String> parseVerifyCommandAllowlist(String raw) {
         if (raw == null || raw.isBlank()) {
-            return Set.of("mvn", "./mvnw", "gradle", "./gradlew", "python", "pytest", "git");
+            return Set.of(
+                "mvn",
+                "./mvnw",
+                "gradle",
+                "./gradlew",
+                "python",
+                "pytest",
+                "npm",
+                "pnpm",
+                "yarn",
+                "go",
+                "dotnet",
+                "cargo",
+                "git",
+                "bash",
+                "sh",
+                "pwsh",
+                "powershell"
+            );
         }
         LinkedHashSet<String> parsed = new LinkedHashSet<>();
         for (String token : raw.split(",")) {
@@ -1114,7 +1132,25 @@ public class LocalWorkerTaskExecutor implements WorkerTaskExecutorPort {
             parsed.add(token.trim().toLowerCase(Locale.ROOT));
         }
         if (parsed.isEmpty()) {
-            return Set.of("mvn", "./mvnw", "gradle", "./gradlew", "python", "pytest", "git");
+            return Set.of(
+                "mvn",
+                "./mvnw",
+                "gradle",
+                "./gradlew",
+                "python",
+                "pytest",
+                "npm",
+                "pnpm",
+                "yarn",
+                "go",
+                "dotnet",
+                "cargo",
+                "git",
+                "bash",
+                "sh",
+                "pwsh",
+                "powershell"
+            );
         }
         return Collections.unmodifiableSet(parsed);
     }

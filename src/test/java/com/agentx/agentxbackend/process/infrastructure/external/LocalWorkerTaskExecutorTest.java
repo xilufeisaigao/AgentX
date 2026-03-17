@@ -491,6 +491,33 @@ class LocalWorkerTaskExecutorTest {
     }
 
     @Test
+    void validateVerifyCommandShouldAcceptPolyglotPrefixesFromDefaultPolicy() throws Exception {
+        LocalWorkerTaskExecutor executor = new LocalWorkerTaskExecutor(
+            buildRuntimeConfigUseCase("mock", ""),
+            new ObjectMapper(),
+            "git",
+            tempDir.toString(),
+            "sessions",
+            120000,
+            20,
+            "",
+            false,
+            "docker",
+            "maven:3.9.11-eclipse-temurin-21",
+            "1g",
+            "1.0",
+            256
+        );
+        Method method = LocalWorkerTaskExecutor.class.getDeclaredMethod("validateVerifyCommand", String.class);
+        method.setAccessible(true);
+
+        assertNull(method.invoke(executor, "npm test"));
+        assertNull(method.invoke(executor, "go test ./..."));
+        assertNull(method.invoke(executor, "cargo test"));
+        assertNull(method.invoke(executor, "bash ./scripts/verify.sh"));
+    }
+
+    @Test
     void executeImplShouldReturnChineseNeedClarificationWhenApiKeyMissing() throws Exception {
         assumeTrue(canRunGit(), "git executable is required");
         Path repo = initGitRepo(tempDir.resolve("repo-lang-zh"));
