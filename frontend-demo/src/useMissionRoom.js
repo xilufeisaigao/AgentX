@@ -1,6 +1,7 @@
 import { useEffect, useState, useTransition } from "react";
 import {
   AUTO_REFRESH_MS,
+  REQUIREMENT_DRAFT_TIMEOUT_MS,
   apiRequest,
   arrayOf,
   buildFallbackProgress,
@@ -16,6 +17,7 @@ import {
   getSessionTitle,
   getTicketId,
   inferRequestKind,
+  isApiTimeoutError,
   read,
 } from "./controlPlane";
 import { readPreferredLocale, translate, translateServerValue } from "./i18n";
@@ -512,30 +514,51 @@ export function useMissionRoom() {
     await runBusy(persist ? "draft-persist" : "draft-analyze", async () => {
       const editor = getRequirementEditor(activeSessionId, activeDetail);
       const doc = getRequirementDoc(activeDetail);
-      let response = await apiRequest(`/api/v0/sessions/${activeSessionId}/requirement-agent/drafts`, {
+      const currentDocId = doc ? getDocId(doc) : "";
+      const currentVersion = Number(read(doc, "currentVersion") || 0);
+      const requestDraft = (body) => apiRequest(`/api/v0/sessions/${activeSessionId}/requirement-agent/drafts`, {
         method: "POST",
-        body: {
+        body,
+        timeoutMs: REQUIREMENT_DRAFT_TIMEOUT_MS,
+      });
+      let response;
+
+      try {
+        response = await requestDraft({
           title: editor.title.trim() || getSessionTitle(activeDetail),
           user_input: editor.userInput.trim() || (persist && editor.readyToDraft ? REQUIREMENT_CONFIRMATION_PROMPT : ""),
-          doc_id: doc ? getDocId(doc) : null,
+          doc_id: currentDocId || null,
           persist,
-        },
-      });
+        });
 
-      const phase = String(read(response, "phase") || "").toUpperCase();
-      const readyToDraft = Boolean(read(response, "readyToDraft")) || phase === "READY_TO_DRAFT";
-      const draftCreated = Boolean(read(response, "persisted")) || phase === "DRAFT_CREATED" || Boolean(read(response, "content"));
+        const phase = String(read(response, "phase") || "").toUpperCase();
+        const readyToDraft = Boolean(read(response, "readyToDraft")) || phase === "READY_TO_DRAFT";
+        const draftCreated = Boolean(read(response, "persisted")) || phase === "DRAFT_CREATED" || Boolean(read(response, "content"));
 
-      if (persist && readyToDraft && !draftCreated) {
-        response = await apiRequest(`/api/v0/sessions/${activeSessionId}/requirement-agent/drafts`, {
-          method: "POST",
-          body: {
+        if (persist && readyToDraft && !draftCreated) {
+          response = await requestDraft({
             title: editor.title.trim() || getSessionTitle(activeDetail),
             user_input: REQUIREMENT_CONFIRMATION_PROMPT,
-            doc_id: doc ? getDocId(doc) : null,
+            doc_id: currentDocId || null,
             persist: true,
-          },
-        });
+          });
+        }
+      } catch (error) {
+        if (isApiTimeoutError(error)) {
+          const detail = await loadSessionDetail(activeSessionId);
+          await loadProgress(activeSessionId);
+          const syncedDoc = getRequirementDoc(detail);
+          const syncedDocId = syncedDoc ? getDocId(syncedDoc) : "";
+          const syncedVersion = Number(read(syncedDoc, "currentVersion") || 0);
+          const draftSynced = Boolean(syncedDocId)
+            && (!currentDocId || syncedDocId !== currentDocId || syncedVersion > currentVersion);
+
+          if (persist && draftSynced) {
+            showToast(tr("requirementDraftSyncedAfterTimeout"), "neutral");
+            return;
+          }
+        }
+        throw error;
       }
 
       const finalPhase = String(read(response, "phase") || "").toUpperCase();

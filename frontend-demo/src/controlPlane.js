@@ -1,6 +1,7 @@
 import { readPreferredLocale, translate, translateServerValue, translateTokenValue } from "./i18n";
 
 export const API_TIMEOUT_MS = 30000;
+export const REQUIREMENT_DRAFT_TIMEOUT_MS = 120000;
 export const AUTO_REFRESH_MS = 15000;
 export const PHASE_STEPS = ["DRAFTING", "REVIEWING", "WAITING_USER", "EXECUTING", "DELIVERED", "COMPLETED"];
 export const PROJECT_VIEWS = [
@@ -21,7 +22,11 @@ export const EXECUTION_VIEWS = [
 
 export async function apiRequest(path, options = {}) {
   const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+  const timeoutMs = resolveTimeoutMs(options.timeoutMs);
+  const timeoutMessage = translate(readPreferredLocale(), "requestTimedOut", {
+    seconds: Math.ceil(timeoutMs / 1000),
+  });
+  const timeout = window.setTimeout(() => controller.abort(new Error(timeoutMessage)), timeoutMs);
 
   try {
     const response = await fetch(path, {
@@ -50,9 +55,18 @@ export async function apiRequest(path, options = {}) {
     }
 
     return data;
+  } catch (error) {
+    if (controller.signal.aborted || error?.name === "AbortError" || error?.name === "TimeoutError") {
+      throw buildApiTimeoutError(timeoutMessage, error);
+    }
+    throw error;
   } finally {
     window.clearTimeout(timeout);
   }
+}
+
+export function isApiTimeoutError(error) {
+  return Boolean(error) && error.name === "ApiTimeoutError";
 }
 
 export function read(source, name) {
@@ -80,6 +94,18 @@ export function safeParseJson(value) {
   } catch {
     return null;
   }
+}
+
+function resolveTimeoutMs(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : API_TIMEOUT_MS;
+}
+
+function buildApiTimeoutError(message, cause) {
+  const error = new Error(message);
+  error.name = "ApiTimeoutError";
+  error.cause = cause;
+  return error;
 }
 
 export function prettyJson(value) {
