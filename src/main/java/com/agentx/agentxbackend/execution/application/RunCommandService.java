@@ -217,15 +217,17 @@ public class RunCommandService implements RunCommandUseCase, RunInternalUseCase,
             now,
             now
         );
+        String allocatedWorktreePath = worktreePath;
         try {
             taskRunRepository.save(run);
-            workspacePort.allocateWorkspace(
+            allocatedWorktreePath = workspacePort.allocateWorkspace(
                 runId,
                 claimedTask.sessionId(),
                 claimedTask.taskId(),
                 baseCommit,
                 branchName
             );
+            run = syncAllocatedWorktreePath(run, allocatedWorktreePath);
             taskRunEventRepository.save(newEvent(
                 runId,
                 RunEventType.RUN_STARTED,
@@ -233,7 +235,7 @@ public class RunCommandService implements RunCommandUseCase, RunInternalUseCase,
                 null
             ));
         } catch (RuntimeException ex) {
-            safeReleaseWorkspace(runId, worktreePath);
+            safeReleaseWorkspace(runId, allocatedWorktreePath);
             taskAllocationPort.releaseTaskAssignment(claimedTask.taskId());
             throw ex;
         }
@@ -504,15 +506,17 @@ public class RunCommandService implements RunCommandUseCase, RunInternalUseCase,
             now,
             now
         );
+        String allocatedWorktreePath = worktreePath;
         try {
             taskRunRepository.save(run);
-            workspacePort.allocateWorkspace(
+            allocatedWorktreePath = workspacePort.allocateWorkspace(
                 runId,
                 sessionId,
                 normalizedTaskId,
                 normalizedMergeCandidateCommit,
                 branchName
             );
+            run = syncAllocatedWorktreePath(run, allocatedWorktreePath);
             taskRunEventRepository.save(newEvent(
                 runId,
                 RunEventType.RUN_STARTED,
@@ -521,7 +525,7 @@ public class RunCommandService implements RunCommandUseCase, RunInternalUseCase,
             ));
             return run;
         } catch (RuntimeException ex) {
-            safeReleaseWorkspace(runId, worktreePath);
+            safeReleaseWorkspace(runId, allocatedWorktreePath);
             throw ex;
         }
     }
@@ -1201,6 +1205,33 @@ public class RunCommandService implements RunCommandUseCase, RunInternalUseCase,
             dataJson,
             Instant.now()
         );
+    }
+
+    private TaskRun syncAllocatedWorktreePath(TaskRun run, String allocatedWorktreePath) {
+        String normalizedAllocatedWorktreePath = requireNotBlank(allocatedWorktreePath, "allocatedWorktreePath");
+        if (run == null || normalizedAllocatedWorktreePath.equals(run.worktreePath())) {
+            return run;
+        }
+        TaskRun updatedRun = new TaskRun(
+            run.runId(),
+            run.taskId(),
+            run.workerId(),
+            run.status(),
+            run.runKind(),
+            run.contextSnapshotId(),
+            run.leaseUntil(),
+            run.lastHeartbeatAt(),
+            run.startedAt(),
+            run.finishedAt(),
+            run.taskSkillRef(),
+            run.toolpacksSnapshotJson(),
+            run.baseCommit(),
+            run.branchName(),
+            normalizedAllocatedWorktreePath,
+            run.createdAt(),
+            Instant.now()
+        );
+        return taskRunRepository.update(updatedRun);
     }
 
     private void safeReleaseWorkspace(String runId, String worktreePath) {

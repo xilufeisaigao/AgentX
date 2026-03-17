@@ -79,6 +79,8 @@ class RunCommandServiceTest {
             ".",
             ".agentx"
         );
+        lenient().when(taskRunRepository.save(any(TaskRun.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        lenient().when(taskRunRepository.update(any(TaskRun.class))).thenAnswer(invocation -> invocation.getArgument(0));
         lenient().when(taskAllocationPort.isSessionActive(anyString())).thenReturn(true);
         lenient().when(taskAllocationPort.hasNonDoneDependentTaskByTemplate(anyString(), anyString())).thenReturn(false);
     }
@@ -220,6 +222,39 @@ class RunCommandServiceTest {
         assertTrue(claimed.get().writeScope().contains(".mvn/"));
         assertTrue(claimed.get().writeScope().contains("mvnw"));
         assertTrue(claimed.get().writeScope().contains("mvnw.cmd"));
+    }
+
+    @Test
+    void claimTaskShouldUseAllocatedWorkspacePathReturnedByPort() {
+        when(workerRuntimePort.workerExists("WRK-1")).thenReturn(true);
+        when(workerRuntimePort.isWorkerReady("WRK-1")).thenReturn(true);
+        when(workerRuntimePort.listWorkerToolpackIds("WRK-1"))
+            .thenReturn(List.of("TP-JAVA-21", "TP-MAVEN-3"));
+        when(taskAllocationPort.claimReadyTaskForWorker(eq("WRK-1"), any()))
+            .thenReturn(Optional.of(new TaskAllocationPort.ClaimedTask(
+                "TASK-1",
+                "SES-TEST",
+                "MOD-1",
+                "Implement module baseline",
+                "tmpl.impl.v0",
+                "[\"TP-JAVA-21\",\"TP-MAVEN-3\"]"
+            )));
+        when(contextSnapshotReadPort.findLatestReadySnapshot("TASK-1", RunKind.IMPL))
+            .thenReturn(Optional.of(new ContextSnapshotReadPort.ReadySnapshot(
+                "CTXS-1",
+                null,
+                "file:.agentx/skill.md"
+            )));
+        when(workspacePort.allocateWorkspace(any(), eq("SES-TEST"), eq("TASK-1"), eq("BASELINE_UNAVAILABLE"), any()))
+            .thenReturn("worktrees/SES-TEST/RUN-ALLOCATED-ACTUAL");
+
+        Optional<TaskPackage> claimed = service.claimTask("WRK-1");
+
+        assertTrue(claimed.isPresent());
+        assertEquals("worktrees/SES-TEST/RUN-ALLOCATED-ACTUAL", claimed.get().git().worktreePath());
+        ArgumentCaptor<TaskRun> updateCaptor = ArgumentCaptor.forClass(TaskRun.class);
+        verify(taskRunRepository).update(updateCaptor.capture());
+        assertEquals("worktrees/SES-TEST/RUN-ALLOCATED-ACTUAL", updateCaptor.getValue().worktreePath());
     }
 
     @Test
@@ -802,6 +837,31 @@ class RunCommandServiceTest {
         assertEquals("abc123", run.baseCommit());
         verify(taskRunRepository).save(any(TaskRun.class));
         verify(taskRunEventRepository).save(any());
+    }
+
+    @Test
+    void createVerifyRunShouldReturnAllocatedWorkspacePathReturnedByPort() {
+        when(workerRuntimePort.workerExists("WRK-VERIFY")).thenReturn(true);
+        when(workerRuntimePort.isWorkerReady("WRK-VERIFY")).thenReturn(true);
+        when(workerRuntimePort.listWorkerToolpackIds("WRK-VERIFY")).thenReturn(List.of("TP-JAVA-21"));
+        when(taskAllocationPort.findSessionIdByTaskId("TASK-VERIFY-1")).thenReturn(Optional.of("SES-TEST"));
+        when(taskRunRepository.findLatestVerifyRunByTaskAndBaseCommit("TASK-VERIFY-1", "abc123"))
+            .thenReturn(Optional.empty());
+        when(contextSnapshotReadPort.findLatestReadySnapshot("TASK-VERIFY-1", RunKind.VERIFY))
+            .thenReturn(Optional.of(new ContextSnapshotReadPort.ReadySnapshot(
+                "CTXS-VERIFY-1",
+                null,
+                "file:.agentx/skill-verify.md"
+            )));
+        when(workspacePort.allocateWorkspace(any(), eq("SES-TEST"), eq("TASK-VERIFY-1"), eq("abc123"), any()))
+            .thenReturn("worktrees/SES-TEST/RUN-VERIFY-ACTUAL");
+
+        TaskRun run = service.createVerifyRun("TASK-VERIFY-1", "abc123");
+
+        assertEquals("worktrees/SES-TEST/RUN-VERIFY-ACTUAL", run.worktreePath());
+        ArgumentCaptor<TaskRun> updateCaptor = ArgumentCaptor.forClass(TaskRun.class);
+        verify(taskRunRepository).update(updateCaptor.capture());
+        assertEquals("worktrees/SES-TEST/RUN-VERIFY-ACTUAL", updateCaptor.getValue().worktreePath());
     }
 
     @Test
