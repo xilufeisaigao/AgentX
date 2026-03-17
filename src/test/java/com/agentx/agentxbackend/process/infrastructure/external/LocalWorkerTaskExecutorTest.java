@@ -24,6 +24,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
@@ -668,6 +669,93 @@ class LocalWorkerTaskExecutorTest {
         assertEquals("rewrite scaffold", invokeRecordAccessor(plannerResult, "message"));
     }
 
+    @Test
+    void prepareVerifyCommandShouldRewriteMavenWrapperForLinuxShell() throws Exception {
+        LocalWorkerTaskExecutor executor = new LocalWorkerTaskExecutor(
+            buildRuntimeConfigUseCase("mock", ""),
+            new ObjectMapper(),
+            "git",
+            tempDir.toString(),
+            "sessions",
+            120000,
+            20,
+            "mvn,./mvnw,gradle,./gradlew,python,pytest,git",
+            false,
+            "docker",
+            "maven:3.9.11-eclipse-temurin-21",
+            "1g",
+            "1.0",
+            256
+        );
+        Method method = LocalWorkerTaskExecutor.class.getDeclaredMethod("prepareVerifyCommand", String.class);
+        method.setAccessible(true);
+
+        Object prepared = withOsName("Linux", () -> method.invoke(executor, "./mvnw -q test"));
+
+        String command = (String) invokeRecordAccessor(prepared, "command");
+        Path cleanupPath = (Path) invokeRecordAccessor(prepared, "cleanupPath");
+        assertTrue(command.startsWith("sh ./mvnw -Dproject.build.directory='"));
+        assertTrue(command.endsWith("' -q test"));
+        assertNotNull(cleanupPath);
+    }
+
+    @Test
+    void prepareVerifyCommandShouldRewriteMavenWrapperForWindowsShell() throws Exception {
+        LocalWorkerTaskExecutor executor = new LocalWorkerTaskExecutor(
+            buildRuntimeConfigUseCase("mock", ""),
+            new ObjectMapper(),
+            "git",
+            tempDir.toString(),
+            "sessions",
+            120000,
+            20,
+            "mvn,./mvnw,gradle,./gradlew,python,pytest,git",
+            false,
+            "docker",
+            "maven:3.9.11-eclipse-temurin-21",
+            "1g",
+            "1.0",
+            256
+        );
+        Method method = LocalWorkerTaskExecutor.class.getDeclaredMethod("prepareVerifyCommand", String.class);
+        method.setAccessible(true);
+
+        Object prepared = withOsName("Windows 11", () -> method.invoke(executor, "./mvnw -q test"));
+
+        String command = (String) invokeRecordAccessor(prepared, "command");
+        Path cleanupPath = (Path) invokeRecordAccessor(prepared, "cleanupPath");
+        assertTrue(command.startsWith("./mvnw.cmd -Dproject.build.directory='"));
+        assertTrue(command.endsWith("' -q test"));
+        assertNotNull(cleanupPath);
+    }
+
+    @Test
+    void prepareVerifyCommandShouldRewriteGradleWrapperForLinuxShell() throws Exception {
+        LocalWorkerTaskExecutor executor = new LocalWorkerTaskExecutor(
+            buildRuntimeConfigUseCase("mock", ""),
+            new ObjectMapper(),
+            "git",
+            tempDir.toString(),
+            "sessions",
+            120000,
+            20,
+            "mvn,./mvnw,gradle,./gradlew,python,pytest,git",
+            false,
+            "docker",
+            "maven:3.9.11-eclipse-temurin-21",
+            "1g",
+            "1.0",
+            256
+        );
+        Method method = LocalWorkerTaskExecutor.class.getDeclaredMethod("prepareVerifyCommand", String.class);
+        method.setAccessible(true);
+
+        Object prepared = withOsName("Linux", () -> method.invoke(executor, "./gradlew test"));
+
+        assertEquals("sh ./gradlew test", invokeRecordAccessor(prepared, "command"));
+        assertNull(invokeRecordAccessor(prepared, "cleanupPath"));
+    }
+
     private static TaskPackage buildImplPackage(String runId, String taskId, String worktreePath) {
         return new TaskPackage(
             runId,
@@ -826,6 +914,20 @@ class LocalWorkerTaskExecutorTest {
         throw new IllegalArgumentException("Record component not found: " + componentName);
     }
 
+    private static <T> T withOsName(String osName, CheckedSupplier<T> supplier) throws Exception {
+        String original = System.getProperty("os.name");
+        try {
+            System.setProperty("os.name", osName);
+            return supplier.get();
+        } finally {
+            if (original == null) {
+                System.clearProperty("os.name");
+            } else {
+                System.setProperty("os.name", original);
+            }
+        }
+    }
+
     private static Path initMinimalSpringBootMavenRepo(Path repo) throws Exception {
         initGitRepo(repo);
         Files.writeString(
@@ -980,6 +1082,11 @@ class LocalWorkerTaskExecutorTest {
                 throw new UnsupportedOperationException("not needed in test");
             }
         };
+    }
+
+    @FunctionalInterface
+    private interface CheckedSupplier<T> {
+        T get() throws Exception;
     }
 }
 

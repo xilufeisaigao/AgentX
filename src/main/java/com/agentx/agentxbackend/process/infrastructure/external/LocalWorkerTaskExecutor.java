@@ -930,17 +930,21 @@ public class LocalWorkerTaskExecutor implements WorkerTaskExecutorPort {
     private PreparedVerifyCommand prepareVerifyCommand(String command) {
         String normalized = command == null ? "" : command.trim();
         if (!isMavenCommand(normalized) || normalized.contains("-Dproject.build.directory=")) {
-            return PreparedVerifyCommand.noop(normalized);
+            return PreparedVerifyCommand.noop(adaptVerifyCommandForShell(normalized));
         }
         if (verifyUseDocker) {
             String dockerBuildDir = "/tmp/agentx-verify-maven-" + UUID.randomUUID();
             return PreparedVerifyCommand.noop(
-                injectMavenBuildDirectory(normalized, quoteShellArgument(dockerBuildDir))
+                adaptVerifyCommandForShell(
+                    injectMavenBuildDirectory(normalized, quoteShellArgument(dockerBuildDir))
+                )
             );
         }
         try {
             Path tempBuildDir = Files.createTempDirectory("agentx-verify-maven-");
-            String rewritten = injectMavenBuildDirectory(normalized, quoteShellArgument(tempBuildDir.toString()));
+            String rewritten = adaptVerifyCommandForShell(
+                injectMavenBuildDirectory(normalized, quoteShellArgument(tempBuildDir.toString()))
+            );
             return new PreparedVerifyCommand(rewritten, tempBuildDir);
         } catch (IOException ex) {
             throw new IllegalStateException("Failed to prepare isolated Maven build directory", ex);
@@ -963,6 +967,28 @@ public class LocalWorkerTaskExecutor implements WorkerTaskExecutorPort {
         return command.substring(0, firstWhitespace)
             + " -Dproject.build.directory=" + quotedBuildDirectory
             + command.substring(firstWhitespace);
+    }
+
+    private static String adaptVerifyCommandForShell(String command) {
+        String normalized = command == null ? "" : command.trim();
+        if (normalized.isEmpty()) {
+            return normalized;
+        }
+        int firstWhitespace = normalized.indexOf(' ');
+        String prefix = firstWhitespace < 0 ? normalized : normalized.substring(0, firstWhitespace);
+        String suffix = firstWhitespace < 0 ? "" : normalized.substring(firstWhitespace);
+        String normalizedPrefix = prefix.replace('\\', '/').toLowerCase(Locale.ROOT);
+        if ("./mvnw".equals(normalizedPrefix)) {
+            return adaptWrapperCommand("./mvnw", "./mvnw.cmd", suffix);
+        }
+        if ("./gradlew".equals(normalizedPrefix)) {
+            return adaptWrapperCommand("./gradlew", "./gradlew.bat", suffix);
+        }
+        return normalized;
+    }
+
+    private static String adaptWrapperCommand(String unixWrapper, String windowsWrapper, String suffix) {
+        return isWindows() ? windowsWrapper + suffix : "sh " + unixWrapper + suffix;
     }
 
     private static String quoteShellArgument(String value) {
