@@ -79,3 +79,18 @@
 如果你只想先验证“现在还能不能闭环”，直接看：
 
 - [current-state/runtime-audit-2026-03-17.md](current-state/runtime-audit-2026-03-17.md)
+
+## AI 学习辅助
+
+如果你想让一个全新的 agent 按统一方式讲解某个模块，可以直接让它使用项目专属 skill `agentx-module-teacher`。
+
+仓库内技能源码位置：
+
+- [.codex/skills/agentx-module-teacher/SKILL.md](../.codex/skills/agentx-module-teacher/SKILL.md)
+
+这个 skill 会要求 agent：
+
+1. 先画目标模块和相关模块的依赖图。
+2. 再按真实执行顺序找关键类和方法。
+3. 直接把关键代码贴在对话里讲，而不是只丢文件路径。
+4. 在你继续追问时，沿着当前调用链继续下钻。
