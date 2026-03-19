@@ -15,7 +15,7 @@ Goal: keep global consistency while preventing every agent from loading the full
 ## 2. Minimal Context Intake (Do Not Load Everything)
 
 When working on one module, only load:
-1. `docs/architecture/end-to-end-chain.md` (global runtime chain and module handoff baseline)
+1. `docs/architecture/03-end-to-end-chain.md` (global runtime chain and module handoff baseline)
 2. `docs/reference/truth-sources.md` (source-of-truth priority and common pitfalls)
 3. `docs/schema/agentx_schema_v0.sql` (table truth for owned tables)
 4. The module-specific docs listed in section 4 of this file.
@@ -27,8 +27,8 @@ Only load additional docs if blocked by ambiguity.
 1. Source of truth priority:
    - Table truth: `docs/schema/agentx_schema_v0.sql`
    - Shape truth: `docs/openapi/agentx-control-plane.v0.yaml`
-   - Runtime/flow truth: `docs/architecture/end-to-end-chain.md`
-   - Current operational truth: `docs/current-state/runtime-audit-2026-03-17.md`
+   - Runtime/flow truth: `docs/architecture/03-end-to-end-chain.md`
+   - Current operational truth: `docs/current-state/02-runtime-audit-2026-03-17.md`
 2. Process managers in `process` own cross-module orchestration.
 3. `DELIVERED != DONE` is non-negotiable.
 4. `RUN_FINISHED` payload is persisted via `task_run_events.data_json`.
@@ -39,81 +39,81 @@ Only load additional docs if blocked by ambiguity.
 
 ### session
 Read first:
-1. `docs/modules/session.md`
-2. `docs/code-index.md` session section
+1. `docs/modules/09-session.md`
+2. `docs/05-code-index.md` session section
 3. `docs/schema/agentx_schema_v0.sql` table `sessions`
-4. `docs/modules/query.md` completion/readiness notes
+4. `docs/modules/08-query.md` completion/readiness notes
 
 ### requirement
 Read first:
-1. `docs/modules/requirement.md`
-2. `docs/architecture/end-to-end-chain.md`
-3. `docs/code-index.md` requirement section
+1. `docs/modules/10-requirement.md`
+2. `docs/architecture/03-end-to-end-chain.md`
+3. `docs/05-code-index.md` requirement section
 4. `docs/schema/agentx_schema_v0.sql` tables `requirement_docs`, `requirement_doc_versions`
 
 ### ticket
 Read first:
-1. `docs/modules/ticket.md`
-2. `docs/modules/process.md`
-3. `docs/code-index.md` ticket/process sections
+1. `docs/modules/18-ticket.md`
+2. `docs/modules/07-process.md`
+3. `docs/05-code-index.md` ticket/process sections
 4. `docs/schema/agentx_schema_v0.sql` tables `tickets`, `ticket_events`
 
 ### workforce
 Read first:
-1. `docs/modules/workforce.md`
-2. `docs/modules/execution.md`
+1. `docs/modules/13-workforce.md`
+2. `docs/modules/14-execution.md`
 3. `docs/schema/agentx_schema_v0.sql` tables `workers`, `toolpacks`, `worker_toolpacks`
-4. `docs/current-state/runtime-audit-2026-03-17.md` runtime worker facts
+4. `docs/current-state/02-runtime-audit-2026-03-17.md` runtime worker facts
 
 ### planning
 Read first:
-1. `docs/modules/planning.md`
-2. `docs/modules/process.md`
-3. `docs/architecture/end-to-end-chain.md` planning stage
+1. `docs/modules/11-planning.md`
+2. `docs/modules/07-process.md`
+3. `docs/architecture/03-end-to-end-chain.md` planning stage
 4. `docs/schema/agentx_schema_v0.sql` tables `work_modules`, `work_tasks`
 
 ### execution
 Read first:
-1. `docs/modules/execution.md`
-2. `docs/modules/workspace.md`
-3. `docs/modules/mergegate.md`
+1. `docs/modules/14-execution.md`
+2. `docs/modules/15-workspace.md`
+3. `docs/modules/16-mergegate.md`
 4. `docs/schema/agentx_schema_v0.sql` tables `task_context_snapshots`, `task_runs`, `task_run_events`
 
 ### workspace
 Read first:
-1. `docs/modules/workspace.md`
-2. `docs/architecture/runtime-artifacts.md`
+1. `docs/modules/15-workspace.md`
+2. `docs/architecture/04-runtime-artifacts.md`
 3. `docs/schema/agentx_schema_v0.sql` table `git_workspaces`
 
 ### mergegate
 Read first:
-1. `docs/modules/mergegate.md`
-2. `docs/architecture/end-to-end-chain.md`
-3. `docs/architecture/runtime-artifacts.md`
+1. `docs/modules/16-mergegate.md`
+2. `docs/architecture/03-end-to-end-chain.md`
+3. `docs/architecture/04-runtime-artifacts.md`
 
 ### contextpack
 Read first:
-1. `docs/modules/contextpack.md`
-2. `docs/modules/process.md`
-3. `docs/code-index.md` context section
+1. `docs/modules/12-contextpack.md`
+2. `docs/modules/07-process.md`
+3. `docs/05-code-index.md` context section
 4. `docs/schema/agentx_schema_v0.sql` table `task_context_snapshots`
 
 ### delivery
 Read first:
-1. `docs/modules/delivery.md`
-2. `docs/architecture/runtime-artifacts.md`
-3. `docs/current-state/runtime-audit-2026-03-17.md`
+1. `docs/modules/17-delivery.md`
+2. `docs/architecture/04-runtime-artifacts.md`
+3. `docs/current-state/02-runtime-audit-2026-03-17.md`
 
 ### process
 Read first:
-1. `docs/modules/process.md`
-2. `docs/architecture/end-to-end-chain.md`
-3. `docs/current-state/runtime-audit-2026-03-17.md`
-4. `docs/code-index.md`
+1. `docs/modules/07-process.md`
+2. `docs/architecture/03-end-to-end-chain.md`
+3. `docs/current-state/02-runtime-audit-2026-03-17.md`
+4. `docs/05-code-index.md`
 
 ### query
 Read first:
-1. `docs/modules/query.md`
+1. `docs/modules/08-query.md`
 2. `docs/reference/truth-sources.md`
 3. Related table schemas for requested views
 

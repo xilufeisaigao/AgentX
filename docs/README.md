@@ -12,16 +12,20 @@
 
 ## 先读什么
 
-1. [learning-path.md](learning-path.md)
+1. [00-learning-progress.md](00-learning-progress.md)
+   记录当前学到哪里，给新窗口的 agent 用来承接“继续学习”。
+2. [01-learning-path.md](01-learning-path.md)
    适合重新接管项目时的阅读顺序和每天推进节奏。
-2. [current-state/runtime-audit-2026-03-17.md](current-state/runtime-audit-2026-03-17.md)
+3. [current-state/02-runtime-audit-2026-03-17.md](current-state/02-runtime-audit-2026-03-17.md)
    真实 Docker 运行面、真实 session、真实 git 产物、真实失败恢复证据。
-3. [architecture/end-to-end-chain.md](architecture/end-to-end-chain.md)
+4. [architecture/03-end-to-end-chain.md](architecture/03-end-to-end-chain.md)
    从 `POST /api/v0/sessions` 到 `delivery/clone-repo` 的整条链路。
-4. [architecture/runtime-artifacts.md](architecture/runtime-artifacts.md)
+5. [architecture/04-runtime-artifacts.md](architecture/04-runtime-artifacts.md)
    代码、worktree、context pack、bare clone、Docker volume 都落在哪。
-5. [code-index.md](code-index.md)
+6. [05-code-index.md](05-code-index.md)
    按问题找类、方法、接口和排查入口。
+7. [modules/06-module-map.md](modules/06-module-map.md)
+   进入模块化学习前，先看一遍模块顺序和阅读建议。
 
 ## 真相源
 
@@ -29,8 +33,8 @@
 
 1. 表结构真相: [schema/agentx_schema_v0.sql](schema/agentx_schema_v0.sql)
 2. API 形状真相: [openapi/agentx-control-plane.v0.yaml](openapi/agentx-control-plane.v0.yaml)
-3. 运行与流程真相: [architecture/end-to-end-chain.md](architecture/end-to-end-chain.md)
-4. 当前闭环证据: [current-state/runtime-audit-2026-03-17.md](current-state/runtime-audit-2026-03-17.md)
+3. 运行与流程真相: [architecture/03-end-to-end-chain.md](architecture/03-end-to-end-chain.md)
+4. 当前闭环证据: [current-state/02-runtime-audit-2026-03-17.md](current-state/02-runtime-audit-2026-03-17.md)
 5. 操作命令与排查动作: [reference/common-commands.md](reference/common-commands.md)
 
 注意：
@@ -56,18 +60,18 @@
 
 按源码真实模块拆分：
 
-1. [modules/session.md](modules/session.md)
-2. [modules/requirement.md](modules/requirement.md)
-3. [modules/ticket.md](modules/ticket.md)
-4. [modules/planning.md](modules/planning.md)
-5. [modules/workforce.md](modules/workforce.md)
-6. [modules/execution.md](modules/execution.md)
-7. [modules/workspace.md](modules/workspace.md)
-8. [modules/mergegate.md](modules/mergegate.md)
-9. [modules/contextpack.md](modules/contextpack.md)
-10. [modules/delivery.md](modules/delivery.md)
-11. [modules/process.md](modules/process.md)
-12. [modules/query.md](modules/query.md)
+1. [modules/07-process.md](modules/07-process.md)
+2. [modules/08-query.md](modules/08-query.md)
+3. [modules/09-session.md](modules/09-session.md)
+4. [modules/10-requirement.md](modules/10-requirement.md)
+5. [modules/11-planning.md](modules/11-planning.md)
+6. [modules/12-contextpack.md](modules/12-contextpack.md)
+7. [modules/13-workforce.md](modules/13-workforce.md)
+8. [modules/14-execution.md](modules/14-execution.md)
+9. [modules/15-workspace.md](modules/15-workspace.md)
+10. [modules/16-mergegate.md](modules/16-mergegate.md)
+11. [modules/17-delivery.md](modules/17-delivery.md)
+12. [modules/18-ticket.md](modules/18-ticket.md)
 
 ## Docker 入口
 
@@ -78,7 +82,7 @@
 
 如果你只想先验证“现在还能不能闭环”，直接看：
 
-- [current-state/runtime-audit-2026-03-17.md](current-state/runtime-audit-2026-03-17.md)
+- [current-state/02-runtime-audit-2026-03-17.md](current-state/02-runtime-audit-2026-03-17.md)
 
 ## AI 学习辅助
 
@@ -92,5 +96,12 @@
 
 1. 先画目标模块和相关模块的依赖图。
 2. 再按真实执行顺序找关键类和方法。
-3. 直接把关键代码贴在对话里讲，而不是只丢文件路径。
-4. 在你继续追问时，沿着当前调用链继续下钻。
+3. 每次只推进一轮，并把进度写回 [00-learning-progress.md](00-learning-progress.md)。
+4. 直接把关键代码贴在对话里讲，而不是只丢文件路径。
+5. 额外再贴一份带教学注释的代码，方便你逐行理解。
+6. 在你继续追问时，沿着当前调用链继续下钻。
+
+你后面如果只想说一句“继续学习”，新的 agent 也应该先读：
+
+1. [00-learning-progress.md](00-learning-progress.md)
+2. [.codex/skills/agentx-module-teacher/SKILL.md](../.codex/skills/agentx-module-teacher/SKILL.md)

@@ -26,7 +26,7 @@
 
 ### 3. 运行链路真相
 
-- [../architecture/end-to-end-chain.md](../architecture/end-to-end-chain.md)
+- [../architecture/03-end-to-end-chain.md](../architecture/03-end-to-end-chain.md)
 
 适合回答：
 
@@ -36,7 +36,7 @@
 
 ### 4. 当前状态真相
 
-- [../current-state/runtime-audit-2026-03-17.md](../current-state/runtime-audit-2026-03-17.md)
+- [../current-state/02-runtime-audit-2026-03-17.md](../current-state/02-runtime-audit-2026-03-17.md)
 
 适合回答：
 
@@ -46,7 +46,7 @@
 
 ### 5. 代码定位真相
 
-- [../code-index.md](../code-index.md)
+- [../05-code-index.md](../05-code-index.md)
 
 适合回答：
 

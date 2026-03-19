@@ -7,10 +7,11 @@
 
 按下面顺序读：
 
-1. [README.md](README.md)
-2. [current-state/runtime-audit-2026-03-17.md](current-state/runtime-audit-2026-03-17.md)
-3. [architecture/end-to-end-chain.md](architecture/end-to-end-chain.md)
-4. [code-index.md](code-index.md)
+1. [00-learning-progress.md](00-learning-progress.md)
+2. [README.md](README.md)
+3. [current-state/02-runtime-audit-2026-03-17.md](current-state/02-runtime-audit-2026-03-17.md)
+4. [architecture/03-end-to-end-chain.md](architecture/03-end-to-end-chain.md)
+5. [05-code-index.md](05-code-index.md)
 
 读完你至少应该能回答：
 
@@ -23,8 +24,8 @@
 在 30 分钟版本基础上继续：
 
 1. 看 [reference/common-commands.md](reference/common-commands.md)，亲自跑一次 `docker compose ps`、`GET /progress`、`GET /run-timeline`。
-2. 看 [architecture/runtime-artifacts.md](architecture/runtime-artifacts.md)，把 host bind mount、Docker volume、session repo 路径和 bare clone 路径都认清。
-3. 看 [modules/process.md](modules/process.md)、[modules/execution.md](modules/execution.md)、[modules/query.md](modules/query.md)。
+2. 看 [architecture/04-runtime-artifacts.md](architecture/04-runtime-artifacts.md)，把 host bind mount、Docker volume、session repo 路径和 bare clone 路径都认清。
+3. 看 [modules/07-process.md](modules/07-process.md)、[modules/14-execution.md](modules/14-execution.md)、[modules/08-query.md](modules/08-query.md)。
 
 读完你应该能回答：
 
@@ -40,9 +41,9 @@
 
 读：
 
-- [current-state/runtime-audit-2026-03-17.md](current-state/runtime-audit-2026-03-17.md)
+- [current-state/02-runtime-audit-2026-03-17.md](current-state/02-runtime-audit-2026-03-17.md)
 - [deployment/docker-runtime.md](deployment/docker-runtime.md)
-- [architecture/runtime-artifacts.md](architecture/runtime-artifacts.md)
+- [architecture/04-runtime-artifacts.md](architecture/04-runtime-artifacts.md)
 
 目标：
 
@@ -52,9 +53,9 @@
 
 读：
 
-- [modules/session.md](modules/session.md)
-- [modules/requirement.md](modules/requirement.md)
-- [modules/ticket.md](modules/ticket.md)
+- [modules/09-session.md](modules/09-session.md)
+- [modules/10-requirement.md](modules/10-requirement.md)
+- [modules/18-ticket.md](modules/18-ticket.md)
 
 目标：
 
@@ -64,9 +65,9 @@
 
 读：
 
-- [modules/process.md](modules/process.md)
-- [modules/planning.md](modules/planning.md)
-- [modules/contextpack.md](modules/contextpack.md)
+- [modules/07-process.md](modules/07-process.md)
+- [modules/11-planning.md](modules/11-planning.md)
+- [modules/12-contextpack.md](modules/12-contextpack.md)
 
 目标：
 
@@ -76,9 +77,9 @@
 
 读：
 
-- [modules/workforce.md](modules/workforce.md)
-- [modules/execution.md](modules/execution.md)
-- [modules/workspace.md](modules/workspace.md)
+- [modules/13-workforce.md](modules/13-workforce.md)
+- [modules/14-execution.md](modules/14-execution.md)
+- [modules/15-workspace.md](modules/15-workspace.md)
 
 目标：
 
@@ -88,9 +89,9 @@
 
 读：
 
-- [modules/mergegate.md](modules/mergegate.md)
-- [modules/delivery.md](modules/delivery.md)
-- [modules/query.md](modules/query.md)
+- [modules/16-mergegate.md](modules/16-mergegate.md)
+- [modules/17-delivery.md](modules/17-delivery.md)
+- [modules/08-query.md](modules/08-query.md)
 
 目标：
 
@@ -102,7 +103,7 @@
 
 1. 先选一个具体问题。
    例子：为什么 verify 失败后还能恢复，或者为什么 worker 会挑 `WRK-BOOT-JAVA-DB`。
-2. 先查 [code-index.md](code-index.md)。
+2. 先查 [05-code-index.md](05-code-index.md)。
 3. 再读对应模块文档。
 4. 最后只改一个小切口。
    例子：补日志、补约束、补测试、收敛分支逻辑。

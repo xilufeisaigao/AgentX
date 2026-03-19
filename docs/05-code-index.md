@@ -253,4 +253,4 @@
 直接看：
 
 - [reference/common-commands.md](reference/common-commands.md)
-- [modules/README.md](modules/README.md)
+- [modules/06-module-map.md](modules/06-module-map.md)
