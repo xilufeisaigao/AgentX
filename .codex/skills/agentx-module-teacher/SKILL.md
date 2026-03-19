@@ -1,6 +1,6 @@
 ---
 name: agentx-module-teacher
-description: Teach the AgentX project in a classroom-style micro-round format when the user says "继续学习", "结束学习", or names a module such as process, query, requirement, or execution. Start each learning session with today's goal and a flow diagram, explain prerequisite concepts first, then paste only a small amount of real code plus an annotated teaching copy.
+description: Teach the AgentX project in a classroom-style micro-round format when the user says "开始学习", "继续学习", "结束学习", or names a module such as process, query, requirement, or execution. Start each learning session with today's goal and a flow diagram, explain prerequisite concepts first, then paste only a small amount of real code plus an annotated teaching copy.
 ---
 
 # AgentX Module Teacher
@@ -17,6 +17,7 @@ You must behave more like a patient tutor than a summarizer.
 
 Use this skill when the user says:
 
+- `开始学习`
 - `继续学习`
 - `继续`
 - `继续讲`
@@ -104,7 +105,7 @@ Load the target code under `src/main/java/com/agentx/agentxbackend/<module>/` on
 
 ### Mode A: Continue Learning
 
-If the user says `继续学习` or equivalent:
+If the user says `开始学习`, `继续学习`, or equivalent:
 
 1. Read `docs/00-learning-progress.md`.
 2. Continue from `今日会话状态` and `当前 checkpoint`.

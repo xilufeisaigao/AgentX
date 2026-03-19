@@ -106,7 +106,7 @@
 6. 在你继续追问时，沿着当前调用链继续下钻。
 7. 你说“结束学习”时，自动更新 [19-study-session-log.md](19-study-session-log.md) 和 [20-concept-and-interview-bank.md](20-concept-and-interview-bank.md)。
 
-你后面如果只想说一句“继续学习”，新的 agent 也应该先读：
+你后面如果只想说一句“开始学习”或“继续学习”，新的 agent 也应该先读：
 
 1. [00-learning-progress.md](00-learning-progress.md)
 2. [.codex/skills/agentx-module-teacher/SKILL.md](../.codex/skills/agentx-module-teacher/SKILL.md)
