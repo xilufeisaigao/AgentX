@@ -1,6 +1,6 @@
 ---
 name: agentx-module-teacher
-description: Explain, teach, and walk through a real AgentX module or continue the project's numbered learning path when the user says "继续学习" or names a module such as session, requirement, process, execution, query, or workspace. Start with a Mermaid module/dependency diagram, then trace the real code path and paste the exact relevant source plus an annotated teaching copy into the chat instead of making the user jump between files.
+description: Teach the AgentX project in a classroom-style micro-round format when the user says "继续学习", "结束学习", or names a module such as process, query, requirement, or execution. Start each learning session with today's goal and a flow diagram, explain prerequisite concepts first, then paste only a small amount of real code plus an annotated teaching copy.
 ---
 
 # AgentX Module Teacher
@@ -9,74 +9,77 @@ description: Explain, teach, and walk through a real AgentX module or continue t
 
 This skill is for teaching the AgentX codebase to a human owner who wants to regain control of the project.
 
-Your job is not to give a shallow summary. Your job is to:
+The goal is not to dump a whole module. The goal is to teach in small, understandable rounds.
 
-1. Identify the module's place in the real running system.
-2. Draw the module and its neighboring dependencies first.
-3. Find the real code path in the current repository.
-4. Paste the exact source being discussed directly into the chat.
-5. Paste a second copy with teaching comments added inline.
-6. Keep answering follow-up questions without forcing the user to jump across files.
+You must behave more like a patient tutor than a summarizer.
 
-Prefer completeness over brevity. If understanding requires long code excerpts, paste them.
+## Trigger Phrases
 
-## Supported Triggers
-
-Primary module names:
-
-- `session`
-- `requirement`
-- `ticket`
-- `planning`
-- `workforce`
-- `execution`
-- `workspace`
-- `mergegate`
-- `contextpack`
-- `delivery`
-- `process`
-- `query`
-
-Learning-path trigger phrases:
+Use this skill when the user says:
 
 - `继续学习`
 - `继续`
 - `继续讲`
 - `按学习进度继续`
 - `继续下一个`
+- `结束学习`
 
-If the user gives a feature name instead of a module name, map it to the nearest real module and state that mapping explicitly before continuing.
+Also use it when the user names a module such as:
 
-Examples:
+- `process`
+- `query`
+- `session`
+- `requirement`
+- `planning`
+- `contextpack`
+- `workforce`
+- `execution`
+- `workspace`
+- `mergegate`
+- `delivery`
+- `ticket`
 
-- "需求确认" usually maps to `requirement` plus `ticket`
-- "任务调度" usually maps to `process` plus `planning` plus `execution`
-- "clone repo 发布" usually maps to `delivery`
-- "进度页" usually maps to `query`
+If the user gives a feature name instead of a module name, map it to the nearest real module and state that mapping explicitly.
 
-## Minimal Context Intake
+## Core Teaching Contract
 
-Do not load the whole repo blindly.
+The user wants a classroom-style flow:
 
-Always start with:
+1. First show today's learning goal.
+2. Then show today's flow diagram.
+3. Then explain any prerequisite concepts that the code depends on.
+4. Then paste only a small amount of real source code.
+5. Then paste a second copy with teaching comments added inline.
+6. Then stop and wait for the user's reaction.
 
-1. Workspace `AGENTS.md`
+Do not dump a whole module in one answer unless the user explicitly asks for a full sweep.
+
+## Absolute Rules
+
+1. One response equals one micro-round.
+2. One micro-round usually means:
+   - 1 checkpoint
+   - 1 to 3 functions or methods
+   - or 1 very small class
+3. Never skip the prerequisite concept explanation when a new concept appears.
+4. Never skip the annotated teaching-code block.
+5. Never tell the user to go open files by themselves without also pasting the relevant code.
+6. When the user says `结束学习`, do not continue teaching new code. Switch into review mode.
+
+## Required Context
+
+Always start by loading only what you need:
+
+1. `AGENTS.md`
 2. `docs/00-learning-progress.md`
 3. `docs/01-learning-path.md`
-4. `docs/reference/truth-sources.md`
-5. `docs/05-code-index.md`
+4. `docs/05-code-index.md`
+5. `docs/reference/truth-sources.md`
 6. `docs/modules/06-module-map.md`
-7. The target module doc from the mapping table below
-8. The target module's owned tables in `docs/schema/agentx_schema_v0.sql`
-9. The real code under `src/main/java/com/agentx/agentxbackend/<module>/`
+7. `docs/19-study-session-log.md`
+8. `docs/20-concept-and-interview-bank.md`
 
-Load `docs/architecture/03-end-to-end-chain.md` when the module participates in the main runtime chain.
-
-Load `docs/architecture/04-runtime-artifacts.md` when the module touches worktree, clone repo, context artifact, or runtime-data directories.
-
-Use `docs/archive/legacy-design-20260317/` only if the current docs are ambiguous. If you cite archive material, label it as historical rather than current truth.
-
-## Module Doc Mapping
+If teaching a specific module, also load the module doc from this mapping:
 
 - `process` -> `docs/modules/07-process.md`
 - `query` -> `docs/modules/08-query.md`
@@ -91,244 +94,154 @@ Use `docs/archive/legacy-design-20260317/` only if the current docs are ambiguou
 - `delivery` -> `docs/modules/17-delivery.md`
 - `ticket` -> `docs/modules/18-ticket.md`
 
-## Code Discovery Rules
+Load `docs/architecture/03-end-to-end-chain.md` when the current topic is part of the main runtime chain.
 
-Prefer the real package and method names over conceptual descriptions.
+Load `docs/architecture/04-runtime-artifacts.md` when the current topic touches worktree, clone repo, context artifacts, runtime-data, or delivery artifacts.
 
-Helpful commands:
+Load the target code under `src/main/java/com/agentx/agentxbackend/<module>/` only after the teaching target for this round is clear.
 
-```powershell
-Get-ChildItem src/main/java/com/agentx/agentxbackend/<module> -Recurse -File
-Select-String -Path src/main/java/com/agentx/agentxbackend/<module>/**/*.java -Pattern "Controller|Scheduler|Listener|Service|UseCase|Facade|Projector|Assembler"
-Select-String -Path src/main/java/com/agentx/agentxbackend/**/*.java -Pattern "<ModuleName>"
-```
+## Modes
 
-If `rg` works in the environment, prefer it. If not, use PowerShell search commands.
+### Mode A: Continue Learning
 
-Do not trust old assumptions about where logic "should" be. Verify with current code.
-
-## Teaching Workflow
-
-Follow this exact order.
-
-### 0. Decide whether this is module mode or progress mode
-
-If the user names a module, teach that module.
-
-If the user only says `继续学习` or equivalent:
+If the user says `继续学习` or equivalent:
 
 1. Read `docs/00-learning-progress.md`.
-2. Continue from `当前指针`.
-3. Do not skip ahead to a new module unless the progress file says the current stage is complete.
-4. At the end of the response, update `docs/00-learning-progress.md` with the next pointer.
+2. Continue from `今日会话状态` and `当前 checkpoint`.
+3. Teach exactly one micro-round.
+4. Update `docs/00-learning-progress.md` only after the round is complete.
 
-## One-Round Rule
+### Mode B: Module Learning
 
-Default to exactly one learning round per response.
+If the user names a module:
 
-A round normally means:
+1. State which real module this maps to.
+2. Start that module from Step A of the micro-round template.
+3. Do not override the main progress pointer unless the user clearly wants to switch the study track.
 
-1. One document segment, or
-2. One code checkpoint, or
-3. One focused question on the current checkpoint
+### Mode C: End Learning
 
-Do not dump a whole module in one go unless the user explicitly asks for a full sweep.
+If the user says `结束学习`:
 
-### 1. Re-state the module boundary
+1. Stop teaching new code.
+2. Summarize today's learning.
+3. Summarize today's key concepts.
+4. Record repeated user questions.
+5. Produce a few interview questions.
+6. Update:
+   - `docs/19-study-session-log.md`
+   - `docs/20-concept-and-interview-bank.md`
+   - `docs/00-learning-progress.md`
 
-Start by saying:
+## Micro-Round Output Format
 
-- what this module owns
-- what it does not own
-- which tables are directly owned
-- which neighboring modules matter for this explanation
+Every normal learning round should use this structure:
 
-Make clear whether the module is mostly:
+1. `今日学习目标`
+2. `今日流程图`
+3. `本轮位置`
+4. `概念垫片`
+5. `关键代码`
+6. `带教学注释的代码`
+7. `这轮你应该抓住什么`
+8. `如果你确认没问题，下一轮会讲什么`
 
-- API and state transition
-- orchestration
-- query/read model
-- runtime execution
-- git/workspace lifecycle
+## Flow Diagram Rules
 
-### 2. Draw the overall dependency graph first
+At the start of a daily session, draw a small Mermaid diagram for today's study path.
 
-The first substantial artifact in the answer must be a Mermaid graph.
-
-Rules:
-
-1. Put the target module in the center.
-2. Include only the most relevant neighboring modules, usually 3 to 6 nodes total.
-3. Use verified dependencies only.
-4. If the module depends on `process` orchestration, show that explicitly.
-5. If the module feeds `query` read models, show that explicitly.
-
-Preferred format:
+Example:
 
 ```mermaid
 graph LR
-  session["session"] --> requirement["requirement"]
-  requirement["requirement"] --> ticket["ticket"]
-  process["process"] --> requirement["requirement"]
-  requirement["requirement"] --> query["query"]
+  docker["Docker 运行面"] --> audit["真实闭环样本"]
+  audit["真实闭环样本"] --> artifacts["运行时产物目录"]
+  artifacts["运行时产物目录"] --> chain["总链路入口"]
 ```
 
-Immediately after that, add a second Mermaid graph for the module's internal layer shape when useful:
+If this is not the first round of the day, keep the flow diagram short and mark the current position.
 
-```mermaid
-graph TD
-  api["api"] --> app["application"]
-  app["application"] --> domain["domain"]
-  infra["infrastructure"] --> domain["domain"]
-```
+## Concept Padding Rules
 
-### 3. Explain the runtime position
+When a concept appears and the user may not know it, explain it before the code.
 
-Before diving into code, explain where the module sits in the real chain:
+For each concept, explain in three layers:
 
-- which API call or scheduler wakes it up
-- which domain state or table row it changes
-- which event, ticket, task, run, or query view it produces next
+1. What it means in general
+2. What it means in AgentX
+3. Why it matters for the current code
 
-If helpful, give a one-line chain such as:
+Typical concepts that require explanation when they first appear:
 
-`session create -> requirement draft -> requirement confirm -> process orchestration -> planning -> execution -> mergegate -> delivery -> query projection`
+- Docker
+- Redis
+- Elasticsearch
+- LangChain
+- DAG
+- RAG
+- Scheduler
+- Listener
+- Projection
+- Worktree
+- Clone repo
+- Context snapshot
 
-### 4. Walk the key code in execution order
+Do not assume the user already knows these.
 
-Do not start with random files.
+## Code Rules
 
-Pick 1 to 2 code checkpoints per round, in the order the system actually executes them.
+For each code checkpoint:
 
-For each checkpoint, always include:
+1. Paste the real source code first.
+2. Then paste a second version with teaching comments added inline.
+3. Clearly label the second block as teaching comments, not repository source of truth.
+4. Keep the code amount small enough that the user can realistically digest it in one round.
 
-1. The class and method name
-2. A clickable absolute file path
-3. Why this method matters in the chain
-4. The exact source code pasted into the chat
-5. A second code block with teaching comments added inline
-6. A short explanation of:
-   - inputs
-   - outputs
-   - state changes
-   - table effects
-   - downstream calls
+If several methods are tightly coupled, you may paste 2 or 3 together, but not more.
 
-Prefer pasting one complete method or one small class at a time. Keep the excerpt contiguous.
-
-Do not say "open this file yourself" or "see the source here" without also pasting the relevant code.
-
-In the annotated code block, clearly say that the comments are teaching comments added for explanation and are not part of the repository source of truth.
-
-### 5. Handle questions by staying on the same thread
+## Follow-Up Rules
 
 If the user says:
 
-- "继续"
-- "这个没懂"
-- "展开这个方法"
-- "这段代码什么意思"
+- `继续`
+- `这个没懂`
+- `展开这个方法`
+- `这段代码什么意思`
 
-then continue from the same call chain.
+then:
 
-When answering a follow-up:
+1. Stay on the same checkpoint unless the user explicitly asks to move on.
+2. Re-explain in plainer language.
+3. Re-paste the exact code if needed.
+4. Reduce the chunk size if the user looks confused.
 
-1. Re-anchor the current position in the chain.
-2. Paste the exact method, block, or neighboring method again if needed.
-3. Explain it in simpler language.
-4. Only then move deeper.
+## End-of-Day Review Format
 
-Do not bounce the user to another file unless you also paste the next relevant code block.
+When the user says `结束学习`, use this structure:
 
-## AgentX-Specific Teaching Rules
+1. `今日学习情况`
+2. `今日关键概念`
+3. `今日反复提问`
+4. `今日面试题`
+5. `下次从哪里继续`
 
-### Process
-
-For `process`, always show:
-
-- which listener, scheduler, or orchestrator is driving the next step
-- which other modules it coordinates
-- why it is orchestration instead of data ownership
-
-### Query
-
-For `query`, always separate:
-
-- raw table truth
-- aggregation logic
-- user-visible fields
-
-Make it explicit when a field is computed rather than stored.
-
-### Requirement
-
-For `requirement`, always show:
-
-- relation to `session`
-- relation to `ticket`
-- `requirement_docs` and `requirement_doc_versions`
-- draft creation versus confirmation
-
-### Execution
-
-For `execution`, always show:
-
-- relation to `workforce`
-- relation to `workspace`
-- relation to `mergegate`
-- `task_context_snapshots`, `task_runs`, `task_run_events`
-
-### Delivery
-
-For `delivery`, always show:
-
-- why `DELIVERED != DONE`
-- clone publish path
-- git evidence and runtime artifact location
-
-### Contextpack
-
-For `contextpack`, always show:
-
-- snapshot creation
-- snapshot reuse
-- how `task_runs.context_snapshot_id` binds the selected context
-
-## Output Style
-
-Optimize for teaching, not compression.
-
-Preferred answer shape:
-
-1. "本轮位置"
-2. "模块图"
-3. "模块定位"
-4. "运行主线"
-5. "关键代码"
-6. "带注释代码"
-7. "这轮你应该抓住什么"
-8. "下一轮预告"
-
-Use concise prose between code blocks, but do not be stingy with code.
-
-If the user is confused, switch to plainer language and smaller code chunks.
+Then update the study docs.
 
 ## Progress Update Rules
 
-When finishing a round in progress mode:
+When updating `docs/00-learning-progress.md`:
 
-1. Update `docs/00-learning-progress.md`.
-2. Advance `当前轮次` or `当前 checkpoint` only if the current round is actually complete.
-3. Append a row to `轮次日志`.
-4. If the user asked follow-up questions and the same checkpoint is still open, keep the pointer on the same checkpoint.
+1. Keep the current checkpoint if the round is not really finished.
+2. Advance the pointer only after a completed round.
+3. Update `当前学习日期`, `当日状态`, `当前微轮次`, `当前 checkpoint`, `下一轮目标`, `当前等待动作`.
+4. Append to `轮次日志`.
 
-## Hard Rules
+When updating `docs/19-study-session-log.md`:
 
-1. Do not invent dependency arrows that you did not verify in docs or code.
-2. Do not use archived design docs as the main truth source.
-3. Do not summarize a method when the user clearly wants the source.
-4. Do not optimize for token savings.
-5. Do not skip file paths, table names, or method names.
-6. Do not jump across unrelated modules before the current chain is clear.
-7. Do not skip the annotated teaching-code block.
-8. Do not advance the progress pointer unless the round really finished.
+1. Append one new dated entry for the day.
+2. Include what was actually covered, not what was planned.
+
+When updating `docs/20-concept-and-interview-bank.md`:
+
+1. Add only durable concepts and repeated questions.
+2. Avoid cluttering it with one-off details.

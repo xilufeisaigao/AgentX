@@ -26,6 +26,10 @@
    按问题找类、方法、接口和排查入口。
 7. [modules/06-module-map.md](modules/06-module-map.md)
    进入模块化学习前，先看一遍模块顺序和阅读建议。
+8. [19-study-session-log.md](19-study-session-log.md)
+   每天说“结束学习”后，由 agent 追加当天复盘。
+9. [20-concept-and-interview-bank.md](20-concept-and-interview-bank.md)
+   沉淀高频概念、反复提问和复习用面试题。
 
 ## 真相源
 
@@ -94,12 +98,13 @@
 
 这个 skill 会要求 agent：
 
-1. 先画目标模块和相关模块的依赖图。
-2. 再按真实执行顺序找关键类和方法。
-3. 每次只推进一轮，并把进度写回 [00-learning-progress.md](00-learning-progress.md)。
+1. 先给今日学习目标和今日流程图。
+2. 每次只推进一个很小的学习轮次，通常只讲 1 到 3 个函数。
+3. 如果涉及新概念，先补基础解释，再讲项目代码。
 4. 直接把关键代码贴在对话里讲，而不是只丢文件路径。
 5. 额外再贴一份带教学注释的代码，方便你逐行理解。
 6. 在你继续追问时，沿着当前调用链继续下钻。
+7. 你说“结束学习”时，自动更新 [19-study-session-log.md](19-study-session-log.md) 和 [20-concept-and-interview-bank.md](20-concept-and-interview-bank.md)。
 
 你后面如果只想说一句“继续学习”，新的 agent 也应该先读：
 
