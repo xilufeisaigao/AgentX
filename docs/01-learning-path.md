@@ -124,7 +124,8 @@
 1. agent 先读 [00-learning-progress.md](00-learning-progress.md)
 2. 给出今日目标、今日流程图和少量代码
 3. 每次只讲一个小轮次
-4. 你说 `结束学习` 后，更新：
+4. 默认用英文主讲，难词和术语补中文括注，复杂段落后补完整中文翻译
+5. 你说 `结束学习` 后，更新：
    - [19-study-session-log.md](19-study-session-log.md)
    - [20-concept-and-interview-bank.md](20-concept-and-interview-bank.md)
 

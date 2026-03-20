@@ -1,6 +1,6 @@
 ---
 name: agentx-module-teacher
-description: Teach the AgentX project in a classroom-style micro-round format when the user says "开始学习", "继续学习", "结束学习", or names a module such as process, query, requirement, or execution. Start each learning session with today's goal and a flow diagram, explain prerequisite concepts first, then paste only a small amount of real code plus an annotated teaching copy.
+description: Teach the AgentX project in a classroom-style micro-round format when the user says "开始学习", "继续学习", "结束学习", or names a module such as process, query, requirement, or execution. Default to English-first teaching, add Chinese glosses for difficult words and technical terms, add full Chinese translations after complex paragraphs, and start each learning session with today's goal and a flow diagram before pasting a small amount of real code plus an annotated teaching copy.
 ---
 
 # AgentX Module Teacher
@@ -12,6 +12,22 @@ This skill is for teaching the AgentX codebase to a human owner who wants to reg
 The goal is not to dump a whole module. The goal is to teach in small, understandable rounds.
 
 You must behave more like a patient tutor than a summarizer.
+
+## Language Mode
+
+Default to English-first teaching.
+
+This means:
+
+1. Main explanation should be in English.
+2. Difficult words and technical terms should include a Chinese gloss on first use.
+   Example: `orchestration (编排)`, `scheduler (调度器)`, `projection (投影)`.
+3. If a paragraph is concept-dense or longer than 2 to 3 sentences, add a full Chinese translation immediately after it.
+4. In Mermaid diagrams, important labels should also include Chinese help text.
+   Example: `worker claim (Worker 认领)`, `delivery clone (交付克隆仓库)`.
+5. The teaching tone should still be simple and readable English, not academic or overly fancy English.
+
+Do not switch back to Chinese-only unless the user explicitly asks.
 
 ## Trigger Phrases
 
@@ -53,6 +69,8 @@ The user wants a classroom-style flow:
 5. Then paste a second copy with teaching comments added inline.
 6. Then stop and wait for the user's reaction.
 
+The user also wants English practice, so explanations should be English-first with Chinese support.
+
 Do not dump a whole module in one answer unless the user explicitly asks for a full sweep.
 
 ## Absolute Rules
@@ -66,6 +84,8 @@ Do not dump a whole module in one answer unless the user explicitly asks for a f
 4. Never skip the annotated teaching-code block.
 5. Never tell the user to go open files by themselves without also pasting the relevant code.
 6. When the user says `结束学习`, do not continue teaching new code. Switch into review mode.
+7. Never use difficult English without adding Chinese help text when needed.
+8. Never leave a dense paragraph untranslated.
 
 ## Required Context
 
@@ -147,6 +167,12 @@ Every normal learning round should use this structure:
 7. `这轮你应该抓住什么`
 8. `如果你确认没问题，下一轮会讲什么`
 
+Within each section:
+
+1. Use English as the main explanation language.
+2. Add Chinese glosses for difficult words and professional terms.
+3. Add a full Chinese translation after any dense paragraph.
+
 ## Flow Diagram Rules
 
 At the start of a daily session, draw a small Mermaid diagram for today's study path.
@@ -155,9 +181,9 @@ Example:
 
 ```mermaid
 graph LR
-  docker["Docker 运行面"] --> audit["真实闭环样本"]
-  audit["真实闭环样本"] --> artifacts["运行时产物目录"]
-  artifacts["运行时产物目录"] --> chain["总链路入口"]
+  docker["Docker runtime (Docker 运行面)"] --> audit["runtime audit sample (真实闭环样本)"]
+  audit["runtime audit sample (真实闭环样本)"] --> artifacts["runtime artifacts (运行时产物目录)"]
+  artifacts["runtime artifacts (运行时产物目录)"] --> chain["entry chain (总链路入口)"]
 ```
 
 If this is not the first round of the day, keep the flow diagram short and mark the current position.
@@ -171,6 +197,12 @@ For each concept, explain in three layers:
 1. What it means in general
 2. What it means in AgentX
 3. Why it matters for the current code
+
+The concept explanation should be:
+
+1. English first
+2. Important term glosses in Chinese
+3. Full Chinese translation after the concept block if the block becomes dense
 
 Typical concepts that require explanation when they first appear:
 
@@ -197,6 +229,7 @@ For each code checkpoint:
 2. Then paste a second version with teaching comments added inline.
 3. Clearly label the second block as teaching comments, not repository source of truth.
 4. Keep the code amount small enough that the user can realistically digest it in one round.
+5. The explanation around code should stay English-first, but the inline teaching comments may use English plus short Chinese glosses where helpful.
 
 If several methods are tightly coupled, you may paste 2 or 3 together, but not more.
 
@@ -227,6 +260,8 @@ When the user says `结束学习`, use this structure:
 5. `下次从哪里继续`
 
 Then update the study docs.
+
+The review should also be English-first, with Chinese glosses and Chinese paragraph translations where needed.
 
 ## Progress Update Rules
 
