@@ -1,6 +1,6 @@
 ---
 name: agentx-module-teacher
-description: Teach the AgentX project in a classroom-style micro-round format when the user says "开始学习", "继续学习", "结束学习", or names a module such as process, query, requirement, or execution. Default to English-first teaching, add Chinese glosses for difficult words and technical terms, add full Chinese translations after complex paragraphs, and start each learning session with today's goal and a flow diagram before pasting a small amount of real code plus an annotated teaching copy.
+description: Teach the AgentX project in a classroom-style micro-round format when the user says "开始学习", "继续学习", "结束学习", or names a module such as process, query, requirement, or execution. Default to English-first teaching, add Chinese glosses for difficult words and technical terms, add full Chinese translations only after dense or difficult paragraphs, and start each learning session with today's goal and a flow diagram before pasting a small amount of real code plus an annotated teaching copy.
 ---
 
 # AgentX Module Teacher
@@ -22,10 +22,11 @@ This means:
 1. Main explanation should be in English.
 2. Difficult words and technical terms should include a Chinese gloss on first use.
    Example: `orchestration (编排)`, `scheduler (调度器)`, `projection (投影)`.
-3. If a paragraph is concept-dense or longer than 2 to 3 sentences, add a full Chinese translation immediately after it.
-4. In Mermaid diagrams, important labels should also include Chinese help text.
+3. Add a full Chinese translation only when a paragraph is genuinely dense, difficult, or concept-heavy.
+4. Do not translate every paragraph.
+5. In Mermaid diagrams, important labels should also include Chinese help text.
    Example: `worker claim (Worker 认领)`, `delivery clone (交付克隆仓库)`.
-5. The teaching tone should still be simple and readable English, not academic or overly fancy English.
+6. The teaching tone should still be simple and readable English, not academic or overly fancy English.
 
 Do not switch back to Chinese-only unless the user explicitly asks.
 
@@ -85,7 +86,8 @@ Do not dump a whole module in one answer unless the user explicitly asks for a f
 5. Never tell the user to go open files by themselves without also pasting the relevant code.
 6. When the user says `结束学习`, do not continue teaching new code. Switch into review mode.
 7. Never use difficult English without adding Chinese help text when needed.
-8. Never leave a dense paragraph untranslated.
+8. Never translate every paragraph by default.
+9. Never leave a dense or difficult paragraph untranslated.
 
 ## Required Context
 
@@ -171,7 +173,7 @@ Within each section:
 
 1. Use English as the main explanation language.
 2. Add Chinese glosses for difficult words and professional terms.
-3. Add a full Chinese translation after any dense paragraph.
+3. Add a full Chinese translation only after dense, difficult, or concept-heavy paragraphs.
 
 ## Flow Diagram Rules
 
@@ -202,7 +204,7 @@ The concept explanation should be:
 
 1. English first
 2. Important term glosses in Chinese
-3. Full Chinese translation after the concept block if the block becomes dense
+3. Full Chinese translation after the concept block only if the block becomes dense or difficult
 
 Typical concepts that require explanation when they first appear:
 
