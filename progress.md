@@ -149,18 +149,16 @@
 ## 本轮任务
 
 - 任务
-  - 整理现有 docs，压缩文本和图，并补齐 L4/L5 状态机与 LangGraph 顶层结构图。
+  - 再整理一轮文档，补入中心派发、运行监督器、租约/心跳与重新规划入口，并做一版整体架构复盘。
 - 验收
-  - docs 阅读顺序更清晰
-  - 零散状态机文档已合并收敛
-  - L4 `WorkTask` 目标状态机已归档
-  - L5 execution 状态机已归档
-  - LangGraph 顶层结构图已归档
-  - 图数量已显著收敛
-  - 文档索引已更新
+  - 文档中已明确中心派发制
+  - 文档中已补入运行监督器
+  - 文档中已说明 lease/heartbeat 真相落点
+  - 文档中已补入重新规划入口
+  - 可直接用于架构复盘
   - 完成一次清晰的本地 git 提交
 - 结果
   - 已验证：`git diff --check`
   - 已验证：docs Markdown fenced blocks 成对闭合
-  - 已自检：`DELIVERED != DONE`、`TaskRun.SUCCEEDED != WorkTask.DONE`、`GitWorkspace.MERGED != WorkTask.DONE`
+  - 已自检：中心派发、运行监督器、lease/heartbeat、重新规划入口在多份文档中的口径一致
   - 待提交

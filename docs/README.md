@@ -27,3 +27,5 @@
 2. 可扩展面优先放在 Agent、Capability Pack、Agent Pool，而不是工作流拓扑。
 3. Requirement / Ticket / Task / Run / Workspace 是固定主链。
 4. 状态真相在 domain + MySQL，LangGraph 只做编排，不做业务真相源。
+5. 任务执行采用中心派发制，不采用 worker 自抢任务。
+6. 运行监督器负责 lease、heartbeat、超时恢复与异常升级，不让架构代理去盯运行态。

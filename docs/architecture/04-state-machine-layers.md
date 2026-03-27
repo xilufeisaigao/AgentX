@@ -250,6 +250,50 @@ L5 只表达执行工件，不直接表达业务完成。
 1. `GitWorkspace.MERGED != WorkTask.DONE`
 2. `cleanupStatus` 是 `GitWorkspace` 的附属维度，不单独上升为业务主状态机
 
+## 调度与运行监督
+
+这一部分只固定当前运行方式，不展开控制面细节。
+
+### 当前派发模式
+
+1. 当前采用中心派发制，不采用 worker 自抢任务。
+2. `WorkTask = READY` 只表示“可以进入派发准备”。
+3. 真正的派发动作由 `工作代理管理器` 执行：
+   - 选择 capability 匹配的 agent instance
+   - 准备 `TaskContextSnapshot`
+   - 创建 `TaskRun`
+
+### 当前监督模式
+
+`运行监督器` 负责 runtime 层的保活和恢复，不负责业务规划。
+
+它关注两类租约：
+
+1. 实例租约
+   - 表：`agent_pool_instances`
+   - 字段：`lease_until`、`last_heartbeat_at`
+2. 运行租约
+   - 表：`task_runs`
+   - 字段：`lease_until`、`last_heartbeat_at`
+
+监督器的最小职责：
+
+1. 接收 heartbeat
+2. 检查 lease 是否过期
+3. 识别 worker 失联
+4. 触发恢复动作
+5. 必要时升级给架构代理重新规划
+
+### 监督规则
+
+1. worker 心跳正常时，只续租，不改业务状态。
+2. `task_runs` 超时且无心跳时：
+   - 优先走自动恢复
+   - 自动恢复不成立时，再升级给架构代理
+3. `agent_pool_instances` 超时且无心跳时：
+   - 标记该实例不可再接新任务
+4. `运行监督器` 不直接修改 `RequirementDoc`、`Ticket` 语义。
+
 ## L4 和 L5 的关系
 
 | L4 状态 | 对 L5 的要求 |
@@ -315,6 +359,18 @@ L5 只表达执行工件，不直接表达业务完成。
 1. `TaskRun.SUCCEEDED` 只说明这次尝试跑通了。
 2. `GitWorkspace.MERGED` 只说明候选已物化。
 3. 真正的业务完成仍然看 L4 `WorkTask.DONE`。
+
+## 当前冻结结论
+
+1. 顶层流程固定，LangGraph 只编排顶层节点。
+2. task 执行采用中心派发制，不采用 worker 自抢。
+3. `架构代理` 负责规划、重规划、提请分流。
+4. `工作代理管理器` 负责派发。
+5. `运行监督器` 负责 heartbeat、lease、超时恢复。
+6. `WorkTask` 是业务任务，`TaskRun` 是执行尝试。
+7. `DELIVERED != DONE`
+8. `TaskRun.SUCCEEDED != WorkTask.DONE`
+9. `GitWorkspace.MERGED != WorkTask.DONE`
 
 ## 和 LangGraph 的关系
 
