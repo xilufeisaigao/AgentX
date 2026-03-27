@@ -1,5 +1,6 @@
 package com.agentx.platform.runtime.persistence.mybatis.mapper;
 
+import com.agentx.platform.domain.execution.model.AgentPoolInstance;
 import com.agentx.platform.domain.execution.model.GitWorkspace;
 import com.agentx.platform.domain.execution.model.RunKind;
 import com.agentx.platform.domain.execution.model.TaskContextSnapshot;
@@ -15,6 +16,24 @@ import java.util.Map;
 
 @Mapper
 public interface ExecutionMapper {
+
+    @Select("""
+            select
+              snapshot_id as snapshotId,
+              task_id as taskId,
+              run_kind as runKind,
+              status,
+              trigger_type as triggerType,
+              source_fingerprint as sourceFingerprint,
+              task_context_ref as taskContextRef,
+              task_skill_ref as taskSkillRef,
+              retained_until as retainedUntil
+            from task_context_snapshots
+            where task_id = #{taskId}
+              and run_kind = #{runKind}
+            order by created_at, snapshot_id
+            """)
+    List<Map<String, Object>> listSnapshotRows(@Param("taskId") String taskId, @Param("runKind") RunKind runKind);
 
     @Select("""
             select
@@ -53,6 +72,137 @@ public interface ExecutionMapper {
             order by api.agent_instance_id
             """)
     List<Map<String, Object>> listReadyAgentRows(@Param("capabilityPackId") String capabilityPackId);
+
+    @Select("""
+            select
+              agent_instance_id as agentInstanceId,
+              agent_id as agentId,
+              runtime_type as runtimeType,
+              status,
+              launch_mode as launchMode,
+              current_workflow_run_id as currentWorkflowRunId,
+              lease_until as leaseUntil,
+              last_heartbeat_at as lastHeartbeatAt,
+              endpoint_ref as endpointRef,
+              runtime_metadata_json as runtimeMetadataJson
+            from agent_pool_instances
+            where agent_instance_id = #{agentInstanceId}
+            """)
+    Map<String, Object> findAgentInstanceRow(@Param("agentInstanceId") String agentInstanceId);
+
+    @Select("""
+            select
+              run_id as runId,
+              task_id as taskId,
+              agent_instance_id as agentInstanceId,
+              status,
+              run_kind as runKind,
+              context_snapshot_id as contextSnapshotId,
+              lease_until as leaseUntil,
+              last_heartbeat_at as lastHeartbeatAt,
+              started_at as startedAt,
+              finished_at as finishedAt,
+              execution_contract_json as executionContractJson
+            from task_runs
+            where run_id = #{runId}
+            """)
+    Map<String, Object> findTaskRunRow(@Param("runId") String runId);
+
+    @Select("""
+            select
+              run_id as runId,
+              task_id as taskId,
+              agent_instance_id as agentInstanceId,
+              status,
+              run_kind as runKind,
+              context_snapshot_id as contextSnapshotId,
+              lease_until as leaseUntil,
+              last_heartbeat_at as lastHeartbeatAt,
+              started_at as startedAt,
+              finished_at as finishedAt,
+              execution_contract_json as executionContractJson
+            from task_runs
+            where task_id = #{taskId}
+            order by started_at, run_id
+            """)
+    List<Map<String, Object>> listTaskRunRows(@Param("taskId") String taskId);
+
+    @Select("""
+            select
+              workspace_id as workspaceId,
+              run_id as runId,
+              task_id as taskId,
+              status,
+              repo_root as repoRoot,
+              worktree_path as worktreePath,
+              branch_name as branchName,
+              base_commit as baseCommit,
+              head_commit as headCommit,
+              merge_commit as mergeCommit,
+              cleanup_status as cleanupStatus
+            from git_workspaces
+            where run_id = #{runId}
+            """)
+    Map<String, Object> findWorkspaceByRunRow(@Param("runId") String runId);
+
+    @Select("""
+            select
+              workspace_id as workspaceId,
+              run_id as runId,
+              task_id as taskId,
+              status,
+              repo_root as repoRoot,
+              worktree_path as worktreePath,
+              branch_name as branchName,
+              base_commit as baseCommit,
+              head_commit as headCommit,
+              merge_commit as mergeCommit,
+              cleanup_status as cleanupStatus
+            from git_workspaces
+            where task_id = #{taskId}
+            order by created_at, workspace_id
+            """)
+    List<Map<String, Object>> listWorkspaceRows(@Param("taskId") String taskId);
+
+    @Insert("""
+            insert into agent_pool_instances (
+              agent_instance_id,
+              agent_id,
+              runtime_type,
+              status,
+              launch_mode,
+              current_workflow_run_id,
+              lease_until,
+              last_heartbeat_at,
+              endpoint_ref,
+              runtime_metadata_json
+            ) values (
+              #{agent.agentInstanceId},
+              #{agent.agentId},
+              #{agent.runtimeType},
+              #{agent.status},
+              #{agent.launchMode},
+              #{agent.currentWorkflowRunId},
+              #{agent.leaseUntil},
+              #{agent.lastHeartbeatAt},
+              #{agent.endpointRef},
+              cast(#{runtimeMetadataJson} as json)
+            )
+            on duplicate key update
+              agent_id = values(agent_id),
+              runtime_type = values(runtime_type),
+              status = values(status),
+              launch_mode = values(launch_mode),
+              current_workflow_run_id = values(current_workflow_run_id),
+              lease_until = values(lease_until),
+              last_heartbeat_at = values(last_heartbeat_at),
+              endpoint_ref = values(endpoint_ref),
+              runtime_metadata_json = values(runtime_metadata_json)
+            """)
+    void upsertAgentInstance(
+            @Param("agent") AgentPoolInstance agent,
+            @Param("runtimeMetadataJson") String runtimeMetadataJson
+    );
 
     @Insert("""
             insert into task_context_snapshots (
@@ -130,15 +280,17 @@ public interface ExecutionMapper {
               event_id,
               run_id,
               event_type,
-              body
+              body,
+              data_json
             ) values (
               #{event.eventId},
               #{event.runId},
               #{event.eventType},
-              #{event.body}
+              #{event.body},
+              cast(#{dataJson} as json)
             )
             """)
-    void insertTaskRunEvent(@Param("event") TaskRunEvent event);
+    void insertTaskRunEvent(@Param("event") TaskRunEvent event, @Param("dataJson") String dataJson);
 
     @Insert("""
             insert into git_workspaces (

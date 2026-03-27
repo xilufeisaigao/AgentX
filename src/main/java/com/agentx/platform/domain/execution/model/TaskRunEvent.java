@@ -1,12 +1,15 @@
 package com.agentx.platform.domain.execution.model;
 
+import com.agentx.platform.domain.shared.model.JsonPayload;
+
 import java.util.Objects;
 
 public record TaskRunEvent(
         String eventId,
         String runId,
         String eventType,
-        String body
+        String body,
+        JsonPayload dataJson
 ) {
 
     public TaskRunEvent {

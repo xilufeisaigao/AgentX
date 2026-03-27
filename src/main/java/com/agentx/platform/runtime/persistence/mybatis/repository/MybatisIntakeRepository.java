@@ -30,17 +30,13 @@ public class MybatisIntakeRepository implements IntakeStore {
     @Override
     public Optional<RequirementDoc> findRequirement(String docId) {
         Map<String, Object> row = intakeMapper.findRequirementRow(docId);
-        if (MybatisRowReader.isEmpty(row)) {
-            return Optional.empty();
-        }
-        return Optional.of(new RequirementDoc(
-                MybatisRowReader.string(row, "docId"),
-                MybatisRowReader.string(row, "workflowRunId"),
-                MybatisRowReader.integer(row, "currentVersion"),
-                MybatisRowReader.nullableInteger(row, "confirmedVersion"),
-                MybatisRowReader.enumValue(row, "status", RequirementStatus.class),
-                MybatisRowReader.string(row, "title")
-        ));
+        return requirement(row);
+    }
+
+    @Override
+    public Optional<RequirementDoc> findRequirementByWorkflow(String workflowRunId) {
+        Map<String, Object> row = intakeMapper.findRequirementByWorkflowRow(workflowRunId);
+        return requirement(row);
     }
 
     @Override
@@ -53,6 +49,15 @@ public class MybatisIntakeRepository implements IntakeStore {
                         actor(row, "createdByActorType", "createdByActorId")
                 ))
                 .toList();
+    }
+
+    @Override
+    public Optional<Ticket> findTicket(String ticketId) {
+        Map<String, Object> row = intakeMapper.findTicketRow(ticketId);
+        if (MybatisRowReader.isEmpty(row)) {
+            return Optional.empty();
+        }
+        return Optional.of(ticket(row));
     }
 
     @Override
@@ -99,8 +104,23 @@ public class MybatisIntakeRepository implements IntakeStore {
         intakeMapper.insertTicketEvent(
                 event,
                 event.actor().type().name(),
-                event.actor().actorId()
+                event.actor().actorId(),
+                event.dataJson() == null ? null : event.dataJson().json()
         );
+    }
+
+    private Optional<RequirementDoc> requirement(Map<String, Object> row) {
+        if (MybatisRowReader.isEmpty(row)) {
+            return Optional.empty();
+        }
+        return Optional.of(new RequirementDoc(
+                MybatisRowReader.string(row, "docId"),
+                MybatisRowReader.string(row, "workflowRunId"),
+                MybatisRowReader.integer(row, "currentVersion"),
+                MybatisRowReader.nullableInteger(row, "confirmedVersion"),
+                MybatisRowReader.enumValue(row, "status", RequirementStatus.class),
+                MybatisRowReader.string(row, "title")
+        ));
     }
 
     private Ticket ticket(Map<String, Object> row) {

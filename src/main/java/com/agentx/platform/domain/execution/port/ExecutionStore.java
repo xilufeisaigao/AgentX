@@ -14,7 +14,21 @@ public interface ExecutionStore {
 
     Optional<TaskContextSnapshot> findLatestReadySnapshot(String taskId, RunKind runKind);
 
+    List<TaskContextSnapshot> listSnapshots(String taskId, RunKind runKind);
+
     List<AgentPoolInstance> listReadyAgents(String capabilityPackId);
+
+    Optional<AgentPoolInstance> findAgentInstance(String agentInstanceId);
+
+    Optional<TaskRun> findTaskRun(String runId);
+
+    List<TaskRun> listTaskRuns(String taskId);
+
+    Optional<GitWorkspace> findWorkspaceByRun(String runId);
+
+    List<GitWorkspace> listWorkspaces(String taskId);
+
+    void saveAgentInstance(AgentPoolInstance agentPoolInstance);
 
     void saveTaskContextSnapshot(TaskContextSnapshot snapshot);
 

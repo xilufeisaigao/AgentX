@@ -1,5 +1,8 @@
 package com.agentx.platform.domain.execution.model;
 
+import com.agentx.platform.domain.shared.model.JsonPayload;
+
+import java.time.LocalDateTime;
 import java.util.Objects;
 
 public record AgentPoolInstance(
@@ -8,7 +11,11 @@ public record AgentPoolInstance(
         String runtimeType,
         AgentPoolStatus status,
         String launchMode,
-        String currentWorkflowRunId
+        String currentWorkflowRunId,
+        LocalDateTime leaseUntil,
+        LocalDateTime lastHeartbeatAt,
+        String endpointRef,
+        JsonPayload runtimeMetadataJson
 ) {
 
     public AgentPoolInstance {

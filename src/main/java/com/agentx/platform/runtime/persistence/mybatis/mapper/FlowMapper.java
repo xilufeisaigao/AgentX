@@ -1,7 +1,10 @@
 package com.agentx.platform.runtime.persistence.mybatis.mapper;
 
 import com.agentx.platform.domain.flow.model.WorkflowNodeBinding;
+import com.agentx.platform.domain.flow.model.WorkflowNodeRun;
+import com.agentx.platform.domain.flow.model.WorkflowNodeRunEvent;
 import com.agentx.platform.domain.flow.model.WorkflowRun;
+import com.agentx.platform.domain.flow.model.WorkflowRunEvent;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -79,12 +82,44 @@ public interface FlowMapper {
               node_id as nodeId,
               selected_agent_id as selectedAgentId,
               agent_instance_id as agentInstanceId,
-              status
+              status,
+              input_payload_json as inputPayloadJson,
+              output_payload_json as outputPayloadJson,
+              started_at as startedAt,
+              finished_at as finishedAt
             from workflow_node_runs
             where workflow_run_id = #{workflowRunId}
             order by started_at, node_run_id
             """)
     List<Map<String, Object>> listNodeRunRows(@Param("workflowRunId") String workflowRunId);
+
+    @Select("""
+            select
+              event_id as eventId,
+              workflow_run_id as workflowRunId,
+              event_type as eventType,
+              actor_type as actorType,
+              actor_id as actorId,
+              body,
+              data_json as dataJson
+            from workflow_run_events
+            where workflow_run_id = #{workflowRunId}
+            order by created_at, event_id
+            """)
+    List<Map<String, Object>> listRunEventRows(@Param("workflowRunId") String workflowRunId);
+
+    @Select("""
+            select
+              event_id as eventId,
+              node_run_id as nodeRunId,
+              event_type as eventType,
+              body,
+              data_json as dataJson
+            from workflow_node_run_events
+            where node_run_id = #{nodeRunId}
+            order by created_at, event_id
+            """)
+    List<Map<String, Object>> listNodeRunEventRows(@Param("nodeRunId") String nodeRunId);
 
     @Insert("""
             insert into workflow_runs (
@@ -146,4 +181,89 @@ public interface FlowMapper {
               locked_by_user = values(locked_by_user)
             """)
     void upsertNodeBinding(@Param("binding") WorkflowNodeBinding binding, @Param("rationale") String rationale);
+
+    @Insert("""
+            insert into workflow_node_runs (
+              node_run_id,
+              workflow_run_id,
+              node_id,
+              selected_agent_id,
+              agent_instance_id,
+              status,
+              input_payload_json,
+              output_payload_json,
+              started_at,
+              finished_at
+            ) values (
+              #{nodeRun.nodeRunId},
+              #{nodeRun.workflowRunId},
+              #{nodeRun.nodeId},
+              #{nodeRun.selectedAgentId},
+              #{nodeRun.agentInstanceId},
+              #{nodeRun.status},
+              cast(#{inputPayloadJson} as json),
+              cast(#{outputPayloadJson} as json),
+              #{nodeRun.startedAt},
+              #{nodeRun.finishedAt}
+            )
+            on duplicate key update
+              selected_agent_id = values(selected_agent_id),
+              agent_instance_id = values(agent_instance_id),
+              status = values(status),
+              input_payload_json = values(input_payload_json),
+              output_payload_json = values(output_payload_json),
+              started_at = values(started_at),
+              finished_at = values(finished_at)
+            """)
+    void upsertNodeRun(
+            @Param("nodeRun") WorkflowNodeRun nodeRun,
+            @Param("inputPayloadJson") String inputPayloadJson,
+            @Param("outputPayloadJson") String outputPayloadJson
+    );
+
+    @Insert("""
+            insert into workflow_run_events (
+              event_id,
+              workflow_run_id,
+              event_type,
+              actor_type,
+              actor_id,
+              body,
+              data_json
+            ) values (
+              #{event.eventId},
+              #{event.workflowRunId},
+              #{event.eventType},
+              #{actorType},
+              #{actorId},
+              #{event.body},
+              cast(#{dataJson} as json)
+            )
+            """)
+    void insertRunEvent(
+            @Param("event") WorkflowRunEvent event,
+            @Param("actorType") String actorType,
+            @Param("actorId") String actorId,
+            @Param("dataJson") String dataJson
+    );
+
+    @Insert("""
+            insert into workflow_node_run_events (
+              event_id,
+              node_run_id,
+              event_type,
+              body,
+              data_json
+            ) values (
+              #{event.eventId},
+              #{event.nodeRunId},
+              #{event.eventType},
+              #{event.body},
+              cast(#{dataJson} as json)
+            )
+            """)
+    void insertNodeRunEvent(
+            @Param("event") WorkflowNodeRunEvent event,
+            @Param("dataJson") String dataJson
+    );
 }

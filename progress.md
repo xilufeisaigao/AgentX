@@ -131,7 +131,14 @@
   - 能以一个最小样例跑通主流程
   - 状态流转和数据库真相一致
 - 当前状态
-  - `PENDING`
+  - `IN_PROGRESS`
+- 备注
+  - 已完成第一轮真相收口：
+    - `WorkTaskStatus` 已加入 `DELIVERED`
+    - `workflow / ticket / task run` 事件模型已补 `dataJson`
+    - `FlowStore / IntakeStore / PlanningStore / ExecutionStore` 已补主流程所需读写契约
+    - MyBatis mapper / repository 已补 `workflow_node_runs`、`workflow_run_events`、`agent_pool_instances`、`task_runs`、`git_workspaces` 等读写能力
+  - 当前验收通过：`./mvnw -q -DskipTests compile`
 
 ### P6 Controlplane
 

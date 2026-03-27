@@ -79,7 +79,27 @@ final class MybatisRowReader {
     }
 
     static JsonPayload jsonPayload(Map<String, Object> row, String key) {
-        return new JsonPayload(string(row, key));
+        Object rawValue = row.get(key);
+        if (rawValue == null) {
+            throw new IllegalArgumentException("missing required json column: " + key);
+        }
+        return new JsonPayload(MybatisJsonSupport.readJsonString(rawValue));
+    }
+
+    static JsonPayload nullableJsonPayload(Map<String, Object> row, String key) {
+        Object rawValue = row.get(key);
+        if (rawValue == null) {
+            return null;
+        }
+        return new JsonPayload(MybatisJsonSupport.readJsonString(rawValue));
+    }
+
+    static LocalDateTime localDateTime(Map<String, Object> row, String key) {
+        LocalDateTime value = nullableLocalDateTime(row, key);
+        if (value == null) {
+            throw new IllegalArgumentException("missing required timestamp column: " + key);
+        }
+        return value;
     }
 
     static List<WriteScope> writeScopeList(Map<String, Object> row, String key) {

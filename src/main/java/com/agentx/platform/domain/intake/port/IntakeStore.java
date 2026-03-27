@@ -12,7 +12,11 @@ public interface IntakeStore {
 
     Optional<RequirementDoc> findRequirement(String docId);
 
+    Optional<RequirementDoc> findRequirementByWorkflow(String workflowRunId);
+
     List<RequirementVersion> listRequirementVersions(String docId);
+
+    Optional<Ticket> findTicket(String ticketId);
 
     List<Ticket> listTicketsForWorkflow(String workflowRunId);
 

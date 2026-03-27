@@ -48,6 +48,23 @@ public interface PlanningMapper {
 
     @Select("""
             select
+              task_id as taskId,
+              module_id as moduleId,
+              title,
+              objective,
+              task_template_id as taskTemplateId,
+              status,
+              write_scope_json as writeScopesJson,
+              origin_ticket_id as originTicketId,
+              created_by_actor_type as createdByActorType,
+              created_by_actor_id as createdByActorId
+            from work_tasks
+            where task_id = #{taskId}
+            """)
+    Map<String, Object> findTaskRow(@Param("taskId") String taskId);
+
+    @Select("""
+            select
               d.task_id as taskId,
               d.depends_on_task_id as dependsOnTaskId,
               d.required_upstream_status as requiredUpstreamStatus

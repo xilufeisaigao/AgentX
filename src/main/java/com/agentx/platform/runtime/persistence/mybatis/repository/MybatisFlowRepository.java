@@ -6,8 +6,10 @@ import com.agentx.platform.domain.flow.model.WorkflowMutability;
 import com.agentx.platform.domain.flow.model.WorkflowNodeBinding;
 import com.agentx.platform.domain.flow.model.WorkflowNodeKind;
 import com.agentx.platform.domain.flow.model.WorkflowNodeRun;
+import com.agentx.platform.domain.flow.model.WorkflowNodeRunEvent;
 import com.agentx.platform.domain.flow.model.WorkflowNodeRunStatus;
 import com.agentx.platform.domain.flow.model.WorkflowRun;
+import com.agentx.platform.domain.flow.model.WorkflowRunEvent;
 import com.agentx.platform.domain.flow.model.WorkflowRunStatus;
 import com.agentx.platform.domain.flow.model.WorkflowTemplate;
 import com.agentx.platform.domain.flow.model.WorkflowTemplateNode;
@@ -105,7 +107,38 @@ public class MybatisFlowRepository implements FlowStore {
                         MybatisRowReader.string(row, "nodeId"),
                         MybatisRowReader.nullableString(row, "selectedAgentId"),
                         MybatisRowReader.nullableString(row, "agentInstanceId"),
-                        MybatisRowReader.enumValue(row, "status", WorkflowNodeRunStatus.class)
+                        MybatisRowReader.enumValue(row, "status", WorkflowNodeRunStatus.class),
+                        MybatisRowReader.nullableJsonPayload(row, "inputPayloadJson"),
+                        MybatisRowReader.nullableJsonPayload(row, "outputPayloadJson"),
+                        MybatisRowReader.localDateTime(row, "startedAt"),
+                        MybatisRowReader.nullableLocalDateTime(row, "finishedAt")
+                ))
+                .toList();
+    }
+
+    @Override
+    public List<WorkflowRunEvent> listRunEvents(String workflowRunId) {
+        return flowMapper.listRunEventRows(workflowRunId).stream()
+                .map(row -> new WorkflowRunEvent(
+                        MybatisRowReader.string(row, "eventId"),
+                        MybatisRowReader.string(row, "workflowRunId"),
+                        MybatisRowReader.string(row, "eventType"),
+                        actor(row, "actorType", "actorId"),
+                        MybatisRowReader.string(row, "body"),
+                        MybatisRowReader.nullableJsonPayload(row, "dataJson")
+                ))
+                .toList();
+    }
+
+    @Override
+    public List<WorkflowNodeRunEvent> listNodeRunEvents(String nodeRunId) {
+        return flowMapper.listNodeRunEventRows(nodeRunId).stream()
+                .map(row -> new WorkflowNodeRunEvent(
+                        MybatisRowReader.string(row, "eventId"),
+                        MybatisRowReader.string(row, "nodeRunId"),
+                        MybatisRowReader.string(row, "eventType"),
+                        MybatisRowReader.string(row, "body"),
+                        MybatisRowReader.nullableJsonPayload(row, "dataJson")
                 ))
                 .toList();
     }
@@ -122,6 +155,33 @@ public class MybatisFlowRepository implements FlowStore {
     @Override
     public void saveNodeBinding(WorkflowNodeBinding binding) {
         flowMapper.upsertNodeBinding(binding, null);
+    }
+
+    @Override
+    public void saveNodeRun(WorkflowNodeRun nodeRun) {
+        flowMapper.upsertNodeRun(
+                nodeRun,
+                nodeRun.inputPayloadJson() == null ? null : nodeRun.inputPayloadJson().json(),
+                nodeRun.outputPayloadJson() == null ? null : nodeRun.outputPayloadJson().json()
+        );
+    }
+
+    @Override
+    public void appendRunEvent(WorkflowRunEvent event) {
+        flowMapper.insertRunEvent(
+                event,
+                event.actor().type().name(),
+                event.actor().actorId(),
+                event.dataJson() == null ? null : event.dataJson().json()
+        );
+    }
+
+    @Override
+    public void appendNodeRunEvent(WorkflowNodeRunEvent event) {
+        flowMapper.insertNodeRunEvent(
+                event,
+                event.dataJson() == null ? null : event.dataJson().json()
+        );
     }
 
     private ActorRef actor(Map<String, Object> row, String typeKey, String actorIdKey) {

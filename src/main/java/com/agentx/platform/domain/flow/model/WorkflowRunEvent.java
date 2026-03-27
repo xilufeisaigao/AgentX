@@ -1,6 +1,7 @@
 package com.agentx.platform.domain.flow.model;
 
 import com.agentx.platform.domain.shared.model.ActorRef;
+import com.agentx.platform.domain.shared.model.JsonPayload;
 
 import java.util.Objects;
 
@@ -9,7 +10,8 @@ public record WorkflowRunEvent(
         String workflowRunId,
         String eventType,
         ActorRef actor,
-        String body
+        String body,
+        JsonPayload dataJson
 ) {
 
     public WorkflowRunEvent {

@@ -6,12 +6,15 @@ import com.agentx.platform.domain.planning.model.WorkModule;
 import com.agentx.platform.domain.planning.model.WorkTask;
 
 import java.util.List;
+import java.util.Optional;
 
 public interface PlanningStore {
 
     List<WorkModule> listModules(String workflowRunId);
 
     List<WorkTask> listTasksByWorkflow(String workflowRunId);
+
+    Optional<WorkTask> findTask(String taskId);
 
     List<TaskDependency> listDependencies(String workflowRunId);
 

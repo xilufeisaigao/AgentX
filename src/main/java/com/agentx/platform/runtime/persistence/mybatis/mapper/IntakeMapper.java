@@ -31,6 +31,21 @@ public interface IntakeMapper {
     @Select("""
             select
               doc_id as docId,
+              workflow_run_id as workflowRunId,
+              current_version as currentVersion,
+              confirmed_version as confirmedVersion,
+              status,
+              title
+            from requirement_docs
+            where workflow_run_id = #{workflowRunId}
+            order by created_at
+            limit 1
+            """)
+    Map<String, Object> findRequirementByWorkflowRow(@Param("workflowRunId") String workflowRunId);
+
+    @Select("""
+            select
+              doc_id as docId,
               version,
               content,
               created_by_actor_type as createdByActorType,
@@ -40,6 +55,27 @@ public interface IntakeMapper {
             order by version
             """)
     List<Map<String, Object>> listRequirementVersionRows(@Param("docId") String docId);
+
+    @Select("""
+            select
+              ticket_id as ticketId,
+              workflow_run_id as workflowRunId,
+              type,
+              blocking_scope as blockingScope,
+              status,
+              title,
+              created_by_actor_type as createdByActorType,
+              created_by_actor_id as createdByActorId,
+              assignee_actor_type as assigneeActorType,
+              assignee_actor_id as assigneeActorId,
+              origin_node_id as originNodeId,
+              requirement_doc_id as requirementDocId,
+              requirement_doc_ver as requirementDocVersion,
+              payload_json as payloadJson
+            from tickets
+            where ticket_id = #{ticketId}
+            """)
+    Map<String, Object> findTicketRow(@Param("ticketId") String ticketId);
 
     @Select("""
             select
@@ -191,19 +227,22 @@ public interface IntakeMapper {
               event_type,
               actor_type,
               actor_id,
-              body
+              body,
+              data_json
             ) values (
               #{event.eventId},
               #{event.ticketId},
               #{event.eventType},
               #{actorType},
               #{actorId},
-              #{event.body}
+              #{event.body},
+              cast(#{dataJson} as json)
             )
             """)
     void insertTicketEvent(
             @Param("event") TicketEvent event,
             @Param("actorType") String actorType,
-            @Param("actorId") String actorId
+            @Param("actorId") String actorId,
+            @Param("dataJson") String dataJson
     );
 }

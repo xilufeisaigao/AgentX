@@ -13,6 +13,7 @@ import org.springframework.stereotype.Repository;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 @Repository
 public class MybatisPlanningRepository implements PlanningStore {
@@ -38,18 +39,17 @@ public class MybatisPlanningRepository implements PlanningStore {
     @Override
     public List<WorkTask> listTasksByWorkflow(String workflowRunId) {
         return planningMapper.listTaskRows(workflowRunId).stream()
-                .map(row -> new WorkTask(
-                        MybatisRowReader.string(row, "taskId"),
-                        MybatisRowReader.string(row, "moduleId"),
-                        MybatisRowReader.string(row, "title"),
-                        MybatisRowReader.string(row, "objective"),
-                        MybatisRowReader.string(row, "taskTemplateId"),
-                        MybatisRowReader.enumValue(row, "status", WorkTaskStatus.class),
-                        MybatisRowReader.writeScopeList(row, "writeScopesJson"),
-                        MybatisRowReader.nullableString(row, "originTicketId"),
-                        actor(row, "createdByActorType", "createdByActorId")
-                ))
+                .map(this::task)
                 .toList();
+    }
+
+    @Override
+    public Optional<WorkTask> findTask(String taskId) {
+        Map<String, Object> row = planningMapper.findTaskRow(taskId);
+        if (MybatisRowReader.isEmpty(row)) {
+            return Optional.empty();
+        }
+        return Optional.of(task(row));
     }
 
     @Override
@@ -103,6 +103,20 @@ public class MybatisPlanningRepository implements PlanningStore {
         return new ActorRef(
                 MybatisRowReader.enumValue(row, typeKey, ActorType.class),
                 MybatisRowReader.string(row, actorIdKey)
+        );
+    }
+
+    private WorkTask task(Map<String, Object> row) {
+        return new WorkTask(
+                MybatisRowReader.string(row, "taskId"),
+                MybatisRowReader.string(row, "moduleId"),
+                MybatisRowReader.string(row, "title"),
+                MybatisRowReader.string(row, "objective"),
+                MybatisRowReader.string(row, "taskTemplateId"),
+                MybatisRowReader.enumValue(row, "status", WorkTaskStatus.class),
+                MybatisRowReader.writeScopeList(row, "writeScopesJson"),
+                MybatisRowReader.nullableString(row, "originTicketId"),
+                actor(row, "createdByActorType", "createdByActorId")
         );
     }
 }

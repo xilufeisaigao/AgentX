@@ -1,12 +1,15 @@
 package com.agentx.platform.domain.flow.model;
 
+import com.agentx.platform.domain.shared.model.JsonPayload;
+
 import java.util.Objects;
 
 public record WorkflowNodeRunEvent(
         String eventId,
         String nodeRunId,
         String eventType,
-        String body
+        String body,
+        JsonPayload dataJson
 ) {
 
     public WorkflowNodeRunEvent {

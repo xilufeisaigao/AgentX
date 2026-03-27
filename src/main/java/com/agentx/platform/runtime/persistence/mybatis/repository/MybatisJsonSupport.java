@@ -58,4 +58,14 @@ public final class MybatisJsonSupport {
                 : values.stream().map(WriteScope::path).toList();
         return writeStringList(rawPaths);
     }
+
+    public static String readJsonString(Object rawValue) {
+        if (rawValue == null) {
+            return null;
+        }
+        if (rawValue instanceof byte[] bytes) {
+            return new String(bytes);
+        }
+        return String.valueOf(rawValue);
+    }
 }

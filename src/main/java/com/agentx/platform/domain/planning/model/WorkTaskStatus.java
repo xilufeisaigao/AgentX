@@ -4,6 +4,7 @@ public enum WorkTaskStatus {
     PLANNED,
     READY,
     IN_PROGRESS,
+    DELIVERED,
     BLOCKED,
     DONE,
     FAILED,
