@@ -58,7 +58,9 @@
   - 目录结构与文档一致
   - 不再保留和新规划冲突的旧包组织
 - 当前状态
-  - `PENDING`
+  - `DONE`
+- 备注
+  - 已移除旧试验骨架，建立三层新目录和后续实现落点。
 
 ### P3 Domain 骨架
 
@@ -81,7 +83,7 @@
   - 关键对象和端口已能表达数据库五层真相
   - 不依赖 Web / MyBatis / Docker / LangGraph 具体实现
 - 当前状态
-  - `PENDING`
+  - `IN_PROGRESS`
 
 ### P4 MyBatis 持久化骨架
 
