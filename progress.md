@@ -149,14 +149,14 @@
 ## 本轮任务
 
 - 任务
-  - 归档状态机分层总览图，作为后续逐层状态机讨论基线。
+  - 归档 L1-L3 状态机交互、L3 状态机设计和三层联动小场景。
 - 验收
-  - 状态机分层图已归档到 docs
-  - 后续讨论顺序清晰可见
-  - 工单阻塞范围字段已落到 schema/domain/persistence
-  - 本地 `agentx_platform.tickets` 已同步新增字段
-  - 相关文档更新
+  - “状态迁移矩阵”术语已明确
+  - L3 `RequirementDoc / Ticket` 状态机已归档
+  - L1/L2/L3 交互图已归档
+  - 三层小场景流转已归档
+  - 文档索引已更新
   - 完成一次清晰的本地 git 提交
 - 结果
-  - 已验证：`./mvnw -q -DskipTests compile`
-  - 已验证：`AGENTX_DB_PASSWORD=*** ./mvnw -q test`
+  - 已验证：`git diff --check`
+  - 待提交

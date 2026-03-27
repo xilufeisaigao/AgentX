@@ -209,3 +209,9 @@ flowchart TB
 1. 状态机先定。
 2. 应用命令再定。
 3. 最后才把命令挂到 LangGraph 节点上。
+
+## 7. 细化文档
+
+L1-L3 的具体交互和小场景推演，继续展开见：
+
+1. [`05-l1-l3-state-machine-interactions.md`](/D:/DeskTop/agentx-platform/docs/architecture/05-l1-l3-state-machine-interactions.md)

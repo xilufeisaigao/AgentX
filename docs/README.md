@@ -12,8 +12,9 @@
 2. [固定工作流](architecture/02-fixed-coding-workflow.md)
 3. [领域基础语义](architecture/03-domain-foundations.md)
 4. [状态机分层图](architecture/04-state-machine-layers.md)
-5. [数据库分层关系图](database/01-table-layer-map.md)
-6. [数据库建表 SQL](../db/schema/agentx_platform_v1.sql)
+5. [L1-L3 状态机交互](architecture/05-l1-l3-state-machine-interactions.md)
+6. [数据库分层关系图](database/01-table-layer-map.md)
+7. [数据库建表 SQL](../db/schema/agentx_platform_v1.sql)
 
 ## 文档范围
 
@@ -30,6 +31,9 @@
 - `architecture/04-state-machine-layers.md`
   - 给出当前状态机设计的分层总览。
   - 说明后续状态机讨论的自顶向下顺序。
+- `architecture/05-l1-l3-state-machine-interactions.md`
+  - 展开 L1 `WorkflowRun`、L2 `WorkflowNodeRun`、L3 `RequirementDoc / Ticket` 的交互。
+  - 归档三层状态机的小场景流转。
 
 ### 数据库文档
 
