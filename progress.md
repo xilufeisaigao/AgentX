@@ -131,14 +131,36 @@
   - 能以一个最小样例跑通主流程
   - 状态流转和数据库真相一致
 - 当前状态
-  - `IN_PROGRESS`
+  - `DONE`
 - 备注
   - 已完成第一轮真相收口：
     - `WorkTaskStatus` 已加入 `DELIVERED`
     - `workflow / ticket / task run` 事件模型已补 `dataJson`
     - `FlowStore / IntakeStore / PlanningStore / ExecutionStore` 已补主流程所需读写契约
     - MyBatis mapper / repository 已补 `workflow_node_runs`、`workflow_run_events`、`agent_pool_instances`、`task_runs`、`git_workspaces` 等读写能力
-  - 当前验收通过：`./mvnw -q -DskipTests compile`
+  - 已完成 Runtime V1 固定应用服务：
+    - `start`
+    - `runUntilStable`
+    - `answerTicket`
+    - `getRuntimeSnapshot`
+  - 已完成 LangGraph 顶层固定图：
+    - `requirement`
+    - `architect`
+    - `ticket-gate`
+    - `task-graph`
+    - `worker-manager`
+    - `coding`
+    - `merge-gate`
+    - `verify`
+  - 已完成本地 fake runtime：
+    - `LocalRequirementAgent`
+    - `LocalArchitectAgent`
+    - `LocalCodingAgent`
+    - `LocalVerifyAgent`
+    - `SyntheticWorkspaceService`
+  - 已完成一次 clarification -> human answer -> resume 闭环
+  - 已补运行实现文档与 deferred 文档，避免后续升级继续混入主链
+  - 验收通过：`AGENTX_DB_PASSWORD=*** ./mvnw -q test`
 
 ### P6 Controlplane
 
@@ -156,15 +178,14 @@
 ## 本轮任务
 
 - 任务
-  - 完善 `AGENTS.md`，固化开发规范、文档索引、项目结构索引，以及注释/DTO/异常处理规则。
+  - 实现 Runtime V1 固定主链闭环，并归档实现边界与 deferred 清单。
 - 验收
-  - `AGENTS.md` 已可作为编码入口规范
-  - 已补入文档引用和项目结构索引
-  - 已补入重点注释规范
-  - 已补入反胶水 / 反 DTO 膨胀规范
-  - 已补入异常快速失败规范
+  - `start / runUntilStable / answerTicket / getRuntimeSnapshot` 已可用
+  - happy path、clarification-resume、idempotency 三类集成测试通过
+  - 已归档 Runtime V1 实现文档
+  - 已归档 deferred 文档
+  - `docs/README.md`、`README.md`、`AGENTS.md`、`progress.md` 已同步
   - 完成一次清晰的本地 git 提交
 - 结果
-  - 已验证：`git diff --check`
-  - 已自检：规范内容覆盖注释、DTO、异常、文档索引、项目结构 5 个目标
-  - 待提交
+  - 已验证：`AGENTX_DB_PASSWORD=*** ./mvnw -q test`
+  - 待补：本地 git 提交

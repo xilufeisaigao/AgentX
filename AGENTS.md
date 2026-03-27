@@ -35,18 +35,24 @@
    - 聚合根和值对象边界
 5. `docs/architecture/04-state-machine-layers.md`
    - L1-L5 状态机、L4/L5 关系、运行监督规则
-6. `docs/database/01-table-layer-map.md`
+6. `docs/runtime/01-runtime-v1-implementation.md`
+   - Runtime V1 的固定入口、LangGraph 节点职责、数据库写入点和恢复路径
+7. `docs/database/01-table-layer-map.md`
    - 数据库五层真相和主要写入方
-7. `db/schema/agentx_platform_v1.sql`
+8. `db/schema/agentx_platform_v1.sql`
    - 当前表结构真相
-8. `progress.md`
+9. `docs/deferred/01-runtime-v1-deferred.md`
+   - 当前明确延期的能力边界，避免把它们重新混进主链
+10. `progress.md`
    - 当前实现阶段、验收方式、最近工作
 
 优先级规则：
 
 1. 表结构真相看 `db/schema/agentx_platform_v1.sql`
 2. 架构边界真相看 `docs/architecture/*.md`
-3. 当前计划和阶段边界看 `progress.md`
+3. Runtime 当前落地真相看 `docs/runtime/01-runtime-v1-implementation.md`
+4. Deferred 范围看 `docs/deferred/01-runtime-v1-deferred.md`
+5. 当前计划和阶段边界看 `progress.md`
 
 ## 3. 项目结构索引
 

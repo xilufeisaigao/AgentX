@@ -1,6 +1,6 @@
 # AgentX Platform
 
-这是一个新的 greenfield 平台内核项目。
+这是一个新的 greenfield Agent 平台内核项目。
 
 目标不是继续在旧控制面上堆编排逻辑，而是先建立一个更清晰的平台骨架：
 
@@ -11,8 +11,8 @@
    - 平台注册、查询、配置、Agent 管控 API。
    - 重点是“固定工作流模板 + 动态 Agent 注册与控制”。
 3. `runtime`
-   - 工作流运行时适配层。
-   - 这里未来会逐步接入 LangGraph4j、LangChain4j、Docker Agent Runtime、Checkpoint、RAG。
+   - 固定主链运行时和执行适配层。
+   - 当前已经用 LangGraph4j 跑通 Runtime V1 的固定代码流程闭环。
 
 ## 当前约束
 
@@ -29,21 +29,16 @@
    - 池化
    - 准入与控制
 
-## 当前已初始化内容
+## 当前已实现内容
 
 1. Spring Boot Maven 脚手架
-2. LangGraph4j / LangChain4j 依赖
-3. Postgres / Flyway / OpenAPI 基础依赖
-4. 三层包结构骨架
-5. 内置代码工作流模板目录
-6. Agent 注册与目录查询 API 骨架
-
-## 第一阶段接口
-
-1. `GET /api/v1/catalog/agents`
-2. `POST /api/v1/catalog/agents`
-3. `GET /api/v1/catalog/workflows`
-4. `GET /api/v1/catalog/kernel-policy`
+2. MyBatis + MySQL 持久化基线
+3. 三层包结构骨架
+4. 固定代码工作流模板与绑定真相
+5. Runtime V1 应用服务
+6. LangGraph 顶层固定图
+7. 本地 fake requirement / architect / coding / verify adapters
+8. MySQL 集成测试基线与 Runtime V1 端到端测试
 
 ## 内置代码工作流策略
 
@@ -67,5 +62,8 @@
 1. `docs/README.md`
 2. `docs/architecture/01-three-layer-architecture.md`
 3. `docs/architecture/02-fixed-coding-workflow.md`
-4. `docs/database/01-table-layer-map.md`
-5. `progress.md`
+4. `docs/architecture/04-state-machine-layers.md`
+5. `docs/runtime/01-runtime-v1-implementation.md`
+6. `docs/deferred/01-runtime-v1-deferred.md`
+7. `docs/database/01-table-layer-map.md`
+8. `progress.md`
