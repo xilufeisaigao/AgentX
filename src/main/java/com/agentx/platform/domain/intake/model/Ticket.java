@@ -10,6 +10,7 @@ public record Ticket(
         String ticketId,
         String workflowRunId,
         TicketType type,
+        TicketBlockingScope blockingScope,
         TicketStatus status,
         String title,
         ActorRef createdBy,
@@ -24,6 +25,7 @@ public record Ticket(
         Objects.requireNonNull(ticketId, "ticketId must not be null");
         Objects.requireNonNull(workflowRunId, "workflowRunId must not be null");
         Objects.requireNonNull(type, "type must not be null");
+        Objects.requireNonNull(blockingScope, "blockingScope must not be null");
         Objects.requireNonNull(status, "status must not be null");
         Objects.requireNonNull(title, "title must not be null");
         Objects.requireNonNull(createdBy, "createdBy must not be null");

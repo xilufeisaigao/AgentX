@@ -199,6 +199,7 @@ flowchart LR
 2. 历史版本有哪些。
 3. 哪些问题被抛给了人类。
 4. ticket 具体锚定的是哪一版 requirement 文档。
+5. 一张 ticket 阻塞的是整个 workflow、单个 task，还是仅用于提示。
 
 ---
 
@@ -271,4 +272,3 @@ flowchart LR
    - `workflow_node_runs`
    - `task_runs`
 5. 人类介入面固定走 `tickets`，不要把问题偷偷塞进 run payload。
-

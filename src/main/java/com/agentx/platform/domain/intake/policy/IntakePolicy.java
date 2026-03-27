@@ -3,6 +3,7 @@ package com.agentx.platform.domain.intake.policy;
 import com.agentx.platform.domain.intake.model.RequirementDoc;
 import com.agentx.platform.domain.intake.model.RequirementStatus;
 import com.agentx.platform.domain.intake.model.Ticket;
+import com.agentx.platform.domain.intake.model.TicketBlockingScope;
 import com.agentx.platform.domain.intake.model.TicketStatus;
 import com.agentx.platform.domain.shared.error.DomainRuleViolation;
 
@@ -15,8 +16,7 @@ public final class IntakePolicy {
 
     public static boolean isPlanningReady(RequirementDoc requirementDoc, Collection<Ticket> tickets) {
         return requirementDoc.status() == RequirementStatus.CONFIRMED
-                && tickets.stream().noneMatch(ticket -> ticket.status() == TicketStatus.OPEN
-                || ticket.status() == TicketStatus.CLAIMED);
+                && tickets.stream().noneMatch(IntakePolicy::isWorkflowBlockingTicket);
     }
 
     public static void assertRequirementConfirmed(RequirementDoc requirementDoc) {
@@ -29,5 +29,10 @@ public final class IntakePolicy {
         if (ticket.status() != TicketStatus.OPEN && ticket.status() != TicketStatus.CLAIMED) {
             throw new DomainRuleViolation("ticket is not answerable in current state");
         }
+    }
+
+    public static boolean isWorkflowBlockingTicket(Ticket ticket) {
+        return ticket.blockingScope() == TicketBlockingScope.GLOBAL_BLOCKING
+                && (ticket.status() == TicketStatus.OPEN || ticket.status() == TicketStatus.CLAIMED);
     }
 }

@@ -153,5 +153,10 @@
 - 验收
   - 状态机分层图已归档到 docs
   - 后续讨论顺序清晰可见
+  - 工单阻塞范围字段已落到 schema/domain/persistence
+  - 本地 `agentx_platform.tickets` 已同步新增字段
   - 相关文档更新
   - 完成一次清晰的本地 git 提交
+- 结果
+  - 已验证：`./mvnw -q -DskipTests compile`
+  - 已验证：`AGENTX_DB_PASSWORD=*** ./mvnw -q test`

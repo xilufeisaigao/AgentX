@@ -154,7 +154,7 @@ insert into requirement_doc_versions (
   );
 
 insert into tickets (
-  ticket_id, workflow_run_id, type, status, title,
+  ticket_id, workflow_run_id, type, blocking_scope, status, title,
   created_by_actor_type, created_by_actor_id,
   assignee_actor_type, assignee_actor_id,
   origin_node_id, requirement_doc_id, requirement_doc_ver, payload_json,
@@ -163,6 +163,7 @@ insert into tickets (
   'demo-ticket-healthz-db-check',
   'demo-run-healthz',
   'CLARIFICATION',
+  'GLOBAL_BLOCKING',
   'ANSWERED',
   'healthz 是否需要探测数据库',
   'AGENT',

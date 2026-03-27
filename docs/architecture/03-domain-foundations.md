@@ -125,6 +125,24 @@
 2. 现在如果直接用 `String`，后面 repository、测试、应用层都容易传入空串或非 JSON 形态。
 3. 先用一个轻值对象把“必须是结构化 JSON”这个约束守住，等未来字段稳定后再考虑进一步强类型化。
 
+### `TicketBlockingScope`
+
+位置：`domain.intake.model.TicketBlockingScope`
+
+表示一张 ticket 的阻塞范围，而不是 ticket 的处理状态。
+
+当前枚举值：
+
+1. `GLOBAL_BLOCKING`
+2. `TASK_BLOCKING`
+3. `INFORMATIONAL`
+
+为什么单独建模：
+
+1. `WAITING_HUMAN` 需要区分“全局暂停”和“局部阻塞”。
+2. `TicketStatus` 只回答 ticket 自己走到哪，不回答它阻塞了多大范围。
+3. 把这个维度独立出来后，后面 `WorkflowRun` 和 `WorkTask` 才能基于同一张 ticket 做不同级别的投影。
+
 ## 6. 当前刻意不做的值对象
 
 为了控制复杂度，下面这些暂时不做：
@@ -145,6 +163,7 @@
 3. `ActorRef`
 4. `WriteScope`
 5. `JsonPayload`
+6. `TicketBlockingScope`
 
 并且这些语义已经接入以下核心模型：
 

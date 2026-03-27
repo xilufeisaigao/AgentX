@@ -3,6 +3,7 @@ package com.agentx.platform.runtime.persistence.mybatis.repository;
 import com.agentx.platform.domain.intake.model.RequirementDoc;
 import com.agentx.platform.domain.intake.model.RequirementStatus;
 import com.agentx.platform.domain.intake.model.RequirementVersion;
+import com.agentx.platform.domain.intake.model.TicketBlockingScope;
 import com.agentx.platform.domain.intake.model.Ticket;
 import com.agentx.platform.domain.intake.model.TicketEvent;
 import com.agentx.platform.domain.intake.model.TicketStatus;
@@ -107,6 +108,7 @@ public class MybatisIntakeRepository implements IntakeStore {
                 MybatisRowReader.string(row, "ticketId"),
                 MybatisRowReader.string(row, "workflowRunId"),
                 MybatisRowReader.enumValue(row, "type", TicketType.class),
+                MybatisRowReader.enumValue(row, "blockingScope", TicketBlockingScope.class),
                 MybatisRowReader.enumValue(row, "status", TicketStatus.class),
                 MybatisRowReader.string(row, "title"),
                 actor(row, "createdByActorType", "createdByActorId"),

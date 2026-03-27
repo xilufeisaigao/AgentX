@@ -257,6 +257,7 @@ create table tickets (
   ticket_id varchar(64) primary key,
   workflow_run_id varchar(64) not null,
   type varchar(32) not null,
+  blocking_scope varchar(32) not null default 'GLOBAL_BLOCKING',
   status varchar(32) not null,
   title varchar(256) not null,
   created_by_actor_type varchar(32) not null,
@@ -276,7 +277,7 @@ create table tickets (
   foreign key (workflow_run_id) references workflow_runs(workflow_run_id),
   foreign key (requirement_doc_id) references requirement_docs(doc_id),
   foreign key (requirement_doc_id, requirement_doc_ver) references requirement_doc_versions(doc_id, version)
-) engine=InnoDB comment='HITL and cross-node ticket inbox.';
+) engine=InnoDB comment='HITL and cross-node ticket inbox. blocking_scope distinguishes workflow-blocking, task-blocking and informational tickets.';
 
 create table ticket_events (
   event_id varchar(64) primary key,

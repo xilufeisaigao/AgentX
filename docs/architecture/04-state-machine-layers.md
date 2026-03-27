@@ -21,6 +21,7 @@
 1. 上层状态机不能去镜像下层所有细节。
 2. 下层状态变化可以影响上层投影，但不能直接篡改上层语义。
 3. LangGraph 后面只负责编排节点，不成为业务状态的事实源。
+4. `WorkflowRun = WAITING_HUMAN` 的前提不是“有 ticket”，而是存在至少一张 `GLOBAL_BLOCKING` 且未解决的 ticket，并且当前没有合法自动下一步。
 
 ## 2. 分层总览图
 
@@ -119,6 +120,7 @@ flowchart TB
 1. 需求文档是否闭合。
 2. 哪些事实仍待澄清。
 3. 哪些问题必须经过人工回答。
+4. 一张 ticket 阻塞的是整个 workflow、单个 task，还是仅用于提示。
 
 这里是人机协作边界，不允许 worker 直接跨过去找人。
 
@@ -160,6 +162,7 @@ flowchart TB
 下层状态会影响上层投影，例如：
 
 1. `Ticket` 处于待回答，可能把 `WorkflowRun` 投影为等待人工。
+   这里只看 `GLOBAL_BLOCKING` ticket。
 2. `WorkTask` 全部完成，可能推动 `WorkflowRun` 进入 verify。
 3. `TaskRun` 失败，可能把 `WorkTask` 重新拉回阻塞或失败。
 

@@ -7,12 +7,18 @@ import com.agentx.platform.domain.flow.model.WorkflowNodeBinding;
 import com.agentx.platform.domain.flow.model.WorkflowRun;
 import com.agentx.platform.domain.flow.model.WorkflowRunStatus;
 import com.agentx.platform.domain.flow.port.FlowStore;
+import com.agentx.platform.domain.intake.model.Ticket;
+import com.agentx.platform.domain.intake.model.TicketBlockingScope;
+import com.agentx.platform.domain.intake.model.TicketStatus;
+import com.agentx.platform.domain.intake.model.TicketType;
+import com.agentx.platform.domain.intake.port.IntakeStore;
 import com.agentx.platform.domain.planning.model.WorkModule;
 import com.agentx.platform.domain.planning.model.WorkTask;
 import com.agentx.platform.domain.planning.model.WorkTaskStatus;
 import com.agentx.platform.domain.planning.port.PlanningStore;
 import com.agentx.platform.domain.shared.model.ActorRef;
 import com.agentx.platform.domain.shared.model.ActorType;
+import com.agentx.platform.domain.shared.model.JsonPayload;
 import com.agentx.platform.domain.shared.model.WriteScope;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -32,6 +38,9 @@ class AgentxPlatformApplicationTests {
 
     @Autowired
     private FlowStore flowStore;
+
+    @Autowired
+    private IntakeStore intakeStore;
 
     @Autowired
     private PlanningStore planningStore;
@@ -108,6 +117,59 @@ class AgentxPlatformApplicationTests {
             jdbcTemplate.update("delete from work_tasks where task_id = ?", taskId);
             jdbcTemplate.update("delete from work_modules where module_id = ?", moduleId);
             jdbcTemplate.update("delete from workflow_run_node_bindings where binding_id = ?", bindingId);
+            jdbcTemplate.update("delete from workflow_runs where workflow_run_id = ?", workflowRunId);
+        }
+    }
+
+    @Test
+    void shouldPersistTicketBlockingScope() {
+        String suffix = UUID.randomUUID().toString().replace("-", "").substring(0, 10);
+        String workflowRunId = "test-run-ticket-" + suffix;
+        String ticketId = "ticket-" + suffix;
+
+        WorkflowRun run = new WorkflowRun(
+                workflowRunId,
+                "builtin-coding-flow",
+                "Ticket Scope Smoke " + suffix,
+                WorkflowRunStatus.ACTIVE,
+                EntryMode.MANUAL,
+                false,
+                new ActorRef(ActorType.HUMAN, "user-ticket-test")
+        );
+        Ticket ticket = new Ticket(
+                ticketId,
+                workflowRunId,
+                TicketType.CLARIFICATION,
+                TicketBlockingScope.GLOBAL_BLOCKING,
+                TicketStatus.OPEN,
+                "确认 healthz 是否探测数据库",
+                new ActorRef(ActorType.AGENT, "architect-agent"),
+                new ActorRef(ActorType.HUMAN, "user-ticket-test"),
+                "architect",
+                null,
+                null,
+                new JsonPayload("{\"question\":\"是否需要数据库探测\"}")
+        );
+
+        try {
+            flowStore.saveRun(run);
+            intakeStore.saveTicket(ticket);
+
+            assertThat(intakeStore.listTicketsForWorkflow(workflowRunId))
+                    .singleElement()
+                    .satisfies(saved -> {
+                        assertThat(saved.ticketId()).isEqualTo(ticketId);
+                        assertThat(saved.workflowRunId()).isEqualTo(workflowRunId);
+                        assertThat(saved.type()).isEqualTo(TicketType.CLARIFICATION);
+                        assertThat(saved.blockingScope()).isEqualTo(TicketBlockingScope.GLOBAL_BLOCKING);
+                        assertThat(saved.status()).isEqualTo(TicketStatus.OPEN);
+                    });
+            assertThat(intakeStore.listOpenTickets(workflowRunId))
+                    .singleElement()
+                    .extracting(Ticket::blockingScope)
+                    .isEqualTo(TicketBlockingScope.GLOBAL_BLOCKING);
+        } finally {
+            jdbcTemplate.update("delete from tickets where ticket_id = ?", ticketId);
             jdbcTemplate.update("delete from workflow_runs where workflow_run_id = ?", workflowRunId);
         }
     }
