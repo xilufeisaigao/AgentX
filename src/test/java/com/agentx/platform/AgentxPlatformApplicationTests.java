@@ -13,6 +13,7 @@ import com.agentx.platform.domain.planning.model.WorkTaskStatus;
 import com.agentx.platform.domain.planning.port.PlanningStore;
 import com.agentx.platform.domain.shared.model.ActorRef;
 import com.agentx.platform.domain.shared.model.ActorType;
+import com.agentx.platform.domain.shared.model.WriteScope;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -88,7 +89,7 @@ class AgentxPlatformApplicationTests {
                 "补一条最小的持久化烟雾任务",
                 "java-backend-task",
                 WorkTaskStatus.PLANNED,
-                List.of("src/main/java", "src/test/java"),
+                List.of(new WriteScope("src/main/java"), new WriteScope("src/test/java")),
                 null,
                 new ActorRef(ActorType.AGENT, "architect-agent")
         );
@@ -110,4 +111,5 @@ class AgentxPlatformApplicationTests {
             jdbcTemplate.update("delete from workflow_runs where workflow_run_id = ?", workflowRunId);
         }
     }
+
 }

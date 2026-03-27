@@ -158,7 +158,7 @@ public interface IntakeMapper {
               #{ticket.originNodeId},
               #{ticket.requirementDocId},
               #{ticket.requirementDocVersion},
-              cast(#{ticket.payloadJson} as json)
+              cast(#{ticket.payloadJson.json} as json)
             )
             on duplicate key update
               type = values(type),

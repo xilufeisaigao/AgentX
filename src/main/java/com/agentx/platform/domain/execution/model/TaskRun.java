@@ -1,5 +1,8 @@
 package com.agentx.platform.domain.execution.model;
 
+import com.agentx.platform.domain.shared.model.AggregateRoot;
+import com.agentx.platform.domain.shared.model.JsonPayload;
+
 import java.time.LocalDateTime;
 import java.util.Objects;
 
@@ -14,8 +17,8 @@ public record TaskRun(
         LocalDateTime lastHeartbeatAt,
         LocalDateTime startedAt,
         LocalDateTime finishedAt,
-        String executionContractJson
-) {
+        JsonPayload executionContractJson
+) implements AggregateRoot<String> {
 
     public TaskRun {
         Objects.requireNonNull(runId, "runId must not be null");
@@ -28,5 +31,10 @@ public record TaskRun(
         Objects.requireNonNull(lastHeartbeatAt, "lastHeartbeatAt must not be null");
         Objects.requireNonNull(startedAt, "startedAt must not be null");
         Objects.requireNonNull(executionContractJson, "executionContractJson must not be null");
+    }
+
+    @Override
+    public String aggregateId() {
+        return runId;
     }
 }

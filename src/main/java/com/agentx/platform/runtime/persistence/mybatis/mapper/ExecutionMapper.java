@@ -110,7 +110,7 @@ public interface ExecutionMapper {
               #{taskRun.lastHeartbeatAt},
               #{taskRun.startedAt},
               #{taskRun.finishedAt},
-              cast(#{taskRun.executionContractJson} as json)
+              cast(#{taskRun.executionContractJson.json} as json)
             )
             on duplicate key update
               agent_instance_id = values(agent_instance_id),

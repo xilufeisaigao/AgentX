@@ -1,5 +1,7 @@
 package com.agentx.platform.domain.catalog.model;
 
+import com.agentx.platform.domain.shared.model.AggregateRoot;
+
 import java.util.Objects;
 
 public record AgentDefinition(
@@ -14,7 +16,7 @@ public record AgentDefinition(
         boolean autoPoolEligible,
         boolean manualRegistrationAllowed,
         boolean enabled
-) {
+) implements AggregateRoot<String> {
 
     public AgentDefinition {
         Objects.requireNonNull(agentId, "agentId must not be null");
@@ -23,5 +25,10 @@ public record AgentDefinition(
         Objects.requireNonNull(registrationSource, "registrationSource must not be null");
         Objects.requireNonNull(runtimeType, "runtimeType must not be null");
         Objects.requireNonNull(model, "model must not be null");
+    }
+
+    @Override
+    public String aggregateId() {
+        return agentId;
     }
 }

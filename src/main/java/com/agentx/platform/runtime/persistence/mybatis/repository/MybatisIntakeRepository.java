@@ -114,7 +114,7 @@ public class MybatisIntakeRepository implements IntakeStore {
                 MybatisRowReader.nullableString(row, "originNodeId"),
                 MybatisRowReader.nullableString(row, "requirementDocId"),
                 MybatisRowReader.nullableInteger(row, "requirementDocVersion"),
-                MybatisRowReader.string(row, "payloadJson")
+                MybatisRowReader.jsonPayload(row, "payloadJson")
         );
     }
 

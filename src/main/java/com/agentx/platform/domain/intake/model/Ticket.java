@@ -1,6 +1,8 @@
 package com.agentx.platform.domain.intake.model;
 
 import com.agentx.platform.domain.shared.model.ActorRef;
+import com.agentx.platform.domain.shared.model.AggregateRoot;
+import com.agentx.platform.domain.shared.model.JsonPayload;
 
 import java.util.Objects;
 
@@ -15,8 +17,8 @@ public record Ticket(
         String originNodeId,
         String requirementDocId,
         Integer requirementDocVersion,
-        String payloadJson
-) {
+        JsonPayload payloadJson
+) implements AggregateRoot<String> {
 
     public Ticket {
         Objects.requireNonNull(ticketId, "ticketId must not be null");
@@ -27,5 +29,10 @@ public record Ticket(
         Objects.requireNonNull(createdBy, "createdBy must not be null");
         Objects.requireNonNull(assignee, "assignee must not be null");
         Objects.requireNonNull(payloadJson, "payloadJson must not be null");
+    }
+
+    @Override
+    public String aggregateId() {
+        return ticketId;
     }
 }

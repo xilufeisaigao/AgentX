@@ -1,6 +1,7 @@
 package com.agentx.platform.domain.flow.model;
 
 import com.agentx.platform.domain.shared.model.ActorRef;
+import com.agentx.platform.domain.shared.model.AggregateRoot;
 
 import java.util.Objects;
 
@@ -12,7 +13,7 @@ public record WorkflowRun(
         EntryMode entryMode,
         boolean autoAgentMode,
         ActorRef createdBy
-) {
+) implements AggregateRoot<String> {
 
     public WorkflowRun {
         Objects.requireNonNull(workflowRunId, "workflowRunId must not be null");
@@ -21,5 +22,10 @@ public record WorkflowRun(
         Objects.requireNonNull(status, "status must not be null");
         Objects.requireNonNull(entryMode, "entryMode must not be null");
         Objects.requireNonNull(createdBy, "createdBy must not be null");
+    }
+
+    @Override
+    public String aggregateId() {
+        return workflowRunId;
     }
 }

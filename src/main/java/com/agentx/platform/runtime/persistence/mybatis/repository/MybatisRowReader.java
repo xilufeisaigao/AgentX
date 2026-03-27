@@ -1,5 +1,8 @@
 package com.agentx.platform.runtime.persistence.mybatis.repository;
 
+import com.agentx.platform.domain.shared.model.JsonPayload;
+import com.agentx.platform.domain.shared.model.WriteScope;
+
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -75,7 +78,11 @@ final class MybatisRowReader {
         return Enum.valueOf(enumType, string(row, key));
     }
 
-    static List<String> stringList(Map<String, Object> row, String key) {
-        return MybatisJsonSupport.readStringList(row.get(key));
+    static JsonPayload jsonPayload(Map<String, Object> row, String key) {
+        return new JsonPayload(string(row, key));
+    }
+
+    static List<WriteScope> writeScopeList(Map<String, Object> row, String key) {
+        return MybatisJsonSupport.readWriteScopeList(row.get(key));
     }
 }

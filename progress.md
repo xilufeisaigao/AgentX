@@ -88,6 +88,9 @@
   - 已补齐 `shared / catalog / flow / intake / planning / execution` 六个切片下的 `model / policy / port` 领域骨架。
   - 已修正启动类中的过期配置引用，当前骨架可独立编译。
   - 验收通过：`./mvnw -q -DskipTests compile`
+  - 已补领域基础语义：`AggregateRoot / ValueObject` 标记，以及 `ActorRef / WriteScope / JsonPayload` 三个实际值对象。
+  - 已归档聚合根和值对象设计文档，作为后续状态机讨论的前置基线。
+  - 语义收口验证通过：`./mvnw -q -DskipTests compile`、`AGENTX_DB_PASSWORD=*** ./mvnw -q test`
 
 ### P4 MyBatis 持久化骨架
 
@@ -146,7 +149,7 @@
 ## 本轮任务
 
 - 任务
-  - 完成 `domain` 与 `MyBatis` 持久化骨架，进入固定主流程实现前的可运行基线。
+  - 收口 `domain` 基础语义，补齐聚合根和值对象设计并归档文档。
 - 验收
   - 新 `domain` 包结构落地
   - 相关文档更新

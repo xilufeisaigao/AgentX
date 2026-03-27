@@ -45,7 +45,7 @@ public class MybatisPlanningRepository implements PlanningStore {
                         MybatisRowReader.string(row, "objective"),
                         MybatisRowReader.string(row, "taskTemplateId"),
                         MybatisRowReader.enumValue(row, "status", WorkTaskStatus.class),
-                        MybatisRowReader.stringList(row, "writeScopesJson"),
+                        MybatisRowReader.writeScopeList(row, "writeScopesJson"),
                         MybatisRowReader.nullableString(row, "originTicketId"),
                         actor(row, "createdByActorType", "createdByActorId")
                 ))

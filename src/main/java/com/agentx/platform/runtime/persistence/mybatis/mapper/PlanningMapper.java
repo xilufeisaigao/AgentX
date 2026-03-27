@@ -4,7 +4,6 @@ import com.agentx.platform.domain.planning.model.TaskCapabilityRequirement;
 import com.agentx.platform.domain.planning.model.TaskDependency;
 import com.agentx.platform.domain.planning.model.WorkModule;
 import com.agentx.platform.domain.planning.model.WorkTask;
-import com.agentx.platform.runtime.persistence.mybatis.typehandler.StringListJsonTypeHandler;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -110,7 +109,7 @@ public interface PlanningMapper {
               #{task.objective},
               #{task.taskTemplateId},
               #{task.status},
-              #{task.writeScopes, typeHandler=com.agentx.platform.runtime.persistence.mybatis.typehandler.StringListJsonTypeHandler},
+              #{task.writeScopes, typeHandler=com.agentx.platform.runtime.persistence.mybatis.typehandler.WriteScopeListJsonTypeHandler},
               #{task.originTicketId},
               #{createdByActorType},
               #{createdByActorId}

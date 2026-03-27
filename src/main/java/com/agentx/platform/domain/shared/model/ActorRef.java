@@ -2,7 +2,7 @@ package com.agentx.platform.domain.shared.model;
 
 import java.util.Objects;
 
-public record ActorRef(ActorType type, String actorId) {
+public record ActorRef(ActorType type, String actorId) implements ValueObject {
 
     public ActorRef {
         Objects.requireNonNull(type, "type must not be null");

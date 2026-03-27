@@ -1,5 +1,6 @@
 package com.agentx.platform.runtime.persistence.mybatis.repository;
 
+import com.agentx.platform.domain.shared.model.WriteScope;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -43,5 +44,18 @@ public final class MybatisJsonSupport {
         } catch (JsonProcessingException exception) {
             throw new IllegalArgumentException("failed to write json string list", exception);
         }
+    }
+
+    public static List<WriteScope> readWriteScopeList(Object rawValue) {
+        return readStringList(rawValue).stream()
+                .map(WriteScope::new)
+                .toList();
+    }
+
+    public static String writeWriteScopeList(List<WriteScope> values) {
+        List<String> rawPaths = values == null
+                ? List.of()
+                : values.stream().map(WriteScope::path).toList();
+        return writeStringList(rawPaths);
     }
 }

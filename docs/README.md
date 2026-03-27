@@ -10,8 +10,9 @@
 
 1. [三层架构](architecture/01-three-layer-architecture.md)
 2. [固定工作流](architecture/02-fixed-coding-workflow.md)
-3. [数据库分层关系图](database/01-table-layer-map.md)
-4. [数据库建表 SQL](../db/schema/agentx_platform_v1.sql)
+3. [领域基础语义](architecture/03-domain-foundations.md)
+4. [数据库分层关系图](database/01-table-layer-map.md)
+5. [数据库建表 SQL](../db/schema/agentx_platform_v1.sql)
 
 ## 文档范围
 
@@ -22,6 +23,9 @@
   - 说明三层和数据库五层之间的映射关系。
 - `architecture/02-fixed-coding-workflow.md`
   - 说明当前固定 workflow 的节点、循环和人类介入面。
+- `architecture/03-domain-foundations.md`
+  - 说明当前 domain 层的聚合根和值对象规划。
+  - 说明为什么不按“每张表一个实体包”来拆。
 
 ### 数据库文档
 
@@ -36,4 +40,3 @@
 2. 平台的主要可扩展面是 Agent、Capability Pack、Agent Pool。
 3. Skill、Tool、Runtime 必须分层，不能糊成一张万能表。
 4. Requirement / Ticket / Task / Run / Workspace 是当前固定 coding workflow 的最小主链路。
-
