@@ -1,217 +1,323 @@
-# 状态机分层图
+# 状态机设计（L1-L5）
 
-这份文档只做一件事：
+这份文档只保留真正会影响实现的状态机信息。
 
-给出当前 AgentX Platform 的状态机分层总览，不在这里展开每层的具体状态迁移。
+先说术语：
 
-目的是先把“状态机应该挂在哪一层”说清楚，防止后面把所有状态揉成一张大图。
+“允许迁移表” 这个说法以后不用了，统一叫 **状态迁移矩阵**。
+它不是数据库表，只是一组规则：
 
-## 1. 总体原则
+1. 当前状态
+2. 触发命令
+3. 守卫条件
+4. 目标状态
+5. 副作用
 
-状态机采用自顶向下分层：
-
-1. 顶层流程机只表达“整个 workflow 走到哪一阶段”。
-2. 顶层节点执行机只表达“某个顶层节点的一次执行结果”。
-3. Intake 层表达需求文档和人工提请闭环。
-4. Planning 层表达 task DAG 的生命周期。
-5. Execution 层表达 run、snapshot、workspace 等执行工件状态。
-
-硬规则：
-
-1. 上层状态机不能去镜像下层所有细节。
-2. 下层状态变化可以影响上层投影，但不能直接篡改上层语义。
-3. LangGraph 后面只负责编排节点，不成为业务状态的事实源。
-4. `WorkflowRun = WAITING_HUMAN` 的前提不是“有 ticket”，而是存在至少一张 `GLOBAL_BLOCKING` 且未解决的 ticket，并且当前没有合法自动下一步。
-
-## 2. 分层总览图
+## 分层交互总图
 
 ```mermaid
 flowchart TB
-  WF["L1 WorkflowRun
-  顶层流程阶段机"]
-
-  NODE["L2 WorkflowNodeRun
-  顶层节点执行机"]
-
-  REQ["L3 RequirementDoc
-  需求闭环机"]
-  TICKET["L3 Ticket
-  人工提请机"]
-
-  TASK["L4 WorkTask
-  任务生命周期机"]
-
+  WR["L1 WorkflowRun
+  宏观阶段投影"]
+  NR["L2 WorkflowNodeRun
+  顶层节点执行"]
+  RD["L3 RequirementDoc
+  需求文档事实"]
+  TK["L3 Ticket
+  人工提请事实"]
+  WT["L4 WorkTask
+  任务生命周期"]
   SNAP["L5 TaskContextSnapshot
-  上下文快照机"]
+  上下文快照"]
   RUN["L5 TaskRun
-  执行尝试机"]
+  执行尝试"]
   WS["L5 GitWorkspace
-  工作区工件机"]
+  工作区工件"]
 
-  WF --> NODE
-  WF --> REQ
-  WF --> TICKET
-  WF --> TASK
+  NR --> RD
+  NR --> TK
+  NR --> WT
 
-  NODE --> REQ
-  NODE --> TICKET
-  NODE --> TASK
-
-  REQ --> TICKET
-  TICKET --> REQ
-  TICKET --> TASK
-
-  TASK --> SNAP
-  TASK --> RUN
-  RUN --> WS
+  RD -.-> WR
+  TK -.-> WR
+  WT -.-> WR
+  TK -.-> WT
+  WT --> SNAP
+  WT --> RUN
   SNAP --> RUN
-
-  classDef top fill:#E8F1FF,stroke:#4472C4,color:#111;
-  classDef intake fill:#EAF7EA,stroke:#3C8C4A,color:#111;
-  classDef plan fill:#FFF4E5,stroke:#C97A1A,color:#111;
-  classDef exec fill:#FDECEC,stroke:#C23B3B,color:#111;
-
-  class WF,NODE top;
-  class REQ,TICKET intake;
-  class TASK plan;
-  class SNAP,RUN,WS exec;
+  RUN --> WS
 ```
 
-## 3. 每层的职责
+这张图里有三个硬规则：
 
-### L1 `WorkflowRun`
+1. L1 是投影层，不拥有需求细节或 task 细节。
+2. L2 记录顶层节点执行，但不直接代替业务真相。
+3. L3/L4 是业务事实层，L5 是执行工件层。
 
-只负责描述整个固定 workflow 的大阶段。
+## L1-L5 各层职责
 
-它回答的问题是：
+| 层 | 当前对象 | 主要回答什么 |
+| --- | --- | --- |
+| L1 | `WorkflowRun` | 整条流程现在处于哪个宏观阶段 |
+| L2 | `WorkflowNodeRun` | 某个顶层节点这次执行是运行中、等待人工、成功还是失败 |
+| L3 | `RequirementDoc` / `Ticket` | 需求是否闭合，人工问题是否解决 |
+| L4 | `WorkTask` | 某个任务是否可执行、执行中、已交付候选、已真正完成 |
+| L5 | `TaskContextSnapshot` / `TaskRun` / `GitWorkspace` | 具体执行工件当前是否可用、在跑、成功、失败、已合并、已清理 |
 
-1. 当前流程还在 intake、planning、execution 还是 verify。
-2. 当前流程是否等待人工。
-3. 当前流程是否已经完成、失败或取消。
+## L1-L3 关键约束
 
-它不应该回答的问题是：
+1. `WorkflowRun = WAITING_ON_HUMAN` 的前提不是“有 ticket”，而是存在未解决的 `GLOBAL_BLOCKING` ticket 且当前没有合法自动下一步。
+2. `Ticket = ANSWERED` 不等于 `RESOLVED`。
+3. `RequirementDoc = CONFIRMED` 是进入 task graph 的前提，但后续仍可 reopen。
+4. 节点等待人工只是信号，L1 最终看的是 L3 真相。
 
-1. 某张 ticket 是否已回答。
-2. 某个 task 是否 delivered。
-3. 某个 task run 是否失败重试。
+## L4 `WorkTask` 设计
 
-### L2 `WorkflowNodeRun`
+这里要明确区分两件事：
 
-只记录顶层节点的一次执行。
+1. **当前代码里的 `WorkTaskStatus` 仍然是粗粒度枚举**
+2. **下面这套是目标状态机设计，用来指导后续实现**
 
-当前主要对应：
+目标状态建议收敛为：
 
-1. 需求代理
-2. 架构代理
-3. 验证代理
-4. 必要的系统节点
+1. `PLANNED`
+2. `READY`
+3. `IN_PROGRESS`
+4. `BLOCKED`
+5. `DELIVERED`
+6. `DONE`
+7. `FAILED`
+8. `CANCELED`
 
-这层的价值是把“顶层节点执行轨迹”和“子任务执行轨迹”隔开，不让 `task_runs` 侵入顶层流程语义。
+其中最关键的规则是：
 
-### L3 Intake 层
-
-包含两个状态机：
-
-1. `RequirementDoc`
-2. `Ticket`
-
-这层负责：
-
-1. 需求文档是否闭合。
-2. 哪些事实仍待澄清。
-3. 哪些问题必须经过人工回答。
-4. 一张 ticket 阻塞的是整个 workflow、单个 task，还是仅用于提示。
-
-这里是人机协作边界，不允许 worker 直接跨过去找人。
-
-### L4 Planning 层
-
-由 `WorkTask` 作为核心状态机承载。
-
-这层负责：
-
-1. task 何时可进入执行。
-2. task 是否被依赖阻塞。
-3. task 是否只是交付候选，还是已真正完成。
-
-后面讨论这层时要特别处理：
-
-1. `DELIVERED != DONE`
-2. DAG 依赖如何影响 task readiness
-
-### L5 Execution 层
-
-这里先保留三类状态机：
-
-1. `TaskContextSnapshot`
-2. `TaskRun`
-3. `GitWorkspace`
-
-这层负责的是真正的执行工件，不再直接表达业务需求语义。
-
-这里回答的问题是：
-
-1. 派发前的上下文是否 ready。
-2. 某次执行尝试现在在跑、成功还是失败。
-3. 工作区工件是否已经创建、合并、清理。
-
-## 4. 层间影响规则
-
-### 上推影响
-
-下层状态会影响上层投影，例如：
-
-1. `Ticket` 处于待回答，可能把 `WorkflowRun` 投影为等待人工。
-   这里只看 `GLOBAL_BLOCKING` ticket。
-2. `WorkTask` 全部完成，可能推动 `WorkflowRun` 进入 verify。
-3. `TaskRun` 失败，可能把 `WorkTask` 重新拉回阻塞或失败。
-
-### 禁止穿透
-
-但下面这些是禁止的：
-
-1. `TaskRun` 直接把 `WorkflowRun` 写成完成。
-2. `GitWorkspace` 直接决定 requirement 是否闭合。
-3. `Ticket` 跳过 `WorkTask` 直接驱动执行态。
-
-中间必须经过所属聚合或流程编排层。
-
-## 5. 后续讨论顺序
-
-为了避免一次讨论太多，后续状态机按下面顺序逐层展开：
-
-1. `WorkflowRun`
-2. `WorkflowNodeRun`
-3. `RequirementDoc`
-4. `Ticket`
-5. `WorkTask`
-6. `TaskRun`
-7. `TaskContextSnapshot`
-8. `GitWorkspace`
-
-每次只讨论一层，输出内容固定为：
-
-1. 状态集合
-2. 允许迁移
-3. 触发命令
-4. 关键约束
-
-## 6. 和 LangGraph 的关系
-
-后面接 LangGraph 时，这张分层图仍然成立：
-
-1. LangGraph 编排的是顶层固定节点。
-2. 数据库仍是状态真相来源。
-3. LangGraph 节点执行的是“命令”，不是直接代替状态机。
+`DELIVERED != DONE`
 
 也就是说：
 
-1. 状态机先定。
-2. 应用命令再定。
-3. 最后才把命令挂到 LangGraph 节点上。
+1. 编码代理完成代码和证据上传，只能把任务推进到 `DELIVERED`
+2. 只有经过 `合并闸门 + 验证代理`，任务才算 `DONE`
 
-## 7. 细化文档
+## L4 状态图
 
-L1-L3 的具体交互和小场景推演，继续展开见：
+```mermaid
+stateDiagram-v2
+  [*] --> PLANNED
 
-1. [`05-l1-l3-state-machine-interactions.md`](/D:/DeskTop/agentx-platform/docs/architecture/05-l1-l3-state-machine-interactions.md)
+  PLANNED --> READY: 依赖满足
+  PLANNED --> BLOCKED: 显式任务阻塞
+  PLANNED --> CANCELED: 流程取消
+
+  READY --> IN_PROGRESS: 工作代理管理器派发
+  READY --> BLOCKED: 任务级 ticket / 环境阻塞
+  READY --> CANCELED: 流程取消
+
+  IN_PROGRESS --> DELIVERED: 编码代理提交交付候选
+  IN_PROGRESS --> BLOCKED: 发现缺失事实 / 上下文失效
+  IN_PROGRESS --> FAILED: 不可恢复失败
+  IN_PROGRESS --> CANCELED: 流程取消
+
+  BLOCKED --> READY: 阻塞解除
+  BLOCKED --> CANCELED: 流程取消
+
+  DELIVERED --> DONE: 合并闸门和验证通过
+  DELIVERED --> READY: 需要返工但无新阻塞
+  DELIVERED --> BLOCKED: 需要补充事实或等待任务级回复
+
+  FAILED --> READY: 允许重试
+```
+
+## L4 状态迁移矩阵
+
+| 当前状态 | 触发命令 | 守卫条件 | 目标状态 | 副作用 |
+| --- | --- | --- | --- | --- |
+| `PLANNED` | `openTaskForDispatch` | DAG 依赖满足，且不存在 task blocker | `READY` | 标记可派发 |
+| `READY` | `dispatchTask` | agent instance、上下文快照、写域齐备 | `IN_PROGRESS` | 创建 `task_runs` |
+| `READY/IN_PROGRESS` | `blockTask` | 出现 `TASK_BLOCKING` ticket、环境缺失或依赖回退 | `BLOCKED` | 记录阻塞原因 |
+| `BLOCKED` | `unblockTask` | blocker 清除 | `READY` | 允许重新派发 |
+| `IN_PROGRESS` | `deliverTask` | task run 产出交付候选 | `DELIVERED` | 记录交付证据 |
+| `DELIVERED` | `acceptDelivery` | 合并闸门通过且验证通过 | `DONE` | 任务真正完成 |
+| `DELIVERED` | `requestRework` | 验证失败但仍在原任务范围内 | `READY` | 回到可返工状态 |
+| `IN_PROGRESS/DELIVERED` | `failTask` | 不可恢复失败 | `FAILED` | 记录失败 |
+
+## L4 和其他层怎么交互
+
+| 来源 | 作用到 `WorkTask` 的方式 |
+| --- | --- |
+| `架构代理 + 任务图` | 创建任务，初始为 `PLANNED` |
+| `Ticket` | `TASK_BLOCKING` 且未解决时，把任务投影为 `BLOCKED` |
+| `工作代理管理器` | 把 `READY` 派发为 `IN_PROGRESS` |
+| `编码代理池` | 让任务从 `IN_PROGRESS` 变成 `DELIVERED / BLOCKED / FAILED` |
+| `合并闸门 + 验证代理` | 让任务从 `DELIVERED` 变成 `DONE / READY / BLOCKED` |
+| `WorkflowRun` | 读取任务聚合结果，决定是否留在 `EXECUTING_TASKS` 或进入 `VERIFYING` |
+
+## L5 `Execution` 设计
+
+L5 只表达执行工件，不直接表达业务完成。
+
+这一层目前保留四个状态维度：
+
+1. `TaskContextSnapshotStatus`
+2. `TaskRunStatus`
+3. `GitWorkspaceStatus`
+4. `CleanupStatus`
+
+### 1. `TaskContextSnapshot`
+
+当前代码枚举：
+
+1. `BUILDING`
+2. `READY`
+3. `FAILED`
+4. `EXPIRED`
+
+它回答的问题是：
+
+1. 当前 task 的上下文和 skill 包是否已经编译好。
+2. 派发时引用的快照是否仍然有效。
+
+核心迁移矩阵：
+
+| 当前状态 | 触发命令 | 守卫条件 | 目标状态 | 副作用 |
+| --- | --- | --- | --- | --- |
+| `BUILDING` | `finishSnapshotBuild` | 上下文构建成功 | `READY` | 允许派发 task run |
+| `BUILDING` | `failSnapshotBuild` | 构建失败 | `FAILED` | 记录错误 |
+| `READY` | `expireSnapshot` | 指纹失效或保留期到期 | `EXPIRED` | 禁止继续派发 |
+
+### 2. `TaskRun`
+
+当前代码枚举：
+
+1. `QUEUED`
+2. `RUNNING`
+3. `SUCCEEDED`
+4. `FAILED`
+5. `CANCELED`
+
+它回答的问题是：
+
+1. 这次执行尝试有没有真正开始。
+2. 当前 agent instance 跑成了什么结果。
+
+核心迁移矩阵：
+
+| 当前状态 | 触发命令 | 守卫条件 | 目标状态 | 副作用 |
+| --- | --- | --- | --- | --- |
+| `QUEUED` | `startRun` | agent instance、快照、租约齐备 | `RUNNING` | 开始心跳 |
+| `RUNNING` | `completeRun` | 产出候选和证据 | `SUCCEEDED` | 回传交付结果 |
+| `RUNNING` | `failRun` | 执行不可恢复失败 | `FAILED` | 回传失败原因 |
+| `QUEUED/RUNNING` | `cancelRun` | 被上层取消或替换 | `CANCELED` | 停止执行 |
+
+关键规则：
+
+1. `TaskRun.SUCCEEDED != WorkTask.DONE`
+2. `TaskRun.SUCCEEDED` 最多只能支撑 L4 进入 `DELIVERED`
+
+### 3. `GitWorkspace`
+
+当前代码枚举：
+
+1. `PROVISIONING`
+2. `READY`
+3. `MERGED`
+4. `CLEANED`
+5. `FAILED`
+
+附属清理状态：
+
+1. `PENDING`
+2. `IN_PROGRESS`
+3. `DONE`
+4. `FAILED`
+
+它回答的问题是：
+
+1. 这个 task run 的 worktree 是否准备好。
+2. 合并候选是否已经物化。
+3. 清理是否完成。
+
+核心迁移矩阵：
+
+| 当前状态 | 触发命令 | 守卫条件 | 目标状态 | 副作用 |
+| --- | --- | --- | --- | --- |
+| `PROVISIONING` | `readyWorkspace` | worktree、branch、base commit 创建成功 | `READY` | 允许编码 |
+| `READY` | `mergeWorkspace` | 合并候选构造成功 | `MERGED` | 记录 `head_commit / merge_commit` |
+| `READY/MERGED` | `failWorkspace` | worktree 或 merge 失败 | `FAILED` | 记录失败 |
+| `MERGED` | `cleanupWorkspace` | 清理动作完成 | `CLEANED` | 回收 worktree |
+
+关键规则：
+
+1. `GitWorkspace.MERGED != WorkTask.DONE`
+2. `cleanupStatus` 是 `GitWorkspace` 的附属维度，不单独上升为业务主状态机
+
+## L4 和 L5 的关系
+
+| L4 状态 | 对 L5 的要求 |
+| --- | --- |
+| `READY` | 允许进入派发准备；真正派发前必须补齐 `READY` 的 `TaskContextSnapshot` |
+| `IN_PROGRESS` | 至少存在一个 `RUNNING` 的 `TaskRun`，通常伴随 `READY` 的 `GitWorkspace` |
+| `DELIVERED` | 至少存在一个 `SUCCEEDED` 的 `TaskRun`，并且交付候选已落到 workspace / 证据中 |
+| `DONE` | 不要求保留执行中工件，但需要有可追溯证据；workspace 可以是 `MERGED` 或后续 `CLEANED` |
+
+## 小场景：把 L4 放进主链
+
+场景还是 `/healthz`。
+
+1. L3 已经闭环：
+   - `RequirementDoc = CONFIRMED`
+   - 全局阻塞 ticket 已 `RESOLVED`
+2. 架构代理拆出任务 `healthz-endpoint`
+   - `WorkTask = PLANNED`
+3. 任务图确认没有前置依赖
+   - `PLANNED -> READY`
+4. 工作代理管理器分配编码代理实例
+   - `READY -> IN_PROGRESS`
+5. 编码代理实现接口，但发现探活返回格式还差一个字段，需要补一个任务级澄清
+   - 架构侧创建 `TASK_BLOCKING` ticket
+   - `IN_PROGRESS -> BLOCKED`
+   - 此时整个 `WorkflowRun` 仍可保持 `EXECUTING_TASKS`，不一定进入 `WAITING_ON_HUMAN`
+6. 任务级 ticket 回复并解决
+   - `BLOCKED -> READY -> IN_PROGRESS`
+7. 编码代理完成代码并上传证据
+   - `IN_PROGRESS -> DELIVERED`
+8. 合并闸门检查通过，验证代理通过
+   - `DELIVERED -> DONE`
+
+这个场景的关键点是：
+
+1. L3 的 `GLOBAL_BLOCKING` 影响整个流程。
+2. L4 的 `TASK_BLOCKING` 只影响单个任务。
+3. `DELIVERED` 是编码侧的完成，`DONE` 是流程侧的完成。
+
+## 同一场景下的 L5 工件
+
+继续上面的 `healthz-endpoint` 场景：
+
+1. 工作代理管理器准备上下文快照
+   - `TaskContextSnapshot: BUILDING -> READY`
+2. 任务被派发后创建执行尝试
+   - `TaskRun: QUEUED -> RUNNING`
+3. 同时准备 worktree
+   - `GitWorkspace: PROVISIONING -> READY`
+4. 编码代理完成并回传证据
+   - `TaskRun: RUNNING -> SUCCEEDED`
+   - L4 `WorkTask: IN_PROGRESS -> DELIVERED`
+5. 合并候选被物化
+   - `GitWorkspace: READY -> MERGED`
+6. 验证通过，任务被接受
+   - L4 `WorkTask: DELIVERED -> DONE`
+7. 收尾清理
+   - `CleanupStatus: PENDING -> IN_PROGRESS -> DONE`
+   - `GitWorkspace: MERGED -> CLEANED`
+
+这里要注意：
+
+1. `TaskRun.SUCCEEDED` 只说明这次尝试跑通了。
+2. `GitWorkspace.MERGED` 只说明候选已物化。
+3. 真正的业务完成仍然看 L4 `WorkTask.DONE`。
+
+## 和 LangGraph 的关系
+
+1. LangGraph 只编排顶层固定节点。
+2. `WorkTask` 不是 LangGraph 的业务真相源。
+3. L4/L5 的迁移命令会由顶层节点或 runtime 执行结果触发，但状态真相仍然落在聚合和数据库。
