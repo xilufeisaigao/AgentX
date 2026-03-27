@@ -1,6 +1,19 @@
 spring:
   application:
     name: agentx-platform
+  datasource:
+    url: ${AGENTX_DB_URL:jdbc:mysql://127.0.0.1:3306/agentx_platform?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai}
+    username: ${AGENTX_DB_USERNAME:root}
+    password: ${AGENTX_DB_PASSWORD:}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  flyway:
+    enabled: false
+
+mybatis:
+  type-handlers-package: com.agentx.platform.runtime.persistence.mybatis.typehandler
+  configuration:
+    map-underscore-to-camel-case: false
+    default-statement-timeout: 10
 
 management:
   endpoints:
@@ -17,4 +30,3 @@ agentx:
     agent:
       architect-suggestion-enabled: true
       architect-auto-pool-enabled: false
-

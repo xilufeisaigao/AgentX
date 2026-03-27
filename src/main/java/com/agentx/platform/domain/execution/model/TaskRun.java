@@ -1,5 +1,6 @@
 package com.agentx.platform.domain.execution.model;
 
+import java.time.LocalDateTime;
 import java.util.Objects;
 
 public record TaskRun(
@@ -8,7 +9,12 @@ public record TaskRun(
         String agentInstanceId,
         TaskRunStatus status,
         RunKind runKind,
-        String contextSnapshotId
+        String contextSnapshotId,
+        LocalDateTime leaseUntil,
+        LocalDateTime lastHeartbeatAt,
+        LocalDateTime startedAt,
+        LocalDateTime finishedAt,
+        String executionContractJson
 ) {
 
     public TaskRun {
@@ -18,5 +24,9 @@ public record TaskRun(
         Objects.requireNonNull(status, "status must not be null");
         Objects.requireNonNull(runKind, "runKind must not be null");
         Objects.requireNonNull(contextSnapshotId, "contextSnapshotId must not be null");
+        Objects.requireNonNull(leaseUntil, "leaseUntil must not be null");
+        Objects.requireNonNull(lastHeartbeatAt, "lastHeartbeatAt must not be null");
+        Objects.requireNonNull(startedAt, "startedAt must not be null");
+        Objects.requireNonNull(executionContractJson, "executionContractJson must not be null");
     }
 }

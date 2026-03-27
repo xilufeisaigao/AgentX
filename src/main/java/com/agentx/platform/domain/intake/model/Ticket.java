@@ -14,7 +14,8 @@ public record Ticket(
         ActorRef assignee,
         String originNodeId,
         String requirementDocId,
-        Integer requirementDocVersion
+        Integer requirementDocVersion,
+        String payloadJson
 ) {
 
     public Ticket {
@@ -25,5 +26,6 @@ public record Ticket(
         Objects.requireNonNull(title, "title must not be null");
         Objects.requireNonNull(createdBy, "createdBy must not be null");
         Objects.requireNonNull(assignee, "assignee must not be null");
+        Objects.requireNonNull(payloadJson, "payloadJson must not be null");
     }
 }

@@ -106,7 +106,13 @@
   - 应用能连上本地 MySQL
   - 能完成核心聚合的最小读写
 - 当前状态
-  - `PENDING`
+  - `DONE`
+- 备注
+  - 已切换到 `MyBatis + MySQL` 依赖基线，移除旧的 `Spring Data JDBC / PostgreSQL` 方向依赖。
+  - 已在 `runtime.persistence.mybatis` 下补齐 `config / mapper / repository / typehandler` 骨架，并按 `catalog / flow / intake / planning / execution` 五个流程切片实现领域端口适配。
+  - 为对齐表真相，已补齐 `Ticket / WorkTask / TaskContextSnapshot / TaskRun` 中用于持久化写入的关键必填字段。
+  - 验收通过：`AGENTX_DB_PASSWORD=*** ./mvnw -q test`
+  - 当前 `Flyway` 仅保留 MySQL 对齐配置，迁移脚本将在后续把现有 DDL 收敛为版本化迁移时再启用。
 
 ### P5 固定主流程应用骨架
 
@@ -140,7 +146,7 @@
 ## 本轮任务
 
 - 任务
-  - 完成 `domain` 层骨架并形成可继续扩展的基线。
+  - 完成 `domain` 与 `MyBatis` 持久化骨架，进入固定主流程实现前的可运行基线。
 - 验收
   - 新 `domain` 包结构落地
   - 相关文档更新

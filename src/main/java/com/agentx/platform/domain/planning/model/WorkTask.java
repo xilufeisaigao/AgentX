@@ -1,5 +1,7 @@
 package com.agentx.platform.domain.planning.model;
 
+import com.agentx.platform.domain.shared.model.ActorRef;
+
 import java.util.List;
 import java.util.Objects;
 
@@ -11,7 +13,8 @@ public record WorkTask(
         String taskTemplateId,
         WorkTaskStatus status,
         List<String> writeScopes,
-        String originTicketId
+        String originTicketId,
+        ActorRef createdBy
 ) {
 
     public WorkTask {
@@ -22,5 +25,6 @@ public record WorkTask(
         Objects.requireNonNull(taskTemplateId, "taskTemplateId must not be null");
         Objects.requireNonNull(status, "status must not be null");
         writeScopes = List.copyOf(Objects.requireNonNull(writeScopes, "writeScopes must not be null"));
+        Objects.requireNonNull(createdBy, "createdBy must not be null");
     }
 }
