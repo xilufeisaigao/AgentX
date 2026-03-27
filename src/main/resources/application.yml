@@ -1,0 +1,20 @@
+spring:
+  application:
+    name: agentx-platform
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+
+agentx:
+  platform:
+    workflow:
+      user-defined-enabled: false
+      agent-node-rebinding-enabled: true
+      parameter-override-enabled: true
+    agent:
+      architect-suggestion-enabled: true
+      architect-auto-pool-enabled: false
+
