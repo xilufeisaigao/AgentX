@@ -11,8 +11,9 @@
 1. [三层架构](architecture/01-three-layer-architecture.md)
 2. [固定工作流](architecture/02-fixed-coding-workflow.md)
 3. [领域基础语义](architecture/03-domain-foundations.md)
-4. [数据库分层关系图](database/01-table-layer-map.md)
-5. [数据库建表 SQL](../db/schema/agentx_platform_v1.sql)
+4. [状态机分层图](architecture/04-state-machine-layers.md)
+5. [数据库分层关系图](database/01-table-layer-map.md)
+6. [数据库建表 SQL](../db/schema/agentx_platform_v1.sql)
 
 ## 文档范围
 
@@ -26,6 +27,9 @@
 - `architecture/03-domain-foundations.md`
   - 说明当前 domain 层的聚合根和值对象规划。
   - 说明为什么不按“每张表一个实体包”来拆。
+- `architecture/04-state-machine-layers.md`
+  - 给出当前状态机设计的分层总览。
+  - 说明后续状态机讨论的自顶向下顺序。
 
 ### 数据库文档
 

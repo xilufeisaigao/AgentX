@@ -127,9 +127,10 @@
 2. `docs/architecture/01-three-layer-architecture.md`
 3. `docs/architecture/02-fixed-coding-workflow.md`
 4. `docs/architecture/03-domain-foundations.md`
-5. `docs/database/01-table-layer-map.md`
-6. `db/schema/agentx_platform_v1.sql`
-7. `progress.md`
+5. `docs/architecture/04-state-machine-layers.md`
+6. `docs/database/01-table-layer-map.md`
+7. `db/schema/agentx_platform_v1.sql`
+8. `progress.md`
 
 ## 6. 修改前检查清单
 
