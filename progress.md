@@ -83,7 +83,11 @@
   - 关键对象和端口已能表达数据库五层真相
   - 不依赖 Web / MyBatis / Docker / LangGraph 具体实现
 - 当前状态
-  - `IN_PROGRESS`
+  - `DONE`
+- 备注
+  - 已补齐 `shared / catalog / flow / intake / planning / execution` 六个切片下的 `model / policy / port` 领域骨架。
+  - 已修正启动类中的过期配置引用，当前骨架可独立编译。
+  - 验收通过：`./mvnw -q -DskipTests compile`
 
 ### P4 MyBatis 持久化骨架
 
@@ -136,7 +140,7 @@
 ## 本轮任务
 
 - 任务
-  - 重构整体包结构，先写出 `domain` 层。
+  - 完成 `domain` 层骨架并形成可继续扩展的基线。
 - 验收
   - 新 `domain` 包结构落地
   - 相关文档更新
