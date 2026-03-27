@@ -128,6 +128,7 @@
 3. `docs/architecture/02-fixed-coding-workflow.md`
 4. `docs/database/01-table-layer-map.md`
 5. `db/schema/agentx_platform_v1.sql`
+6. `progress.md`
 
 ## 6. 修改前检查清单
 
@@ -137,4 +138,4 @@
 4. 是否错误地让 worker 直接找人，而不是走 ticket。
 5. 是否把顶层节点执行和 task 执行混成一类 run。
 6. 是否引入了可推导但冗余的状态字段。
-
+7. 是否更新了 `progress.md` 并准备本地 git 提交。

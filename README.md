@@ -68,3 +68,4 @@
 2. `docs/architecture/01-three-layer-architecture.md`
 3. `docs/architecture/02-fixed-coding-workflow.md`
 4. `docs/database/01-table-layer-map.md`
+5. `progress.md`
