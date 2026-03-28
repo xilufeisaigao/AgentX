@@ -175,17 +175,156 @@
 - 当前状态
   - `PENDING`
 
+## 下一阶段执行计划
+
+### P5.1 真实执行链设计收口
+
+- 目标
+  - 先把固定主链从“fake 证明可行”收口到“真实执行接口已定型”。
+- 范围
+  - `runtime.application`
+  - `runtime.orchestration`
+  - `runtime.agentruntime`
+  - `runtime.workspace`
+- 产出
+  - 固定主链各节点的真实输入输出契约
+  - `worker-manager -> coding -> merge-gate -> verify` 的真实执行边界文档
+  - `TaskRun / GitWorkspace / Ticket / WorkflowRun` 的协作规则补充
+- 验收方式
+  - 文档能明确回答：
+    - agent 如何拿到上下文
+    - capability / tool / runtime pack 如何进入执行环境
+    - task run 结束后哪些证据进入 merge gate
+    - 什么情况下回 architect，什么情况下直接失败
+  - 不引入新的胶水 DTO 层
+- 当前状态
+  - `PENDING`
+
+### P5.2 Docker 执行环境基线
+
+- 目标
+  - 让 worker 真正跑在可控的容器环境里，而不是本地 fake adapter 直接返回结果。
+- 范围
+  - `runtime.agentruntime.docker`
+  - `runtime.support`
+  - `runtime.persistence`
+- 产出
+  - Docker worker runtime 最小适配
+  - 基础镜像/运行参数约定
+  - task run 与 container 生命周期绑定
+  - container 启动失败、退出码、stderr 的证据回写
+- 验收方式
+  - `worker-manager` 能为一个 `READY` task 拉起容器执行
+  - `task_runs` 中可看到真实开始/结束/失败证据
+  - 容器失败时可落成 `task_run_events`
+- 当前状态
+  - `PENDING`
+
+### P5.3 真实 Git Worktree 分配
+
+- 目标
+  - 把当前 synthetic workspace 替换为真实 git worktree 分配。
+- 范围
+  - `runtime.workspace.git`
+  - `runtime.application`
+- 产出
+  - repo root / branch / worktree 的真实分配策略
+  - 每个 task run 独立 worktree
+  - worktree 清理与复用规则
+- 验收方式
+  - 启动 task run 时能真实创建 worktree
+  - `git_workspaces` 中记录真实路径、分支、base commit
+  - task 结束后 workspace 状态能真实推进
+- 当前状态
+  - `PENDING`
+
+### P5.4 Merge Gate 落地
+
+- 目标
+  - 把 merge-gate 从逻辑占位变成真实代码交付闸门。
+- 范围
+  - `runtime.workspace.git`
+  - `runtime.application`
+  - `runtime.agentruntime`
+- 产出
+  - 提交产物检查
+  - 基础 diff/changed-files 校验
+  - 合并尝试与冲突处理基线
+  - merge 证据回写
+- 验收方式
+  - `DELIVERED` task 能进入真实 merge attempt
+  - merge 成功后写回 `merge_commit`
+  - merge 冲突时不会误标 `DONE`，而是回 architect 或转 ticket
+- 当前状态
+  - `PENDING`
+
+### P5.5 DAG 与任务拆分可用化
+
+- 目标
+  - 先把 DAG 和任务拆分做到“可用”，不急着做复杂优化。
+- 范围
+  - `runtime.agentruntime.local`
+  - `runtime.application`
+  - `domain.planning`
+- 产出
+  - 多 task DAG 基线
+  - 任务依赖与 `READY` 判定
+  - capability requirement 与 agent instance 匹配基线
+- 验收方式
+  - 一个 workflow 至少能拆成 2-3 个 task
+  - 依赖未满足的 task 不会被错误派发
+  - 上游完成后下游 task 能自动进入 `READY`
+- 当前状态
+  - `PENDING`
+
+### P5.6 Verify 与返工闭环
+
+- 目标
+  - 把 verify 从 fake acceptor 补成真正的交付闭环节点。
+- 范围
+  - `runtime.application`
+  - `runtime.agentruntime`
+  - `runtime.workspace`
+- 产出
+  - 验证命令/脚本执行基线
+  - 验证失败后的返工路径
+  - `DONE` 判定收口
+- 验收方式
+  - verify 不再只按开关返回结果
+  - 失败能产生证据并回 architect
+  - 通过后 `WorkTask -> DONE` 的条件清晰且可测
+- 当前状态
+  - `PENDING`
+
+### P5.7 Supervisor 最小闭环
+
+- 目标
+  - 补齐 runtime 监督能力，避免 worker 掉线后流程失真。
+- 范围
+  - `runtime.support`
+  - `runtime.application`
+  - `runtime.persistence`
+- 产出
+  - heartbeat 更新
+  - lease timeout 检测
+  - worker 失联后的 run 终止/重派发/升级基线
+- 验收方式
+  - 能模拟一个 worker 失联场景
+  - 超时后 `task_runs`、`agent_pool_instances`、`workflow_runs` 状态一致
+  - 必要时会升级给 architect/ticket，而不是静默挂死
+- 当前状态
+  - `PENDING`
+
 ## 本轮任务
 
 - 任务
-  - 实现 Runtime V1 固定主链闭环，并归档实现边界与 deferred 清单。
+  - 输出 Runtime 后续补齐计划，并按“先核心流程、后控制面”的顺序冻结下一阶段优先级。
 - 验收
-  - `start / runUntilStable / answerTicket / getRuntimeSnapshot` 已可用
-  - happy path、clarification-resume、idempotency 三类集成测试通过
-  - 已归档 Runtime V1 实现文档
-  - 已归档 deferred 文档
-  - `docs/README.md`、`README.md`、`AGENTS.md`、`progress.md` 已同步
-  - 完成一次清晰的本地 git 提交
+  - `progress.md` 已新增 P5.1-P5.7 的执行计划
+  - 执行顺序已体现：
+    - 先真实执行链设计
+    - 再 Docker / Git Worktree / Merge Gate
+    - 再 DAG 可用化 / Verify / Supervisor
+  - 当前不提前启动 controlplane / 展示面
 - 结果
-  - 已验证：`AGENTX_DB_PASSWORD=*** ./mvnw -q test`
-  - 待补：本地 git 提交
+  - 待执行
