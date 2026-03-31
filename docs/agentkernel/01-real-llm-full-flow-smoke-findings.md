@@ -38,14 +38,14 @@ $env:AGENTX_DEEPSEEK_API_KEY='***'
 
 本次最新运行目录：
 
-- `D:\DeskTop\agentx-platform\target\real-llm-smoke\student-management-runtime-1774799138165`
+- `target/real-llm-smoke/student-management-runtime-1774799138165`
 
 关键信息：
 
 - 评估与 fallback 记录：
-  - `D:\DeskTop\agentx-platform\target\real-llm-smoke\student-management-runtime-1774799138165\artifacts\evaluation-plan.json`
+  - `target/real-llm-smoke/student-management-runtime-1774799138165/artifacts/evaluation-plan.json`
 - workflow 最终结果：
-  - `D:\DeskTop\agentx-platform\target\real-llm-smoke\student-management-runtime-1774799138165\artifacts\workflow-result.json`
+  - `target/real-llm-smoke/student-management-runtime-1774799138165/artifacts/workflow-result.json`
 - 各节点真实原始输出：
   - `requirement-first-real.json`
   - `requirement-second-real.json`
@@ -54,7 +54,7 @@ $env:AGENTX_DEEPSEEK_API_KEY='***'
   - `coding-tests-real.json`
   - `verify-real.json`
 - 方便人工审阅的代码 bundle：
-  - `D:\DeskTop\agentx-platform\target\real-llm-smoke\student-management-runtime-1774799138165\review-bundle`
+  - `target/real-llm-smoke/student-management-runtime-1774799138165/review-bundle`
 
 说明：
 
@@ -164,7 +164,7 @@ $env:AGENTX_DEEPSEEK_API_KEY='***'
 本次导出的 `review-bundle` 已额外执行：
 
 ```powershell
-.\mvnw.cmd -q -f D:\DeskTop\agentx-platform\target\real-llm-smoke\student-management-runtime-1774799138165\review-bundle\pom.xml test
+.\mvnw.cmd -q -f .\target\real-llm-smoke\student-management-runtime-1774799138165\review-bundle\pom.xml test
 ```
 
 结果：通过
