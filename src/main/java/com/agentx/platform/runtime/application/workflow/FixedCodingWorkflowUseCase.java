@@ -8,5 +8,9 @@ public interface FixedCodingWorkflowUseCase {
 
     WorkflowRuntimeSnapshot answerTicket(AnswerTicketCommand command);
 
+    WorkflowRuntimeSnapshot confirmRequirementDoc(ConfirmRequirementDocCommand command);
+
+    WorkflowRuntimeSnapshot editRequirementDoc(EditRequirementDocCommand command);
+
     WorkflowRuntimeSnapshot getRuntimeSnapshot(String workflowRunId);
 }

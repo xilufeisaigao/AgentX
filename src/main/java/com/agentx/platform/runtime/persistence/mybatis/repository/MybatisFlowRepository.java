@@ -85,6 +85,24 @@ public class MybatisFlowRepository implements FlowStore {
     }
 
     @Override
+    public List<WorkflowRun> listRunsByStatuses(List<WorkflowRunStatus> statuses) {
+        if (statuses.isEmpty()) {
+            return List.of();
+        }
+        return flowMapper.listRunRowsByStatuses(statuses.stream().map(Enum::name).toList()).stream()
+                .map(row -> new WorkflowRun(
+                        MybatisRowReader.string(row, "workflowRunId"),
+                        MybatisRowReader.string(row, "workflowTemplateId"),
+                        MybatisRowReader.string(row, "title"),
+                        MybatisRowReader.enumValue(row, "status", WorkflowRunStatus.class),
+                        MybatisRowReader.enumValue(row, "entryMode", EntryMode.class),
+                        MybatisRowReader.bool(row, "autoAgentMode"),
+                        actor(row, "createdByActorType", "createdByActorId")
+                ))
+                .toList();
+    }
+
+    @Override
     public List<WorkflowNodeBinding> listNodeBindings(String workflowRunId) {
         return flowMapper.listNodeBindingRows(workflowRunId).stream()
                 .map(row -> new WorkflowNodeBinding(

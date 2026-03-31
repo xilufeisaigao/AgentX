@@ -24,9 +24,17 @@ public interface ExecutionStore {
 
     List<TaskRun> listTaskRuns(String taskId);
 
+    List<TaskRunEvent> listTaskRunEvents(String runId);
+
+    List<TaskRun> listActiveTaskRuns();
+
     Optional<GitWorkspace> findWorkspaceByRun(String runId);
 
     List<GitWorkspace> listWorkspaces(String taskId);
+
+    List<GitWorkspace> listWorkspacesPendingCleanup();
+
+    List<AgentPoolInstance> listActiveAgentInstances();
 
     void saveAgentInstance(AgentPoolInstance agentPoolInstance);
 

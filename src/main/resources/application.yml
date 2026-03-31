@@ -30,3 +30,29 @@ agentx:
     agent:
       architect-suggestion-enabled: true
       architect-auto-pool-enabled: false
+    model:
+      timeout: ${AGENTX_MODEL_TIMEOUT:PT20S}
+      max-retries: ${AGENTX_MODEL_MAX_RETRIES:1}
+      deepseek:
+        base-url: ${AGENTX_DEEPSEEK_BASE_URL:https://api.deepseek.com}
+        api-key: ${AGENTX_DEEPSEEK_API_KEY:}
+    runtime:
+      repo-root: ${AGENTX_RUNTIME_REPO_ROOT:${user.dir}}
+      base-branch: ${AGENTX_RUNTIME_BASE_BRANCH:HEAD}
+      workspace-root: ${AGENTX_RUNTIME_WORKSPACE_ROOT:${java.io.tmpdir}/agentx-runtime-workspaces}
+      dispatch-batch-size: ${AGENTX_RUNTIME_DISPATCH_BATCH_SIZE:4}
+      lease-ttl: ${AGENTX_RUNTIME_LEASE_TTL:PT20S}
+      heartbeat-interval: ${AGENTX_RUNTIME_HEARTBEAT_INTERVAL:PT5S}
+      supervisor-scan-interval: ${AGENTX_RUNTIME_SUPERVISOR_SCAN_INTERVAL:PT2S}
+      driver-scan-interval: ${AGENTX_RUNTIME_DRIVER_SCAN_INTERVAL:PT2S}
+      blocking-poll-interval: ${AGENTX_RUNTIME_BLOCKING_POLL_INTERVAL:PT0.2S}
+      blocking-timeout: ${AGENTX_RUNTIME_BLOCKING_TIMEOUT:PT45S}
+      max-run-attempts: ${AGENTX_RUNTIME_MAX_RUN_ATTEMPTS:2}
+      driver-enabled: ${AGENTX_RUNTIME_DRIVER_ENABLED:true}
+      supervisor-enabled: ${AGENTX_RUNTIME_SUPERVISOR_ENABLED:true}
+      docker:
+        binary: ${AGENTX_RUNTIME_DOCKER_BINARY:docker}
+        network-mode: ${AGENTX_RUNTIME_DOCKER_NETWORK_MODE:bridge}
+    evaluation:
+      artifact-root: ${AGENTX_EVAL_ARTIFACT_ROOT:${user.dir}/artifacts/evaluation-runs}
+      trace-collection-enabled: ${AGENTX_EVAL_TRACE_COLLECTION_ENABLED:true}

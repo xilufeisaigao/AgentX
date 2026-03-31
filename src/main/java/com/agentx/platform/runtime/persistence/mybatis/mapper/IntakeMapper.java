@@ -71,6 +71,7 @@ public interface IntakeMapper {
               origin_node_id as originNodeId,
               requirement_doc_id as requirementDocId,
               requirement_doc_ver as requirementDocVersion,
+              task_id as taskId,
               payload_json as payloadJson
             from tickets
             where ticket_id = #{ticketId}
@@ -92,12 +93,28 @@ public interface IntakeMapper {
               origin_node_id as originNodeId,
               requirement_doc_id as requirementDocId,
               requirement_doc_ver as requirementDocVersion,
+              task_id as taskId,
               payload_json as payloadJson
             from tickets
             where workflow_run_id = #{workflowRunId}
             order by created_at, ticket_id
             """)
     List<Map<String, Object>> listTicketRows(@Param("workflowRunId") String workflowRunId);
+
+    @Select("""
+            select
+              event_id as eventId,
+              ticket_id as ticketId,
+              event_type as eventType,
+              actor_type as actorType,
+              actor_id as actorId,
+              body,
+              data_json as dataJson
+            from ticket_events
+            where ticket_id = #{ticketId}
+            order by created_at, event_id
+            """)
+    List<Map<String, Object>> listTicketEventRows(@Param("ticketId") String ticketId);
 
     @Select("""
             select
@@ -114,6 +131,7 @@ public interface IntakeMapper {
               origin_node_id as originNodeId,
               requirement_doc_id as requirementDocId,
               requirement_doc_ver as requirementDocVersion,
+              task_id as taskId,
               payload_json as payloadJson
             from tickets
             where workflow_run_id = #{workflowRunId}
@@ -121,6 +139,18 @@ public interface IntakeMapper {
             order by created_at, ticket_id
             """)
     List<Map<String, Object>> listOpenTicketRows(@Param("workflowRunId") String workflowRunId);
+
+    @Select("""
+            select count(*) > 0
+            from tickets
+            where blocking_scope = 'TASK_BLOCKING'
+              and status not in ('RESOLVED', 'CANCELED')
+              and (
+                task_id = #{taskId}
+                or (task_id is null and json_unquote(json_extract(payload_json, '$.taskId')) = #{taskId})
+              )
+            """)
+    boolean hasOpenTaskBlocker(@Param("taskId") String taskId);
 
     @Insert("""
             insert into requirement_docs (
@@ -183,6 +213,7 @@ public interface IntakeMapper {
               origin_node_id,
               requirement_doc_id,
               requirement_doc_ver,
+              task_id,
               payload_json
             ) values (
               #{ticket.ticketId},
@@ -198,6 +229,7 @@ public interface IntakeMapper {
               #{ticket.originNodeId},
               #{ticket.requirementDocId},
               #{ticket.requirementDocVersion},
+              #{ticket.taskId},
               cast(#{ticket.payloadJson.json} as json)
             )
             on duplicate key update
@@ -210,6 +242,7 @@ public interface IntakeMapper {
               origin_node_id = values(origin_node_id),
               requirement_doc_id = values(requirement_doc_id),
               requirement_doc_ver = values(requirement_doc_ver),
+              task_id = values(task_id),
               payload_json = values(payload_json)
             """)
     void upsertTicket(

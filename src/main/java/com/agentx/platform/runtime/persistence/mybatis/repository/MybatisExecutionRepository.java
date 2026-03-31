@@ -77,6 +77,26 @@ public class MybatisExecutionRepository implements ExecutionStore {
     }
 
     @Override
+    public List<TaskRunEvent> listTaskRunEvents(String runId) {
+        return executionMapper.listTaskRunEventRows(runId).stream()
+                .map(row -> new TaskRunEvent(
+                        MybatisRowReader.string(row, "eventId"),
+                        MybatisRowReader.string(row, "runId"),
+                        MybatisRowReader.string(row, "eventType"),
+                        MybatisRowReader.string(row, "body"),
+                        MybatisRowReader.nullableJsonPayload(row, "dataJson")
+                ))
+                .toList();
+    }
+
+    @Override
+    public List<TaskRun> listActiveTaskRuns() {
+        return executionMapper.listActiveTaskRunRows().stream()
+                .map(this::taskRun)
+                .toList();
+    }
+
+    @Override
     public Optional<GitWorkspace> findWorkspaceByRun(String runId) {
         Map<String, Object> row = executionMapper.findWorkspaceByRunRow(runId);
         if (MybatisRowReader.isEmpty(row)) {
@@ -89,6 +109,20 @@ public class MybatisExecutionRepository implements ExecutionStore {
     public List<GitWorkspace> listWorkspaces(String taskId) {
         return executionMapper.listWorkspaceRows(taskId).stream()
                 .map(this::workspace)
+                .toList();
+    }
+
+    @Override
+    public List<GitWorkspace> listWorkspacesPendingCleanup() {
+        return executionMapper.listWorkspaceRowsPendingCleanup().stream()
+                .map(this::workspace)
+                .toList();
+    }
+
+    @Override
+    public List<AgentPoolInstance> listActiveAgentInstances() {
+        return executionMapper.listActiveAgentRows().stream()
+                .map(this::agent)
                 .toList();
     }
 

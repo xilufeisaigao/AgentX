@@ -1,0 +1,59 @@
+{
+  "scenarioId": "student-management-validation-real-strict",
+  "profileId": "java-backend-maven",
+  "workflowTitle": "Student Management Validation Strict Real Eval",
+  "requirementTitle": "学生管理系统校验增强",
+  "initialPrompt": "做一个学生管理系统，重点把输入校验和错误处理做好",
+  "scriptedHumanResponses": [
+    {
+      "originNodeId": "requirement",
+      "ticketType": "CLARIFICATION",
+      "answer": "这是一个最小后端版本，不需要前端，也不接数据库。需要支持学生新增、查询、更新、删除。学生字段至少包含学号、姓名、年级、邮箱。学号、姓名和邮箱必填，邮箱格式必须合法。重复学号不能创建成功，更新不存在的学生要返回不存在，删除后再次查询也应返回不存在。需要补齐最小回归测试，重点覆盖必填校验、邮箱校验、重复学号、更新不存在和删除后查询。"
+    }
+  ],
+  "autoConfirmRequirementDoc": true,
+  "repoFixtureId": "student-management-java",
+  "agentModelOverrides": {
+    "requirement-agent": "gpt-5.4",
+    "architect-agent": "gpt-5.4",
+    "coding-agent-java": "gpt-5.4",
+    "verify-agent-java": "gpt-5.4"
+  },
+  "workflowScenario": {
+    "requireHumanClarification": false,
+    "architectCanAutoResolveClarification": false,
+    "verifyNeedsRework": false
+  },
+  "expectations": {
+    "expectedBehavior": "严格真实 LLM 全流程评测，重点观察校验规则、错误路径和测试覆盖是否进入完整 workflow 证据。",
+    "expectedFacts": [
+      "重复学号不能创建成功",
+      "邮箱格式必须合法",
+      "更新不存在的学生要返回不存在",
+      "最小回归测试"
+    ],
+    "expectedSnippetRefs": [
+      "Student.java",
+      "StudentService.java",
+      "StudentServiceTest.java"
+    ],
+    "expectedNodeOrder": [
+      "requirement",
+      "architect",
+      "ticket-gate",
+      "task-graph",
+      "worker-manager",
+      "coding",
+      "merge-gate",
+      "verify"
+    ],
+    "repoContextRequired": true
+  },
+  "stopPolicy": {
+    "maxHumanInteractions": 2,
+    "terminateActiveRunsOnAbort": true,
+    "disallowSyntheticAdvance": true,
+    "terminateOnProviderFailure": true,
+    "terminateOnSchemaFailure": true
+  }
+}

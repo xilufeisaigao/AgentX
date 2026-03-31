@@ -1,0 +1,4 @@
+interface:
+  display_name: "Capability Profile Author"
+  short_description: "Scaffold and revise AgentX profiles"
+  default_prompt: "Use $agentx-capability-profile-author to create or revise an AgentX capability profile and its five-piece scaffold."

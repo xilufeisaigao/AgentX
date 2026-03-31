@@ -17,6 +17,8 @@ public interface CatalogStore {
 
     Optional<CapabilityPack> findCapabilityPack(String capabilityPackId);
 
+    List<AgentDefinition> listAgentsByCapability(String capabilityPackId);
+
     List<AgentCapabilityBinding> listAgentCapabilityBindings(String agentId);
 
     List<CapabilityRuntimeRequirement> listCapabilityRuntimeRequirements(String capabilityPackId);
@@ -26,4 +28,8 @@ public interface CatalogStore {
     List<CapabilitySkillGrant> listCapabilitySkillGrants(String capabilityPackId);
 
     List<SkillToolBinding> listSkillToolBindings(String skillId);
+
+    void saveAgent(AgentDefinition agentDefinition);
+
+    void replaceAgentCapabilityBindings(String agentId, List<AgentCapabilityBinding> bindings);
 }

@@ -42,18 +42,20 @@ public class FixedCodingGraphFactory {
             graph.addNode("verify", state -> completed(nodeExecutor.verifyNode(state)));
 
             graph.addEdge(StateGraph.START, "requirement");
-            graph.addEdge("requirement", "architect");
+            graph.addConditionalEdges("requirement",
+                    state -> completed(nodeExecutor.routeAfterRequirement(state)),
+                    Map.of("architect", "architect", "ticket-gate", "ticket-gate"));
             graph.addConditionalEdges("architect",
                     state -> completed(nodeExecutor.routeAfterArchitect(state)),
                     Map.of("ticket-gate", "ticket-gate", "task-graph", "task-graph"));
             graph.addConditionalEdges("ticket-gate",
                     state -> completed(nodeExecutor.routeAfterTicketGate(state)),
-                    Map.of("architect", "architect", "end", StateGraph.END));
+                    Map.of("requirement", "requirement", "architect", "architect", "end", StateGraph.END));
             graph.addEdge("task-graph", "worker-manager");
             graph.addEdge("worker-manager", "coding");
             graph.addConditionalEdges("coding",
                     state -> completed(nodeExecutor.routeAfterCoding(state)),
-                    Map.of("architect", "architect", "merge-gate", "merge-gate"));
+                    Map.of("architect", "architect", "merge-gate", "merge-gate", "end", StateGraph.END));
             graph.addEdge("merge-gate", "verify");
             graph.addConditionalEdges("verify",
                     state -> completed(nodeExecutor.routeAfterVerify(state)),

@@ -14,9 +14,15 @@ public interface PlanningStore {
 
     List<WorkTask> listTasksByWorkflow(String workflowRunId);
 
+    List<String> claimReadyTaskIdsForDispatch(int limit);
+
     Optional<WorkTask> findTask(String taskId);
 
+    Optional<String> findWorkflowRunIdByTask(String taskId);
+
     List<TaskDependency> listDependencies(String workflowRunId);
+
+    List<TaskDependency> listDependenciesForTask(String taskId);
 
     List<TaskCapabilityRequirement> listCapabilityRequirements(String taskId);
 

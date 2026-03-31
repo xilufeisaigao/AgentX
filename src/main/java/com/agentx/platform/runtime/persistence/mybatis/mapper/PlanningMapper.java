@@ -48,6 +48,17 @@ public interface PlanningMapper {
 
     @Select("""
             select
+              wt.task_id as taskId
+            from work_tasks wt
+            where wt.status = 'READY'
+            order by wt.created_at, wt.task_id
+            limit #{limit}
+            for update skip locked
+            """)
+    List<String> claimReadyTaskIdsForDispatch(@Param("limit") int limit);
+
+    @Select("""
+            select
               task_id as taskId,
               module_id as moduleId,
               title,
@@ -65,6 +76,15 @@ public interface PlanningMapper {
 
     @Select("""
             select
+              wm.workflow_run_id
+            from work_tasks wt
+            join work_modules wm on wm.module_id = wt.module_id
+            where wt.task_id = #{taskId}
+            """)
+    String findWorkflowRunIdByTask(@Param("taskId") String taskId);
+
+    @Select("""
+            select
               d.task_id as taskId,
               d.depends_on_task_id as dependsOnTaskId,
               d.required_upstream_status as requiredUpstreamStatus
@@ -75,6 +95,17 @@ public interface PlanningMapper {
             order by d.task_id, d.depends_on_task_id
             """)
     List<Map<String, Object>> listDependencyRows(@Param("workflowRunId") String workflowRunId);
+
+    @Select("""
+            select
+              task_id as taskId,
+              depends_on_task_id as dependsOnTaskId,
+              required_upstream_status as requiredUpstreamStatus
+            from work_task_dependencies
+            where task_id = #{taskId}
+            order by depends_on_task_id
+            """)
+    List<Map<String, Object>> listDependencyRowsForTask(@Param("taskId") String taskId);
 
     @Select("""
             select

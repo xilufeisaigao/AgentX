@@ -1,0 +1,65 @@
+{
+  "scenarioId": "ts-fullstack-student-status-filter",
+  "profileId": "ts-fullstack-pnpm-monorepo",
+  "workflowTitle": "TS Fullstack Student Status Filter Strict Eval",
+  "requirementTitle": "学生门户状态筛选",
+  "initialPrompt": "在这个 pnpm monorepo 的学生门户里新增学生状态筛选能力，要同步更新 shared contract、API 查询参数和前端筛选 UI，并补最小回归测试。",
+  "scriptedHumanResponses": [
+    {
+      "originNodeId": "requirement",
+      "ticketType": "CLARIFICATION",
+      "answer": "目录固定为 apps/web、apps/api、packages/shared。这个需求只改现有学生列表页，对应 apps/web/src/studentPage.ts 和 apps/web/src/studentFilters.ts。shared 仍是前后端共享契约唯一来源。状态筛选是单选，选项固定为 ALL、ACTIVE、INACTIVE，默认 ALL。ACTIVE 表示当前在读并应展示在活动名单中；INACTIVE 表示停用或非在读但仍保留档案。shared contract 里给 StudentListFilter 新增可选 status?: StudentStatus；未传 status 表示全部。API 查询参数名固定为 status，类型为 StudentStatus，未传表示不过滤；与 query 同时出现时按 AND 逻辑组合。不要改 pnpm-workspace.yaml、不要引入新的依赖、也不要做浏览器 E2E。最小回归测试至少覆盖 shared contract、API status 过滤，以及前端页面模型会暴露 ACTIVE/INACTIVE 选项并保留当前选中状态。"
+    },
+    {
+      "originNodeId": "requirement",
+      "ticketType": "CLARIFICATION",
+      "answer": "补充验收细节：无结果时前端仍返回页面模型并保留当前筛选状态，students 应为空数组；非法 status 值在 API 解析阶段应返回明确的校验错误，不要静默吞掉；现有 query-only 请求必须保持兼容。文案维持当前英文风格即可，不需要大改页面结构。"
+    }
+  ],
+  "autoConfirmRequirementDoc": true,
+  "repoFixtureId": "ts-fullstack-student-portal",
+  "agentModelOverrides": {
+    "requirement-agent": "gpt-5.4",
+    "architect-agent": "gpt-5.4",
+    "coding-agent-ts-fullstack": "gpt-5.4",
+    "verify-agent-ts-fullstack": "gpt-5.4"
+  },
+  "workflowScenario": {
+    "requireHumanClarification": false,
+    "architectCanAutoResolveClarification": false,
+    "verifyNeedsRework": false
+  },
+  "expectations": {
+    "expectedBehavior": "真实 LLM 在固定主链里完成 shared/api/web 三层的状态筛选联动；如果 provider 或 schema 失败就立刻终止并输出部分报告。",
+    "expectedFacts": [
+      "shared contract 是前后端唯一来源",
+      "学生状态筛选",
+      "API 查询参数",
+      "前端筛选 UI",
+      "最小回归测试"
+    ],
+    "expectedSnippetRefs": [
+      "packages/shared/src/student.ts",
+      "apps/api/src/studentService.ts",
+      "apps/web/src/studentPage.ts"
+    ],
+    "expectedNodeOrder": [
+      "requirement",
+      "architect",
+      "ticket-gate",
+      "task-graph",
+      "worker-manager",
+      "coding",
+      "merge-gate",
+      "verify"
+    ],
+    "repoContextRequired": true
+  },
+  "stopPolicy": {
+    "maxHumanInteractions": 4,
+    "terminateActiveRunsOnAbort": true,
+    "disallowSyntheticAdvance": true,
+    "terminateOnProviderFailure": true,
+    "terminateOnSchemaFailure": true
+  }
+}

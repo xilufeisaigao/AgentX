@@ -1,0 +1,11 @@
+{
+  "name": "ts-fullstack-student-portal",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@8.15.9",
+  "scripts": {
+    "test": "node --experimental-strip-types --test apps/api/test/student-api.test.ts packages/shared/test/shared-contract.test.ts",
+    "verify:api": "node --experimental-strip-types scripts/verify-api.ts",
+    "verify:integration": "node --experimental-strip-types scripts/verify-integration.ts"
+  }
+}

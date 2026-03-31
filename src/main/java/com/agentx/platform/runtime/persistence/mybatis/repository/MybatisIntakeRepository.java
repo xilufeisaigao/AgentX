@@ -68,10 +68,29 @@ public class MybatisIntakeRepository implements IntakeStore {
     }
 
     @Override
+    public List<TicketEvent> listTicketEvents(String ticketId) {
+        return intakeMapper.listTicketEventRows(ticketId).stream()
+                .map(row -> new TicketEvent(
+                        MybatisRowReader.string(row, "eventId"),
+                        MybatisRowReader.string(row, "ticketId"),
+                        MybatisRowReader.string(row, "eventType"),
+                        actor(row, "actorType", "actorId"),
+                        MybatisRowReader.string(row, "body"),
+                        MybatisRowReader.nullableJsonPayload(row, "dataJson")
+                ))
+                .toList();
+    }
+
+    @Override
     public List<Ticket> listOpenTickets(String workflowRunId) {
         return intakeMapper.listOpenTicketRows(workflowRunId).stream()
                 .map(this::ticket)
                 .toList();
+    }
+
+    @Override
+    public boolean hasOpenTaskBlocker(String taskId) {
+        return intakeMapper.hasOpenTaskBlocker(taskId);
     }
 
     @Override
@@ -136,6 +155,7 @@ public class MybatisIntakeRepository implements IntakeStore {
                 MybatisRowReader.nullableString(row, "originNodeId"),
                 MybatisRowReader.nullableString(row, "requirementDocId"),
                 MybatisRowReader.nullableInteger(row, "requirementDocVersion"),
+                MybatisRowReader.nullableString(row, "taskId"),
                 MybatisRowReader.jsonPayload(row, "payloadJson")
         );
     }

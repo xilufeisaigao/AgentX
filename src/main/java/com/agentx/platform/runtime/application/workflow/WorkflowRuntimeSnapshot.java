@@ -12,10 +12,12 @@ import com.agentx.platform.domain.planning.model.WorkTask;
 
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 
 public record WorkflowRuntimeSnapshot(
         WorkflowRun workflowRun,
-        RequirementDoc requirementDoc,
+        Optional<WorkflowProfileRef> workflowProfile,
+        Optional<RequirementDoc> requirementDoc,
         List<RequirementVersion> requirementVersions,
         List<Ticket> tickets,
         List<WorkTask> tasks,
@@ -27,7 +29,8 @@ public record WorkflowRuntimeSnapshot(
 
     public WorkflowRuntimeSnapshot {
         Objects.requireNonNull(workflowRun, "workflowRun must not be null");
-        Objects.requireNonNull(requirementDoc, "requirementDoc must not be null");
+        workflowProfile = workflowProfile == null ? Optional.empty() : workflowProfile;
+        requirementDoc = requirementDoc == null ? Optional.empty() : requirementDoc;
         requirementVersions = List.copyOf(Objects.requireNonNull(requirementVersions, "requirementVersions must not be null"));
         tickets = List.copyOf(Objects.requireNonNull(tickets, "tickets must not be null"));
         tasks = List.copyOf(Objects.requireNonNull(tasks, "tasks must not be null"));

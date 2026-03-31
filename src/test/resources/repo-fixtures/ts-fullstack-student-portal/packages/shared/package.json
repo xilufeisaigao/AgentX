@@ -1,0 +1,8 @@
+{
+  "name": "@student-portal/shared",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node --experimental-strip-types ../../scripts/build-shared.ts"
+  }
+}

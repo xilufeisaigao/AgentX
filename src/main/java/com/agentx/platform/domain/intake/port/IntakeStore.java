@@ -20,7 +20,11 @@ public interface IntakeStore {
 
     List<Ticket> listTicketsForWorkflow(String workflowRunId);
 
+    List<TicketEvent> listTicketEvents(String ticketId);
+
     List<Ticket> listOpenTickets(String workflowRunId);
+
+    boolean hasOpenTaskBlocker(String taskId);
 
     void saveRequirement(RequirementDoc requirementDoc);
 

@@ -5,6 +5,7 @@ import com.agentx.platform.domain.flow.model.WorkflowNodeRun;
 import com.agentx.platform.domain.flow.model.WorkflowNodeRunEvent;
 import com.agentx.platform.domain.flow.model.WorkflowRun;
 import com.agentx.platform.domain.flow.model.WorkflowRunEvent;
+import com.agentx.platform.domain.flow.model.WorkflowRunStatus;
 import com.agentx.platform.domain.flow.model.WorkflowTemplate;
 import com.agentx.platform.domain.flow.model.WorkflowTemplateNode;
 
@@ -18,6 +19,8 @@ public interface FlowStore {
     List<WorkflowTemplateNode> listTemplateNodes(String workflowTemplateId);
 
     Optional<WorkflowRun> findRun(String workflowRunId);
+
+    List<WorkflowRun> listRunsByStatuses(List<WorkflowRunStatus> statuses);
 
     List<WorkflowNodeBinding> listNodeBindings(String workflowRunId);
 

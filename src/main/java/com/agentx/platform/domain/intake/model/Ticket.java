@@ -18,6 +18,9 @@ public record Ticket(
         String originNodeId,
         String requirementDocId,
         Integer requirementDocVersion,
+        // taskId is only populated for TASK_BLOCKING tickets.
+        // GLOBAL_BLOCKING intentionally keeps this null so workflow-level tickets do not masquerade as task truth.
+        String taskId,
         JsonPayload payloadJson
 ) implements AggregateRoot<String> {
 
@@ -31,6 +34,37 @@ public record Ticket(
         Objects.requireNonNull(createdBy, "createdBy must not be null");
         Objects.requireNonNull(assignee, "assignee must not be null");
         Objects.requireNonNull(payloadJson, "payloadJson must not be null");
+    }
+
+    public Ticket(
+            String ticketId,
+            String workflowRunId,
+            TicketType type,
+            TicketBlockingScope blockingScope,
+            TicketStatus status,
+            String title,
+            ActorRef createdBy,
+            ActorRef assignee,
+            String originNodeId,
+            String requirementDocId,
+            Integer requirementDocVersion,
+            JsonPayload payloadJson
+    ) {
+        this(
+                ticketId,
+                workflowRunId,
+                type,
+                blockingScope,
+                status,
+                title,
+                createdBy,
+                assignee,
+                originNodeId,
+                requirementDocId,
+                requirementDocVersion,
+                null,
+                payloadJson
+        );
     }
 
     @Override

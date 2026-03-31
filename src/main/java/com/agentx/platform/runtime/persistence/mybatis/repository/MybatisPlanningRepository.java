@@ -44,6 +44,11 @@ public class MybatisPlanningRepository implements PlanningStore {
     }
 
     @Override
+    public List<String> claimReadyTaskIdsForDispatch(int limit) {
+        return planningMapper.claimReadyTaskIdsForDispatch(limit);
+    }
+
+    @Override
     public Optional<WorkTask> findTask(String taskId) {
         Map<String, Object> row = planningMapper.findTaskRow(taskId);
         if (MybatisRowReader.isEmpty(row)) {
@@ -53,8 +58,24 @@ public class MybatisPlanningRepository implements PlanningStore {
     }
 
     @Override
+    public Optional<String> findWorkflowRunIdByTask(String taskId) {
+        return Optional.ofNullable(planningMapper.findWorkflowRunIdByTask(taskId));
+    }
+
+    @Override
     public List<TaskDependency> listDependencies(String workflowRunId) {
         return planningMapper.listDependencyRows(workflowRunId).stream()
+                .map(row -> new TaskDependency(
+                        MybatisRowReader.string(row, "taskId"),
+                        MybatisRowReader.string(row, "dependsOnTaskId"),
+                        MybatisRowReader.enumValue(row, "requiredUpstreamStatus", WorkTaskStatus.class)
+                ))
+                .toList();
+    }
+
+    @Override
+    public List<TaskDependency> listDependenciesForTask(String taskId) {
+        return planningMapper.listDependencyRowsForTask(taskId).stream()
                 .map(row -> new TaskDependency(
                         MybatisRowReader.string(row, "taskId"),
                         MybatisRowReader.string(row, "dependsOnTaskId"),

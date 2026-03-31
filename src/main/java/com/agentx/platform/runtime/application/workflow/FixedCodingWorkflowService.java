@@ -4,6 +4,7 @@ import com.agentx.platform.domain.execution.model.GitWorkspace;
 import com.agentx.platform.domain.execution.model.RunKind;
 import com.agentx.platform.domain.execution.model.TaskContextSnapshot;
 import com.agentx.platform.domain.execution.model.TaskRun;
+import com.agentx.platform.domain.execution.model.TaskRunStatus;
 import com.agentx.platform.domain.execution.port.ExecutionStore;
 import com.agentx.platform.domain.flow.model.EntryMode;
 import com.agentx.platform.domain.flow.model.WorkflowBindingMode;
@@ -17,6 +18,7 @@ import com.agentx.platform.domain.flow.port.FlowStore;
 import com.agentx.platform.domain.intake.model.RequirementDoc;
 import com.agentx.platform.domain.intake.model.RequirementVersion;
 import com.agentx.platform.domain.intake.model.Ticket;
+import com.agentx.platform.domain.intake.model.TicketBlockingScope;
 import com.agentx.platform.domain.intake.model.TicketEvent;
 import com.agentx.platform.domain.intake.model.TicketStatus;
 import com.agentx.platform.domain.intake.port.IntakeStore;
@@ -24,17 +26,18 @@ import com.agentx.platform.domain.planning.model.WorkTask;
 import com.agentx.platform.domain.planning.port.PlanningStore;
 import com.agentx.platform.domain.shared.model.ActorType;
 import com.agentx.platform.domain.shared.model.JsonPayload;
-import com.agentx.platform.runtime.agentruntime.local.LocalRequirementAgent;
-import com.agentx.platform.runtime.orchestration.langgraph.FixedCodingGraphFactory;
+import com.agentx.platform.runtime.application.workflow.profile.ActiveStackProfileSnapshot;
+import com.agentx.platform.runtime.application.workflow.profile.StackProfileRegistry;
+import com.agentx.platform.runtime.support.RuntimeInfrastructureProperties;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.bsc.langgraph4j.RunnableConfig;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 @Service
@@ -46,8 +49,11 @@ public class FixedCodingWorkflowService implements FixedCodingWorkflowUseCase {
     private final IntakeStore intakeStore;
     private final PlanningStore planningStore;
     private final ExecutionStore executionStore;
-    private final LocalRequirementAgent requirementAgent;
-    private final FixedCodingGraphFactory graphFactory;
+    private final RequirementStageService requirementStageService;
+    private final WorkflowDriverService workflowDriverService;
+    private final WorkflowScenarioResolver workflowScenarioResolver;
+    private final StackProfileRegistry stackProfileRegistry;
+    private final RuntimeInfrastructureProperties runtimeProperties;
     private final ObjectMapper objectMapper;
 
     public FixedCodingWorkflowService(
@@ -55,16 +61,22 @@ public class FixedCodingWorkflowService implements FixedCodingWorkflowUseCase {
             IntakeStore intakeStore,
             PlanningStore planningStore,
             ExecutionStore executionStore,
-            LocalRequirementAgent requirementAgent,
-            FixedCodingGraphFactory graphFactory,
+            RequirementStageService requirementStageService,
+            WorkflowDriverService workflowDriverService,
+            WorkflowScenarioResolver workflowScenarioResolver,
+            StackProfileRegistry stackProfileRegistry,
+            RuntimeInfrastructureProperties runtimeProperties,
             ObjectMapper objectMapper
     ) {
         this.flowStore = flowStore;
         this.intakeStore = intakeStore;
         this.planningStore = planningStore;
         this.executionStore = executionStore;
-        this.requirementAgent = requirementAgent;
-        this.graphFactory = graphFactory;
+        this.requirementStageService = requirementStageService;
+        this.workflowDriverService = workflowDriverService;
+        this.workflowScenarioResolver = workflowScenarioResolver;
+        this.stackProfileRegistry = stackProfileRegistry;
+        this.runtimeProperties = runtimeProperties;
         this.objectMapper = objectMapper;
     }
 
@@ -73,6 +85,7 @@ public class FixedCodingWorkflowService implements FixedCodingWorkflowUseCase {
     public String start(StartCodingWorkflowCommand command) {
         WorkflowTemplate template = flowStore.findTemplate(TEMPLATE_ID)
                 .orElseThrow(() -> new IllegalStateException("missing workflow template " + TEMPLATE_ID));
+        ActiveStackProfileSnapshot activeProfile = stackProfileRegistry.resolveRequired(command.profileId());
         String workflowRunId = "workflow-" + randomId();
         WorkflowRun workflowRun = new WorkflowRun(
                 workflowRunId,
@@ -89,49 +102,65 @@ public class FixedCodingWorkflowService implements FixedCodingWorkflowUseCase {
             if (node.defaultAgentId() == null) {
                 continue;
             }
+            String selectedAgentId = Optional.ofNullable(activeProfile.nodeAgentId(node.nodeId()))
+                    .filter(agentId -> !agentId.isBlank())
+                    .orElse(node.defaultAgentId());
             flowStore.saveNodeBinding(new WorkflowNodeBinding(
                     "binding-" + workflowRunId + "-" + node.nodeId(),
                     workflowRunId,
                     node.nodeId(),
                     WorkflowBindingMode.DEFAULT,
-                    node.defaultAgentId(),
+                    selectedAgentId,
                     false
             ));
         }
 
-        String requirementDocId = "requirement-" + workflowRunId;
-        LocalRequirementAgent.RequirementDraft draft =
-                requirementAgent.createConfirmedRequirement(workflowRunId, requirementDocId, command);
-        intakeStore.saveRequirement(draft.requirementDoc());
-        intakeStore.appendRequirementVersion(draft.requirementVersion());
         flowStore.appendRunEvent(new WorkflowRunEvent(
                 "workflow-event-" + randomId(),
                 workflowRunId,
                 "WORKFLOW_STARTED",
                 command.createdBy(),
                 "固定代码交付流程已启动。",
-                scenarioJson(command.scenario(), requirementDocId)
+                startEventPayload(command, activeProfile)
         ));
         return workflowRunId;
     }
 
     @Override
     public WorkflowRuntimeSnapshot runUntilStable(String workflowRunId) {
-        WorkflowRun workflowRun = workflow(workflowRunId);
-        if (isStableWithoutResume(workflowRun)) {
-            return getRuntimeSnapshot(workflowRunId);
+        WorkflowRuntimeSnapshot snapshot = getRuntimeSnapshot(workflowRunId);
+        long deadline = nextDeadline();
+        String progressSignature = progressSignature(snapshot);
+        while (System.nanoTime() < deadline) {
+            if (isStableWithoutResume(snapshot.workflowRun()) || isStableAgentBlocked(snapshot)) {
+                return snapshot;
+            }
+            workflowDriverService.driveWorkflowOnce(workflowRunId);
+            WorkflowRuntimeSnapshot progressedSnapshot = getRuntimeSnapshot(workflowRunId);
+            if (isStableAfterInvoke(progressedSnapshot.workflowRun()) || isStableAgentBlocked(progressedSnapshot)) {
+                return progressedSnapshot;
+            }
+            String progressedSignature = progressSignature(progressedSnapshot);
+            if (!progressedSignature.equals(progressSignature)) {
+                progressSignature = progressedSignature;
+                deadline = nextDeadline();
+            }
+            snapshot = progressedSnapshot;
+            sleepQuietly();
         }
-
-        graphFactory.compiledGraph().invoke(
-                Map.of("workflowRunId", workflowRunId),
-                RunnableConfig.builder().threadId(workflowRunId).build()
+        snapshot = getRuntimeSnapshot(workflowRunId);
+        throw new IllegalStateException(
+                "workflow did not reach a stable state before timeout: "
+                        + workflowRunId
+                        + " status="
+                        + snapshot.workflowRun().status()
+                        + " tasks="
+                        + snapshot.tasks().stream().map(task -> task.taskId() + ":" + task.status()).toList()
+                        + " taskRuns="
+                        + snapshot.taskRuns().stream().map(run -> run.runId() + ":" + run.status()).toList()
+                        + " workspaces="
+                        + snapshot.workspaces().stream().map(workspace -> workspace.workspaceId() + ":" + workspace.status()).toList()
         );
-
-        WorkflowRun completedRun = workflow(workflowRunId);
-        if (!isStableAfterInvoke(completedRun)) {
-            throw new IllegalStateException("workflow did not reach a stable state: " + completedRun.status());
-        }
-        return getRuntimeSnapshot(workflowRunId);
     }
 
     @Override
@@ -156,6 +185,7 @@ public class FixedCodingWorkflowService implements FixedCodingWorkflowUseCase {
                 currentTicket.originNodeId(),
                 currentTicket.requirementDocId(),
                 currentTicket.requirementDocVersion(),
+                currentTicket.taskId(),
                 mergedPayload
         );
         intakeStore.saveTicket(answeredTicket);
@@ -184,11 +214,24 @@ public class FixedCodingWorkflowService implements FixedCodingWorkflowUseCase {
     }
 
     @Override
+    @Transactional
+    public WorkflowRuntimeSnapshot confirmRequirementDoc(ConfirmRequirementDocCommand command) {
+        return getRuntimeSnapshot(requirementStageService.confirmRequirementDoc(command));
+    }
+
+    @Override
+    @Transactional
+    public WorkflowRuntimeSnapshot editRequirementDoc(EditRequirementDocCommand command) {
+        return getRuntimeSnapshot(requirementStageService.editRequirementDoc(command));
+    }
+
+    @Override
     public WorkflowRuntimeSnapshot getRuntimeSnapshot(String workflowRunId) {
         WorkflowRun workflowRun = workflow(workflowRunId);
-        RequirementDoc requirementDoc = intakeStore.findRequirementByWorkflow(workflowRunId)
-                .orElseThrow(() -> new IllegalStateException("missing requirement doc for workflow " + workflowRunId));
-        List<RequirementVersion> versions = intakeStore.listRequirementVersions(requirementDoc.docId());
+        Optional<RequirementDoc> requirementDoc = intakeStore.findRequirementByWorkflow(workflowRunId);
+        List<RequirementVersion> versions = requirementDoc
+                .map(doc -> intakeStore.listRequirementVersions(doc.docId()))
+                .orElse(List.of());
         List<Ticket> tickets = intakeStore.listTicketsForWorkflow(workflowRunId);
         List<WorkTask> tasks = planningStore.listTasksByWorkflow(workflowRunId);
         List<TaskContextSnapshot> snapshots = new ArrayList<>();
@@ -201,6 +244,7 @@ public class FixedCodingWorkflowService implements FixedCodingWorkflowUseCase {
         }
         return new WorkflowRuntimeSnapshot(
                 workflowRun,
+                workflowScenarioResolver.resolveProfileRef(workflowRunId),
                 requirementDoc,
                 versions,
                 tickets,
@@ -223,6 +267,9 @@ public class FixedCodingWorkflowService implements FixedCodingWorkflowUseCase {
                 || workflowRun.status() == WorkflowRunStatus.CANCELED) {
             return true;
         }
+        if (isAsyncMacroStable(workflowRun.status())) {
+            return true;
+        }
         if (workflowRun.status() != WorkflowRunStatus.WAITING_ON_HUMAN) {
             return false;
         }
@@ -234,16 +281,74 @@ public class FixedCodingWorkflowService implements FixedCodingWorkflowUseCase {
         return workflowRun.status() == WorkflowRunStatus.COMPLETED
                 || workflowRun.status() == WorkflowRunStatus.FAILED
                 || workflowRun.status() == WorkflowRunStatus.CANCELED
-                || workflowRun.status() == WorkflowRunStatus.WAITING_ON_HUMAN;
+                || workflowRun.status() == WorkflowRunStatus.WAITING_ON_HUMAN
+                || isAsyncMacroStable(workflowRun.status());
     }
 
-    private JsonPayload scenarioJson(WorkflowScenario scenario, String requirementDocId) {
+    private boolean isStableAgentBlocked(WorkflowRuntimeSnapshot snapshot) {
+        boolean hasOpenNonHumanBlocker = snapshot.tickets().stream()
+                .anyMatch(ticket -> ticket.status() == TicketStatus.OPEN
+                        && ticket.assignee().type() != ActorType.HUMAN
+                        && ticket.blockingScope() != TicketBlockingScope.INFORMATIONAL);
+        boolean hasActiveRun = snapshot.taskRuns().stream()
+                .anyMatch(run -> run.status() == TaskRunStatus.QUEUED || run.status() == TaskRunStatus.RUNNING);
+        return hasOpenNonHumanBlocker && !hasActiveRun;
+    }
+
+    private long nextDeadline() {
+        return System.nanoTime() + runtimeProperties.getBlockingTimeout().toNanos();
+    }
+
+    private String progressSignature(WorkflowRuntimeSnapshot snapshot) {
+        StringBuilder signature = new StringBuilder();
+        signature.append(snapshot.workflowRun().status()).append('|');
+        snapshot.tasks().forEach(task -> signature.append(task.taskId()).append(':').append(task.status()).append('|'));
+        snapshot.taskRuns().forEach(run -> signature.append(run.runId())
+                .append(':').append(run.status())
+                .append(':').append(run.lastHeartbeatAt())
+                .append(':').append(run.finishedAt())
+                .append('|'));
+        snapshot.workspaces().forEach(workspace -> signature.append(workspace.workspaceId())
+                .append(':').append(workspace.status())
+                .append(':').append(workspace.headCommit())
+                .append(':').append(workspace.mergeCommit())
+                .append(':').append(workspace.cleanupStatus())
+                .append('|'));
+        snapshot.tickets().forEach(ticket -> signature.append(ticket.ticketId())
+                .append(':').append(ticket.status())
+                .append(':').append(ticket.assignee().type())
+                .append('|'));
+        signature.append("nodeRuns=").append(snapshot.nodeRuns().size());
+        if (!snapshot.nodeRuns().isEmpty()) {
+            var lastNodeRun = snapshot.nodeRuns().getLast();
+            signature.append(':').append(lastNodeRun.nodeRunId())
+                    .append(':').append(lastNodeRun.status())
+                    .append(':').append(lastNodeRun.finishedAt());
+        }
+        return signature.toString();
+    }
+
+    private void sleepQuietly() {
+        try {
+            Thread.sleep(runtimeProperties.getBlockingPollInterval().toMillis());
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("workflow wait interrupted", exception);
+        }
+    }
+
+    private JsonPayload startEventPayload(StartCodingWorkflowCommand command, ActiveStackProfileSnapshot activeProfile) {
         try {
             return new JsonPayload(objectMapper.writeValueAsString(Map.of(
-                    "requireHumanClarification", scenario.requireHumanClarification(),
-                    "architectCanAutoResolveClarification", scenario.architectCanAutoResolveClarification(),
-                    "verifyNeedsRework", scenario.verifyNeedsRework(),
-                    "requirementDocId", requirementDocId
+                    "requireHumanClarification", command.scenario().requireHumanClarification(),
+                    "architectCanAutoResolveClarification", command.scenario().architectCanAutoResolveClarification(),
+                    "verifyNeedsRework", command.scenario().verifyNeedsRework(),
+                    "profileId", activeProfile.profileId(),
+                    "profileDisplayName", activeProfile.displayName(),
+                    "profileVersion", activeProfile.version(),
+                    "profileDigest", activeProfile.digest(),
+                    "requirementSeedTitle", command.requirementTitle(),
+                    "requirementSeedContent", command.requirementContent()
             )));
         } catch (JsonProcessingException exception) {
             throw new IllegalArgumentException("failed to serialize workflow scenario", exception);
@@ -265,5 +370,12 @@ public class FixedCodingWorkflowService implements FixedCodingWorkflowUseCase {
 
     private String randomId() {
         return UUID.randomUUID().toString().replace("-", "").substring(0, 16);
+    }
+
+    private boolean isAsyncMacroStable(WorkflowRunStatus status) {
+        if (!runtimeProperties.isDriverEnabled()) {
+            return false;
+        }
+        return status == WorkflowRunStatus.EXECUTING_TASKS || status == WorkflowRunStatus.VERIFYING;
     }
 }

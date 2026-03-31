@@ -267,6 +267,7 @@ create table tickets (
   origin_node_id varchar(64) null,
   requirement_doc_id varchar(64) null,
   requirement_doc_ver int null,
+  task_id varchar(64) null,
   payload_json json not null,
   claimed_by_actor_id varchar(64) null,
   claimed_by_instance_id varchar(64) null,
@@ -274,6 +275,8 @@ create table tickets (
   created_at datetime(3) not null default current_timestamp(3),
   updated_at datetime(3) not null default current_timestamp(3) on update current_timestamp(3),
   key idx_tickets_workflow_status (workflow_run_id, status),
+  key idx_tickets_blocking_status_assignee (blocking_scope, status, assignee_actor_type),
+  key idx_tickets_task_status (task_id, status),
   foreign key (workflow_run_id) references workflow_runs(workflow_run_id),
   foreign key (requirement_doc_id) references requirement_docs(doc_id),
   foreign key (requirement_doc_id, requirement_doc_ver) references requirement_doc_versions(doc_id, version)
@@ -316,6 +319,7 @@ create table work_tasks (
   created_at datetime(3) not null default current_timestamp(3),
   updated_at datetime(3) not null default current_timestamp(3) on update current_timestamp(3),
   key idx_work_tasks_module_status (module_id, status),
+  key idx_work_tasks_status (status),
   foreign key (module_id) references work_modules(module_id),
   foreign key (origin_ticket_id) references tickets(ticket_id)
 ) engine=InnoDB comment='Executable tasks created from architect planning.';
@@ -374,6 +378,7 @@ create table agent_pool_instances (
   created_at datetime(3) not null default current_timestamp(3),
   updated_at datetime(3) not null default current_timestamp(3) on update current_timestamp(3),
   key idx_agent_pool_status (agent_id, status),
+  key idx_agent_pool_status_lease (status, lease_until),
   foreign key (agent_id) references agent_definitions(agent_id),
   foreign key (current_workflow_run_id) references workflow_runs(workflow_run_id)
 ) engine=InnoDB comment='Runtime instances pooled from an agent definition.';
@@ -422,6 +427,7 @@ create table task_runs (
   created_at datetime(3) not null default current_timestamp(3),
   updated_at datetime(3) not null default current_timestamp(3) on update current_timestamp(3),
   key idx_task_runs_task_status (task_id, status),
+  key idx_task_runs_status_lease (status, lease_until),
   foreign key (task_id) references work_tasks(task_id),
   foreign key (agent_instance_id) references agent_pool_instances(agent_instance_id),
   foreign key (context_snapshot_id) references task_context_snapshots(snapshot_id)
@@ -548,7 +554,7 @@ insert into agent_definitions (
   runtime_type, model, max_parallel_runs,
   architect_suggested, auto_pool_eligible, manual_registration_allowed, enabled
 ) values
-  ('requirement-agent', '需求代理', '负责需求澄清、需求文档草拟与修订。', 'SYSTEM', 'Keep the user conversation focused on requirement intent and requirement document quality.', 'in-process', 'gpt-5-class', 4, false, false, true, true),
+  ('requirement-agent', '需求代理', '负责需求澄清、需求文档草拟与修订。', 'SYSTEM', 'Keep the user conversation focused on requirement intent and requirement document quality.', 'in-process', 'deepseek-chat', 4, false, false, true, true),
   ('architect-agent', '架构代理', '负责架构审查、任务拆分、Agent 建议与人工提请。', 'SYSTEM', 'Review the requirement, ask for missing facts and produce task plans and agent suggestions.', 'in-process', 'gpt-5-class', 2, true, false, true, true),
   ('coding-agent-java', 'Java 编码代理', '负责在受控 worktree 中完成 Java 后端实现。', 'SYSTEM', 'Implement the assigned Java task within the provided write scope.', 'docker', 'gpt-5-class', 8, false, true, true, true),
   ('verify-agent-java', '验证代理', '负责执行验证、产生验证证据并支撑合并闸门。', 'SYSTEM', 'Run verification in a read-only manner and report merge evidence.', 'docker', 'gpt-5-class', 8, false, true, true, true);

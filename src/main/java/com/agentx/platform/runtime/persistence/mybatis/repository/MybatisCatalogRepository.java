@@ -63,6 +63,25 @@ public class MybatisCatalogRepository implements CatalogStore {
     }
 
     @Override
+    public List<AgentDefinition> listAgentsByCapability(String capabilityPackId) {
+        return catalogMapper.listAgentRowsByCapability(capabilityPackId).stream()
+                .map(row -> new AgentDefinition(
+                        MybatisRowReader.string(row, "agentId"),
+                        MybatisRowReader.string(row, "displayName"),
+                        MybatisRowReader.string(row, "purpose"),
+                        MybatisRowReader.string(row, "registrationSource"),
+                        MybatisRowReader.string(row, "runtimeType"),
+                        MybatisRowReader.string(row, "model"),
+                        MybatisRowReader.integer(row, "maxParallelRuns"),
+                        MybatisRowReader.bool(row, "architectSuggested"),
+                        MybatisRowReader.bool(row, "autoPoolEligible"),
+                        MybatisRowReader.bool(row, "manualRegistrationAllowed"),
+                        MybatisRowReader.bool(row, "enabled")
+                ))
+                .toList();
+    }
+
+    @Override
     public List<AgentCapabilityBinding> listAgentCapabilityBindings(String agentId) {
         return catalogMapper.listAgentCapabilityBindingRows(agentId).stream()
                 .map(row -> new AgentCapabilityBinding(
@@ -120,5 +139,18 @@ public class MybatisCatalogRepository implements CatalogStore {
                         MybatisRowReader.integer(row, "sortOrder")
                 ))
                 .toList();
+    }
+
+    @Override
+    public void saveAgent(AgentDefinition agentDefinition) {
+        catalogMapper.upsertAgentDefinition(agentDefinition);
+    }
+
+    @Override
+    public void replaceAgentCapabilityBindings(String agentId, List<AgentCapabilityBinding> bindings) {
+        catalogMapper.deleteAgentCapabilityBindings(agentId);
+        for (AgentCapabilityBinding binding : bindings) {
+            catalogMapper.insertAgentCapabilityBinding(binding.agentId(), binding.capabilityPackId(), binding.required());
+        }
     }
 }

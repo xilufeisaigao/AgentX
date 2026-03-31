@@ -1,0 +1,254 @@
+{
+  "identity": {
+    "profileId": "java-backend-maven",
+    "displayName": "Java Backend Maven",
+    "version": "v1",
+    "workspaceShape": "single-module-maven",
+    "packageManager": "maven"
+  },
+  "nodeAgents": {
+    "verify": "verify-agent-java"
+  },
+  "planner": {
+    "allowedTaskTemplateIds": [
+      "java-backend-code",
+      "java-backend-test",
+      "docs-update",
+      "config-or-schema-update"
+    ],
+    "rules": [
+      "需求只涉及 Java 后端实现和回归测试时，优先使用 java-backend-code 与 java-backend-test。",
+      "除非需求明确要求，不要把 docs-update 或 config-or-schema-update 作为主要关键路径任务。",
+      "write scope 只能落在模板允许的边界内，优先使用最窄子路径。"
+    ]
+  },
+  "taskTemplates": [
+    {
+      "taskTemplateId": "java-backend-code",
+      "capabilityPackId": "cap-java-backend-coding",
+      "defaultWriteScopes": [
+        "src/main/java",
+        "src/test/java"
+      ],
+      "deliveryKind": "backend-code",
+      "verifyExpectations": [
+        "maven-test"
+      ]
+    },
+    {
+      "taskTemplateId": "java-backend-test",
+      "capabilityPackId": "cap-java-backend-coding",
+      "defaultWriteScopes": [
+        "src/test/java"
+      ],
+      "deliveryKind": "regression-test",
+      "verifyExpectations": [
+        "maven-test"
+      ]
+    },
+    {
+      "taskTemplateId": "docs-update",
+      "capabilityPackId": "cap-java-backend-coding",
+      "defaultWriteScopes": [
+        "docs",
+        "progress.md"
+      ],
+      "deliveryKind": "docs",
+      "verifyExpectations": []
+    },
+    {
+      "taskTemplateId": "config-or-schema-update",
+      "capabilityPackId": "cap-java-backend-coding",
+      "defaultWriteScopes": [
+        "src/main/resources",
+        "db/schema"
+      ],
+      "deliveryKind": "config",
+      "verifyExpectations": [
+        "maven-test"
+      ]
+    }
+  ],
+  "prompts": {
+    "architectRules": [
+      "如果需求主要是后端功能实现，尽量把实现与测试拆成最小充分的 DAG。",
+      "优先围绕 src/main/java 与 src/test/java 组织任务，不要凭空规划前端或数据库迁移。"
+    ],
+    "codingRules": [
+      "实现 Java 后端任务时，通常先查看 pom.xml、src/main/java、src/test/java 再修改。",
+      "优先在既有包结构内增量实现，不要引入和需求无关的大重构。"
+    ],
+    "verifyRules": [
+      "重点确认 Maven 测试是否通过，以及交付是否覆盖 requirement 里的关键行为。",
+      "如果需求要求回归测试，而 review bundle 中没有测试产物，应倾向 REWORK。"
+    ]
+  },
+  "capabilityRuntime": [
+    {
+      "capabilityPackId": "cap-java-backend-coding",
+      "runtimeImage": "maven:3.9.11-eclipse-temurin-21",
+      "environment": {
+        "AGENTX_PROFILE_ID": "java-backend-maven"
+      },
+      "allowedCommands": {
+        "show-marker": [
+          "sh",
+          "-lc",
+          "test -f \"$MARKER_FILE\" && cat \"$MARKER_FILE\" || true"
+        ],
+        "require-marker": [
+          "sh",
+          "-lc",
+          "test -f \"$MARKER_FILE\""
+        ],
+        "maven-test": [
+          "sh",
+          "-lc",
+          "mvn -q test"
+        ],
+        "git-commit-delivery": [
+          "sh",
+          "-lc",
+          "git config user.email agentx-runtime@example.local && git config user.name agentx-runtime && rm -rf target && git add -A && git diff --cached --quiet || git commit -m task-$TASK_ID-attempt-$ATTEMPT_NUMBER"
+        ]
+      },
+      "postDeliveryCommandIds": [
+        "git-commit-delivery"
+      ],
+      "verifyCommandIds": [
+        "require-marker",
+        "maven-test"
+      ],
+      "httpEndpoints": [],
+      "cleanupPaths": [
+        "target"
+      ],
+      "reportHints": [
+        "java-backend",
+        "maven-test"
+      ]
+    },
+    {
+      "capabilityPackId": "cap-api-test",
+      "runtimeImage": "python:3.11-slim",
+      "environment": {
+        "AGENTX_PROFILE_ID": "java-backend-maven"
+      },
+      "allowedCommands": {
+        "python-version": [
+          "sh",
+          "-lc",
+          "python --version"
+        ]
+      },
+      "postDeliveryCommandIds": [],
+      "verifyCommandIds": [],
+      "httpEndpoints": [
+        {
+          "endpointId": "local-http",
+          "baseUrl": "http://127.0.0.1",
+          "allowedMethods": [
+            "GET",
+            "POST",
+            "PUT",
+            "DELETE",
+            "PATCH"
+          ],
+          "description": "Deterministic local endpoint baseline for API smoke and verification."
+        }
+      ],
+      "cleanupPaths": [],
+      "reportHints": [
+        "api-smoke"
+      ]
+    },
+    {
+      "capabilityPackId": "cap-verify",
+      "runtimeImage": "maven:3.9.11-eclipse-temurin-21",
+      "environment": {
+        "AGENTX_PROFILE_ID": "java-backend-maven"
+      },
+      "allowedCommands": {
+        "show-marker": [
+          "sh",
+          "-lc",
+          "test -f \"$MARKER_FILE\" && cat \"$MARKER_FILE\" || true"
+        ],
+        "require-marker": [
+          "sh",
+          "-lc",
+          "test -f \"$MARKER_FILE\""
+        ],
+        "maven-test": [
+          "sh",
+          "-lc",
+          "mvn -q test"
+        ]
+      },
+      "postDeliveryCommandIds": [],
+      "verifyCommandIds": [
+        "require-marker",
+        "maven-test"
+      ],
+      "httpEndpoints": [],
+      "cleanupPaths": [
+        "target"
+      ],
+      "reportHints": [
+        "verify-java"
+      ]
+    }
+  ],
+  "eval": {
+    "roleGlobs": {
+      "source": [
+        "src/main/java/**"
+      ],
+      "test": [
+        "src/test/java/**"
+      ],
+      "config": [
+        "pom.xml",
+        "src/main/resources/**",
+        "db/schema/**"
+      ],
+      "docs": [
+        "docs/**",
+        "progress.md",
+        "README.md"
+      ]
+    },
+    "requiredArtifactRoles": [
+      "source",
+      "test"
+    ],
+    "buildCommandIds": [
+      "maven-test"
+    ],
+    "apiCommandIds": [],
+    "integrationCommandIds": [],
+    "frontendConnectivityChecks": []
+  },
+  "reporting": {
+    "labels": [
+      "java",
+      "backend",
+      "maven"
+    ],
+    "highlightedRoles": [
+      "source",
+      "test"
+    ],
+    "enabledDimensions": [
+      "NODE_CONTRACT",
+      "WORKFLOW_TRAJECTORY",
+      "DAG_QUALITY",
+      "RAG_QUALITY",
+      "TOOL_PROTOCOL",
+      "DELIVERY_ARTIFACT",
+      "RUNTIME_ROBUSTNESS",
+      "HUMAN_IN_LOOP",
+      "EFFICIENCY"
+    ]
+  }
+}

@@ -62,6 +62,27 @@ public interface FlowMapper {
     Map<String, Object> findRunRow(@Param("workflowRunId") String workflowRunId);
 
     @Select("""
+            <script>
+            select
+              workflow_run_id as workflowRunId,
+              workflow_template_id as workflowTemplateId,
+              title,
+              status,
+              entry_mode as entryMode,
+              auto_agent_mode as autoAgentMode,
+              created_by_actor_type as createdByActorType,
+              created_by_actor_id as createdByActorId
+            from workflow_runs
+            where status in
+            <foreach item="status" collection="statuses" open="(" separator="," close=")">
+              #{status}
+            </foreach>
+            order by updated_at, workflow_run_id
+            </script>
+            """)
+    List<Map<String, Object>> listRunRowsByStatuses(@Param("statuses") List<String> statuses);
+
+    @Select("""
             select
               binding_id as bindingId,
               workflow_run_id as workflowRunId,

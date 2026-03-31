@@ -129,6 +129,38 @@ public interface ExecutionMapper {
 
     @Select("""
             select
+              event_id as eventId,
+              run_id as runId,
+              event_type as eventType,
+              body,
+              data_json as dataJson
+            from task_run_events
+            where run_id = #{runId}
+            order by created_at, event_id
+            """)
+    List<Map<String, Object>> listTaskRunEventRows(@Param("runId") String runId);
+
+    @Select("""
+            select
+              run_id as runId,
+              task_id as taskId,
+              agent_instance_id as agentInstanceId,
+              status,
+              run_kind as runKind,
+              context_snapshot_id as contextSnapshotId,
+              lease_until as leaseUntil,
+              last_heartbeat_at as lastHeartbeatAt,
+              started_at as startedAt,
+              finished_at as finishedAt,
+              execution_contract_json as executionContractJson
+            from task_runs
+            where status in ('QUEUED', 'RUNNING')
+            order by started_at, run_id
+            """)
+    List<Map<String, Object>> listActiveTaskRunRows();
+
+    @Select("""
+            select
               workspace_id as workspaceId,
               run_id as runId,
               task_id as taskId,
@@ -163,6 +195,43 @@ public interface ExecutionMapper {
             order by created_at, workspace_id
             """)
     List<Map<String, Object>> listWorkspaceRows(@Param("taskId") String taskId);
+
+    @Select("""
+            select
+              workspace_id as workspaceId,
+              run_id as runId,
+              task_id as taskId,
+              status,
+              repo_root as repoRoot,
+              worktree_path as worktreePath,
+              branch_name as branchName,
+              base_commit as baseCommit,
+              head_commit as headCommit,
+              merge_commit as mergeCommit,
+              cleanup_status as cleanupStatus
+            from git_workspaces
+            where cleanup_status <> 'DONE'
+            order by updated_at, workspace_id
+            """)
+    List<Map<String, Object>> listWorkspaceRowsPendingCleanup();
+
+    @Select("""
+            select
+              agent_instance_id as agentInstanceId,
+              agent_id as agentId,
+              runtime_type as runtimeType,
+              status,
+              launch_mode as launchMode,
+              current_workflow_run_id as currentWorkflowRunId,
+              lease_until as leaseUntil,
+              last_heartbeat_at as lastHeartbeatAt,
+              endpoint_ref as endpointRef,
+              runtime_metadata_json as runtimeMetadataJson
+            from agent_pool_instances
+            where status in ('PROVISIONING', 'READY')
+            order by updated_at, agent_instance_id
+            """)
+    List<Map<String, Object>> listActiveAgentRows();
 
     @Insert("""
             insert into agent_pool_instances (

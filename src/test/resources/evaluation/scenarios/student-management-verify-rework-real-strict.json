@@ -1,0 +1,59 @@
+{
+  "scenarioId": "student-management-verify-rework-real-strict",
+  "profileId": "java-backend-maven",
+  "workflowTitle": "Student Management Verify Rework Strict Real Eval",
+  "requirementTitle": "学生管理系统验证返工闭环",
+  "initialPrompt": "做一个学生管理系统，并确保完整跑过一次验证返工闭环",
+  "scriptedHumanResponses": [
+    {
+      "originNodeId": "requirement",
+      "ticketType": "CLARIFICATION",
+      "answer": "这是一个最小后端版本，不需要前端，也不接数据库。需要支持学生新增、查询、更新、删除。学生字段至少包含学号、姓名、年级、邮箱。学号、姓名和邮箱必填，邮箱格式必须合法。删除后再次查询应返回不存在。需要补齐最小回归测试，重点覆盖新增、更新、删除和邮箱校验。第一次 verify 如果要求返工，就继续按固定主链完成一次返工后再验收，不需要额外人工介入。"
+    }
+  ],
+  "autoConfirmRequirementDoc": true,
+  "repoFixtureId": "student-management-java",
+  "agentModelOverrides": {
+    "requirement-agent": "gpt-5.4",
+    "architect-agent": "gpt-5.4",
+    "coding-agent-java": "gpt-5.4",
+    "verify-agent-java": "gpt-5.4"
+  },
+  "workflowScenario": {
+    "requireHumanClarification": false,
+    "architectCanAutoResolveClarification": false,
+    "verifyNeedsRework": true
+  },
+  "expectations": {
+    "expectedBehavior": "严格真实 LLM 全流程评测，要求 workflow 至少经历一次 verify -> rework -> verify 的真实闭环。",
+    "expectedFacts": [
+      "回归测试",
+      "邮箱格式必须合法",
+      "删除后再次查询应返回不存在",
+      "内存存储"
+    ],
+    "expectedSnippetRefs": [
+      "Student.java",
+      "StudentService.java",
+      "StudentServiceTest.java"
+    ],
+    "expectedNodeOrder": [
+      "requirement",
+      "architect",
+      "ticket-gate",
+      "task-graph",
+      "worker-manager",
+      "coding",
+      "merge-gate",
+      "verify"
+    ],
+    "repoContextRequired": true
+  },
+  "stopPolicy": {
+    "maxHumanInteractions": 2,
+    "terminateActiveRunsOnAbort": true,
+    "disallowSyntheticAdvance": true,
+    "terminateOnProviderFailure": true,
+    "terminateOnSchemaFailure": true
+  }
+}

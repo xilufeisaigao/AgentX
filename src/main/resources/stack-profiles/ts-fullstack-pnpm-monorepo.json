@@ -1,0 +1,304 @@
+{
+  "identity": {
+    "profileId": "ts-fullstack-pnpm-monorepo",
+    "displayName": "TS Fullstack pnpm Monorepo",
+    "version": "v1",
+    "workspaceShape": "apps/web + apps/api + packages/shared",
+    "packageManager": "pnpm"
+  },
+  "nodeAgents": {
+    "verify": "verify-agent-ts-fullstack"
+  },
+  "planner": {
+    "allowedTaskTemplateIds": [
+      "ts-shared-contract",
+      "ts-api-feature",
+      "ts-web-feature",
+      "ts-fullstack-test"
+    ],
+    "rules": [
+      "优先先稳定 shared contract，再让 api 与 web 分别对齐共享契约。",
+      "DAG 关键路径尽量保持 shared -> api/web -> tests，不要在第一版拆出过细子任务。",
+      "除非需求明确要求，不要把 lockfile、脚手架迁移或大规模目录改造放进首轮计划。"
+    ]
+  },
+  "taskTemplates": [
+    {
+      "taskTemplateId": "ts-shared-contract",
+      "capabilityPackId": "cap-ts-fullstack-coding",
+      "defaultWriteScopes": [
+        "packages/shared/src"
+      ],
+      "deliveryKind": "shared-contract",
+      "verifyExpectations": [
+        "pnpm-build",
+        "pnpm-test"
+      ]
+    },
+    {
+      "taskTemplateId": "ts-api-feature",
+      "capabilityPackId": "cap-ts-fullstack-coding",
+      "defaultWriteScopes": [
+        "apps/api/src",
+        "apps/api/test"
+      ],
+      "deliveryKind": "api-feature",
+      "verifyExpectations": [
+        "pnpm-build",
+        "pnpm-verify-api"
+      ]
+    },
+    {
+      "taskTemplateId": "ts-web-feature",
+      "capabilityPackId": "cap-ts-fullstack-coding",
+      "defaultWriteScopes": [
+        "apps/web/src"
+      ],
+      "deliveryKind": "web-feature",
+      "verifyExpectations": [
+        "pnpm-build",
+        "pnpm-verify-integration"
+      ]
+    },
+    {
+      "taskTemplateId": "ts-fullstack-test",
+      "capabilityPackId": "cap-ts-fullstack-coding",
+      "defaultWriteScopes": [
+        "apps/api/test",
+        "packages/shared/test",
+        "apps/web/src",
+        "scripts"
+      ],
+      "deliveryKind": "fullstack-test",
+      "verifyExpectations": [
+        "pnpm-test",
+        "pnpm-verify-api",
+        "pnpm-verify-integration"
+      ]
+    }
+  ],
+  "prompts": {
+    "architectRules": [
+      "这是一套 pnpm monorepo，全栈任务应显式说明 shared、api、web 的边界与依赖方向。",
+      "shared contract 应作为 api 与 web 的单一契约来源，不要在 apps/web 或 apps/api 私自复制类型定义。"
+    ],
+    "codingRules": [
+      "优先在 packages/shared 维护共享类型与查询参数定义，在 apps/api 与 apps/web 复用这些定义。",
+      "不要随意修改 pnpm-workspace.yaml、锁文件或工程结构，除非需求明确阻塞。",
+      "如果需要验证前后端连通性，优先利用仓库内既有 verify 脚本，而不是临时拼接新的长命令。"
+    ],
+    "verifyRules": [
+      "必须确认 pnpm -r build、pnpm test、pnpm verify:api、pnpm verify:integration 的结果。",
+      "如果 shared/api/web 三层里有一层没有对齐需求，应优先 REWORK，而不是只看单一模块通过。"
+    ]
+  },
+  "capabilityRuntime": [
+    {
+      "capabilityPackId": "cap-ts-fullstack-coding",
+      "runtimeImage": "node:22-bookworm",
+      "environment": {
+        "AGENTX_PROFILE_ID": "ts-fullstack-pnpm-monorepo"
+      },
+      "allowedCommands": {
+        "show-marker": [
+          "sh",
+          "-lc",
+          "test -f \"$MARKER_FILE\" && cat \"$MARKER_FILE\" || true"
+        ],
+        "require-marker": [
+          "sh",
+          "-lc",
+          "test -f \"$MARKER_FILE\""
+        ],
+        "pnpm-install": [
+          "sh",
+          "-lc",
+          "corepack enable >/dev/null 2>&1 || true && pnpm install --frozen-lockfile"
+        ],
+        "pnpm-build": [
+          "sh",
+          "-lc",
+          "corepack enable >/dev/null 2>&1 || true && pnpm -r build"
+        ],
+        "pnpm-test": [
+          "sh",
+          "-lc",
+          "corepack enable >/dev/null 2>&1 || true && pnpm test"
+        ],
+        "pnpm-verify-api": [
+          "sh",
+          "-lc",
+          "corepack enable >/dev/null 2>&1 || true && pnpm verify:api"
+        ],
+        "pnpm-verify-integration": [
+          "sh",
+          "-lc",
+          "corepack enable >/dev/null 2>&1 || true && pnpm verify:integration"
+        ],
+        "git-commit-delivery": [
+          "sh",
+          "-lc",
+          "git config user.email agentx-runtime@example.local && git config user.name agentx-runtime && git add -A && git diff --cached --quiet || git commit -m task-$TASK_ID-attempt-$ATTEMPT_NUMBER"
+        ]
+      },
+      "postDeliveryCommandIds": [
+        "git-commit-delivery"
+      ],
+      "verifyCommandIds": [
+        "require-marker",
+        "pnpm-install",
+        "pnpm-build",
+        "pnpm-test",
+        "pnpm-verify-api",
+        "pnpm-verify-integration"
+      ],
+      "httpEndpoints": [],
+      "cleanupPaths": [
+        "apps/web/dist",
+        "apps/api/dist",
+        "packages/shared/dist",
+        "coverage"
+      ],
+      "reportHints": [
+        "pnpm-monorepo",
+        "shared-api-web"
+      ]
+    },
+    {
+      "capabilityPackId": "cap-ts-fullstack-verify",
+      "runtimeImage": "node:22-bookworm",
+      "environment": {
+        "AGENTX_PROFILE_ID": "ts-fullstack-pnpm-monorepo"
+      },
+      "allowedCommands": {
+        "show-marker": [
+          "sh",
+          "-lc",
+          "test -f \"$MARKER_FILE\" && cat \"$MARKER_FILE\" || true"
+        ],
+        "require-marker": [
+          "sh",
+          "-lc",
+          "test -f \"$MARKER_FILE\""
+        ],
+        "pnpm-install": [
+          "sh",
+          "-lc",
+          "corepack enable >/dev/null 2>&1 || true && pnpm install --frozen-lockfile"
+        ],
+        "pnpm-build": [
+          "sh",
+          "-lc",
+          "corepack enable >/dev/null 2>&1 || true && pnpm -r build"
+        ],
+        "pnpm-test": [
+          "sh",
+          "-lc",
+          "corepack enable >/dev/null 2>&1 || true && pnpm test"
+        ],
+        "pnpm-verify-api": [
+          "sh",
+          "-lc",
+          "corepack enable >/dev/null 2>&1 || true && pnpm verify:api"
+        ],
+        "pnpm-verify-integration": [
+          "sh",
+          "-lc",
+          "corepack enable >/dev/null 2>&1 || true && pnpm verify:integration"
+        ]
+      },
+      "postDeliveryCommandIds": [],
+      "verifyCommandIds": [
+        "pnpm-install",
+        "pnpm-build",
+        "pnpm-test",
+        "pnpm-verify-api",
+        "pnpm-verify-integration"
+      ],
+      "httpEndpoints": [],
+      "cleanupPaths": [
+        "apps/web/dist",
+        "apps/api/dist",
+        "packages/shared/dist",
+        "coverage"
+      ],
+      "reportHints": [
+        "verify-ts-fullstack"
+      ]
+    }
+  ],
+  "eval": {
+    "roleGlobs": {
+      "api-source": [
+        "apps/api/src/**"
+      ],
+      "web-source": [
+        "apps/web/src/**"
+      ],
+      "shared-source": [
+        "packages/shared/src/**"
+      ],
+      "test": [
+        "apps/api/test/**",
+        "packages/shared/test/**",
+        "apps/web/src/**/*.test.ts",
+        "scripts/**"
+      ],
+      "config": [
+        "package.json",
+        "pnpm-lock.yaml",
+        "pnpm-workspace.yaml",
+        "tsconfig*.json",
+        "apps/**/package.json",
+        "packages/**/package.json"
+      ],
+      "docs": [
+        "README.md",
+        "docs/**"
+      ]
+    },
+    "requiredArtifactRoles": [
+      "api-source",
+      "web-source",
+      "shared-source",
+      "test"
+    ],
+    "buildCommandIds": [
+      "pnpm-build"
+    ],
+    "apiCommandIds": [
+      "pnpm-verify-api"
+    ],
+    "integrationCommandIds": [
+      "pnpm-verify-integration"
+    ],
+    "frontendConnectivityChecks": [
+      "apps/web must consume packages/shared student contracts and stay aligned with apps/api filtering behavior"
+    ]
+  },
+  "reporting": {
+    "labels": [
+      "typescript",
+      "fullstack",
+      "pnpm",
+      "monorepo"
+    ],
+    "highlightedRoles": [
+      "shared-source",
+      "api-source",
+      "web-source",
+      "test"
+    ],
+    "enabledDimensions": [
+      "NODE_CONTRACT",
+      "WORKFLOW_TRAJECTORY",
+      "DAG_QUALITY",
+      "RAG_QUALITY",
+      "TOOL_PROTOCOL",
+      "DELIVERY_ARTIFACT",
+      "RUNTIME_ROBUSTNESS",
+      "HUMAN_IN_LOOP",
+      "EFFICIENCY"
+    ]
+  }
+}
