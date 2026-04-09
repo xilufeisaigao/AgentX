@@ -196,6 +196,12 @@ coding 主链现在只接受统一 `ToolCall`：
 3. verify 在只读 checkout 上执行确定性命令
 4. cleanup 删除 task worktree、merge worktree、verify checkout 和临时分支
 
+说明：
+
+1. 上面是当前代码真相。
+2. 目标设计已经调整为：merge-gate 先把 task 改动并入模块集成候选，再由模块集成测试闸门执行确定性集成测试，最后才启动 verify agent。
+3. 因此后续这里会扩成 `task worktree -> merge worktree -> module integration checkout -> verify checkout` 四段式路径。
+
 ## 7. 中央派发器
 
 ### 7.1 入口
@@ -321,6 +327,11 @@ sequenceDiagram
     Verify->>Docker: executeOnce(read-only checkout)
     Verify->>DB: task(DONE or READY/BLOCKED), workspace(cleanup)
 ```
+
+说明：
+
+1. 这张时序图描述的是当前实现。
+2. 目标设计已经把 verify agent 的启动点后移到“模块级集成测试证据产生之后”，因此后续会在 `MergeGate` 和 `Verify` 之间补一个模块集成测试阶段。
 
 结论：
 

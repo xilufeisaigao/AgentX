@@ -2,6 +2,13 @@
 
 本文只描述当前已经落地的本地 RAG 基础设施。当前版本不接向量库、不接 embeddings、不接外部网页或外部知识源。
 
+状态说明：
+
+1. 本文仍然是当前代码真相。
+2. 但它不再代表下一阶段 coding 设计方向。
+3. 新的目标方案见 `docs/runtime/07-unix-exploration-coding-context-design.md`。
+4. `docs/runtime/06-layered-vector-rag-design.md` 仅保留为历史设计归档。
+
 ## 1. 目标
 
 当前本地 RAG 的目标不是“语义效果最好”，而是先把检索基础设施和证据链跑通。
@@ -152,3 +159,5 @@
 2. 更好的排序与 rerank
 3. 更细粒度 chunk 策略
 4. 更强的上下文压缩
+
+这些升级项已经不再是 coding 阶段的主方向；当前运行真相仍然以本文描述的 lexical / symbol baseline 为准，直到 runtime/tooling 真正切换到新的 Unix 探索方案。

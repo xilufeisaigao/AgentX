@@ -75,12 +75,19 @@ class DeterministicTaskExecutionContractBuilderTests {
                 "-lc",
                 "trap exit TERM INT; while true; do sleep 1; done"
         );
+        assertThat(contract.runtimePlatform()).isEqualTo("LINUX_CONTAINER");
+        assertThat(contract.shellFamily()).isEqualTo("POSIX_SH");
+        assertThat(contract.workspaceRoot()).isEqualTo("/workspace");
+        assertThat(contract.repoRoot()).isEqualTo("/workspace");
+        assertThat(contract.explorationRoots()).containsExactly(".", "src/main/java");
+        assertThat(contract.workspaceReadPolicy()).isEqualTo("BROAD_WORKSPACE");
         assertThat(contract.toolCatalog().entries())
                 .extracting(entry -> entry.toolId())
                 .containsExactlyInAnyOrder("tool-filesystem", "tool-git", "tool-shell");
         assertThat(contract.runtimePacks())
                 .containsExactly("rt-java-21", "rt-maven-3", "rt-git");
         assertThat(contract.allowedCommandCatalog()).containsKeys("show-marker", "require-marker", "maven-test", "git-commit-delivery");
+        assertThat(contract.explorationCommandCatalog()).containsKeys("grep-text", "read-range", "head-file", "tail-file");
         assertThat(contract.postDeliveryToolCalls()).singleElement().satisfies(toolCall -> {
             assertThat(toolCall.toolId()).isEqualTo("tool-shell");
             assertThat(toolCall.operation()).isEqualTo("run_command");

@@ -97,13 +97,27 @@ public class DefaultScopedFactResolver implements ScopedFactResolver {
                     sections.put("toolCatalog", contract.toolCatalog());
                     sections.put("runtimePacks", contract.runtimePacks());
                     sections.put("toolEnvironment", contract.toolEnvironment());
+                    sections.put("runtimePlatform", contract.runtimePlatform());
+                    sections.put("shellFamily", contract.shellFamily());
+                    sections.put("workspaceRoot", contract.workspaceRoot());
+                    sections.put("repoRoot", contract.repoRoot());
+                    sections.put("explorationRoots", contract.explorationRoots());
+                    sections.put("workspaceReadPolicy", contract.workspaceReadPolicy());
                     sections.put("allowedCommandCatalog", contract.allowedCommandCatalog());
+                    sections.put("explorationCommandCatalog", contract.explorationCommandCatalog());
                     sections.put("httpEndpointCatalog", contract.httpEndpointCatalog());
-                    sections.put("runtimeGuardrails", Map.of(
-                            "writeScopes", contract.writeScopes(),
-                            "toolCatalog", contract.toolCatalog(),
-                            "allowedCommandCatalog", contract.allowedCommandCatalog(),
-                            "httpEndpointCatalog", contract.httpEndpointCatalog()
+                    sections.put("runtimeGuardrails", Map.ofEntries(
+                            Map.entry("runtimePlatform", contract.runtimePlatform()),
+                            Map.entry("shellFamily", contract.shellFamily()),
+                            Map.entry("workspaceRoot", contract.workspaceRoot()),
+                            Map.entry("repoRoot", contract.repoRoot()),
+                            Map.entry("explorationRoots", contract.explorationRoots()),
+                            Map.entry("workspaceReadPolicy", contract.workspaceReadPolicy()),
+                            Map.entry("writeScopes", contract.writeScopes()),
+                            Map.entry("toolCatalog", contract.toolCatalog()),
+                            Map.entry("allowedCommandCatalog", contract.allowedCommandCatalog()),
+                            Map.entry("explorationCommandCatalog", contract.explorationCommandCatalog()),
+                            Map.entry("httpEndpointCatalog", contract.httpEndpointCatalog())
                     ));
                 }
             }

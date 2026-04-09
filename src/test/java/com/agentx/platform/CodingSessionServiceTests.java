@@ -37,6 +37,7 @@ import com.agentx.platform.runtime.context.ContextScope;
 import com.agentx.platform.runtime.context.FactBundle;
 import com.agentx.platform.runtime.context.RetrievalBundle;
 import com.agentx.platform.runtime.tooling.CompiledToolCatalog;
+import com.agentx.platform.runtime.tooling.ExplorationCommandSpec;
 import com.agentx.platform.runtime.tooling.ToolCall;
 import com.agentx.platform.runtime.tooling.ToolCatalogEntry;
 import com.agentx.platform.runtime.tooling.ToolExecutor;
@@ -48,6 +49,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.time.LocalDateTime;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -151,12 +153,26 @@ class CodingSessionServiceTests {
                 List.of("sh", "-lc", "sleep 1"),
                 Map.of("TASK_ID", task.taskId()),
                 20,
+                "LINUX_CONTAINER",
+                "POSIX_SH",
+                "/workspace",
+                "/workspace",
+                List.of(".", "src/main/java"),
+                "BROAD_WORKSPACE",
                 new CompiledToolCatalog(List.of(
-                        new ToolCatalogEntry("tool-filesystem", "Filesystem", "DIRECT", List.of("read_file", "list_directory", "search_text", "write_file", "delete_file"), "schema://tool-filesystem", "")
+                        new ToolCatalogEntry(
+                                "tool-filesystem",
+                                "Filesystem",
+                                "DIRECT",
+                                List.of("read_file", "read_range", "head_file", "tail_file", "list_directory", "glob_files", "grep_text", "write_file", "delete_file"),
+                                "schema://tool-filesystem",
+                                ""
+                        )
                 )),
                 List.of("rt-java-21"),
                 Map.of(),
                 Map.of(),
+                explorationCommands(),
                 Map.of(),
                 List.of(),
                 List.of(),
@@ -383,5 +399,16 @@ class CodingSessionServiceTests {
                 eventType,
                 JsonPayload.emptyObject()
         );
+    }
+
+    private Map<String, ExplorationCommandSpec> explorationCommands() {
+        Map<String, ExplorationCommandSpec> commands = new LinkedHashMap<>();
+        commands.put("grep-text", new ExplorationCommandSpec(
+                "grep-text",
+                List.of("grep", "-R", "-n", "--binary-files=without-match", "--color=never", "${query}", "${path}"),
+                List.of("query", "path"),
+                "Readonly recursive grep inside the workspace."
+        ));
+        return Map.copyOf(commands);
     }
 }

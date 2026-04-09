@@ -1,5 +1,7 @@
 package com.agentx.platform.runtime.application.workflow.profile;
 
+import com.agentx.platform.runtime.tooling.ExplorationCommandSpec;
+
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -116,6 +118,7 @@ public record StackProfileManifest(
             String runtimeImage,
             Map<String, String> environment,
             Map<String, List<String>> allowedCommands,
+            List<ExplorationCommandSpec> explorationCommands,
             List<String> postDeliveryCommandIds,
             List<String> verifyCommandIds,
             List<HttpEndpointSpec> httpEndpoints,
@@ -128,6 +131,7 @@ public record StackProfileManifest(
             Objects.requireNonNull(runtimeImage, "runtimeImage must not be null");
             environment = copyMap(environment);
             allowedCommands = copyMultiMap(allowedCommands);
+            explorationCommands = List.copyOf(explorationCommands == null ? List.of() : explorationCommands);
             postDeliveryCommandIds = List.copyOf(postDeliveryCommandIds == null ? List.of() : postDeliveryCommandIds);
             verifyCommandIds = List.copyOf(verifyCommandIds == null ? List.of() : verifyCommandIds);
             httpEndpoints = List.copyOf(httpEndpoints == null ? List.of() : httpEndpoints);

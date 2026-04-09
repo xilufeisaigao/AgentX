@@ -112,6 +112,68 @@
           "git config user.email agentx-runtime@example.local && git config user.name agentx-runtime && rm -rf target && git add -A && git diff --cached --quiet || git commit -m task-$TASK_ID-attempt-$ATTEMPT_NUMBER"
         ]
       },
+      "explorationCommands": [
+        {
+          "commandId": "grep-text",
+          "argvTemplate": [
+            "grep",
+            "-R",
+            "-n",
+            "--binary-files=without-match",
+            "--color=never",
+            "${query}",
+            "${path}"
+          ],
+          "allowedArgs": [
+            "query",
+            "path"
+          ],
+          "description": "Readonly recursive grep inside the workspace."
+        },
+        {
+          "commandId": "read-range",
+          "argvTemplate": [
+            "sed",
+            "-n",
+            "${startLine},${endLine}p",
+            "${path}"
+          ],
+          "allowedArgs": [
+            "startLine",
+            "endLine",
+            "path"
+          ],
+          "description": "Readonly line-range read for a file."
+        },
+        {
+          "commandId": "head-file",
+          "argvTemplate": [
+            "head",
+            "-n",
+            "${lineCount}",
+            "${path}"
+          ],
+          "allowedArgs": [
+            "lineCount",
+            "path"
+          ],
+          "description": "Readonly head read for a file."
+        },
+        {
+          "commandId": "tail-file",
+          "argvTemplate": [
+            "tail",
+            "-n",
+            "${lineCount}",
+            "${path}"
+          ],
+          "allowedArgs": [
+            "lineCount",
+            "path"
+          ],
+          "description": "Readonly tail read for a file."
+        }
+      ],
       "postDeliveryCommandIds": [
         "git-commit-delivery"
       ],
@@ -141,6 +203,40 @@
           "python --version"
         ]
       },
+      "explorationCommands": [
+        {
+          "commandId": "grep-text",
+          "argvTemplate": [
+            "grep",
+            "-R",
+            "-n",
+            "--binary-files=without-match",
+            "--color=never",
+            "${query}",
+            "${path}"
+          ],
+          "allowedArgs": [
+            "query",
+            "path"
+          ],
+          "description": "Readonly recursive grep inside the workspace."
+        },
+        {
+          "commandId": "read-range",
+          "argvTemplate": [
+            "sed",
+            "-n",
+            "${startLine},${endLine}p",
+            "${path}"
+          ],
+          "allowedArgs": [
+            "startLine",
+            "endLine",
+            "path"
+          ],
+          "description": "Readonly line-range read for a file."
+        }
+      ],
       "postDeliveryCommandIds": [],
       "verifyCommandIds": [],
       "httpEndpoints": [
@@ -185,6 +281,68 @@
           "mvn -q test"
         ]
       },
+      "explorationCommands": [
+        {
+          "commandId": "grep-text",
+          "argvTemplate": [
+            "grep",
+            "-R",
+            "-n",
+            "--binary-files=without-match",
+            "--color=never",
+            "${query}",
+            "${path}"
+          ],
+          "allowedArgs": [
+            "query",
+            "path"
+          ],
+          "description": "Readonly recursive grep inside the workspace."
+        },
+        {
+          "commandId": "read-range",
+          "argvTemplate": [
+            "sed",
+            "-n",
+            "${startLine},${endLine}p",
+            "${path}"
+          ],
+          "allowedArgs": [
+            "startLine",
+            "endLine",
+            "path"
+          ],
+          "description": "Readonly line-range read for a file."
+        },
+        {
+          "commandId": "head-file",
+          "argvTemplate": [
+            "head",
+            "-n",
+            "${lineCount}",
+            "${path}"
+          ],
+          "allowedArgs": [
+            "lineCount",
+            "path"
+          ],
+          "description": "Readonly head read for a file."
+        },
+        {
+          "commandId": "tail-file",
+          "argvTemplate": [
+            "tail",
+            "-n",
+            "${lineCount}",
+            "${path}"
+          ],
+          "allowedArgs": [
+            "lineCount",
+            "path"
+          ],
+          "description": "Readonly tail read for a file."
+        }
+      ],
       "postDeliveryCommandIds": [],
       "verifyCommandIds": [
         "require-marker",

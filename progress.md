@@ -12,6 +12,62 @@
 
 ## 已完成阶段
 
+### P10.1 Coding Context 设计改版（Docs）
+
+- 目标
+  - 明确把 coding 下一阶段目标从“继续加强代码 RAG”切换为“保留结构化事实层 + Unix 类工具主动探索代码 + 读宽写窄权限隔离”。
+- 当前状态
+  - `DONE`
+- 备注
+  - 已新增 `docs/runtime/07-unix-exploration-coding-context-design.md`
+  - 已将 `docs/runtime/06-layered-vector-rag-design.md` 降级为历史归档
+  - 已同步更新：
+    - `docs/README.md`
+    - `docs/runtime/03-context-compilation-center.md`
+    - `docs/runtime/04-local-rag-and-code-indexing.md`
+    - `docs/runtime/05-runtime-closure-assessment.md`
+    - `docs/runtime/01-runtime-v1-implementation.md`
+    - `docs/deferred/01-runtime-v1-deferred.md`
+
+### P10.2 Interview / Upgrade Design 收口（Docs）
+
+- 目标
+  - 把下一阶段能力升级蓝图和本轮项目面试口径收口到文档体系里，避免运行真相、设计稿和 interview bank 再次分叉。
+- 当前状态
+  - `DONE`
+- 备注
+  - 已新增：
+    - `docs/runtime/08-agent-capability-upgrade-design.md`
+    - `docs/runtime/09-repo-graph-lite-design.md`
+    - `docs/interview/agentx-end-to-end-project-interview.md`
+  - 已更新：
+    - `docs/architecture/02-fixed-coding-workflow.md`
+    - `docs/architecture/04-state-machine-layers.md`
+    - `docs/runtime/07-unix-exploration-coding-context-design.md`
+    - `docs/interview/runtime-rag-and-agent-frameworks.md`
+    - `docs/interview/README.md`
+    - `docs/README.md`
+
+### P10.3 审批处理中心设计补档（Docs）
+
+- 目标
+  - 把“审批处理中心”补成独立主线设计，并同步主线架构图、面试口径和进度索引，明确 `资源授权账本` 与 `外部集成契约` 都是其中的持久化事实。
+- 当前状态
+  - `DONE`
+- 备注
+  - 已新增：
+    - `docs/runtime/10-approval-processing-center-design.md`
+  - 已更新：
+    - `docs/README.md`
+    - `docs/architecture/02-fixed-coding-workflow.md`
+    - `docs/architecture/04-state-machine-layers.md`
+    - `docs/runtime/07-unix-exploration-coding-context-design.md`
+    - `docs/runtime/08-agent-capability-upgrade-design.md`
+    - `docs/interview/agentx-end-to-end-project-interview.md`
+    - `docs/interview/runtime-rag-and-agent-frameworks.md`
+    - `docs/interview/general-agent-system-design.md`
+    - `progress.md`
+
 ### P0 仓库基线
 
 - 目标
@@ -477,14 +533,301 @@
 ### P12 效果升级与治理
 
 - 目标
-  - 在控制面和展示面可用之后，再系统推进 prompt 质量、评测、向量化召回和治理能力。
+  - 在控制面和展示面可用之后，再系统推进 Unix exploration、审批治理、spec/verify、repo graph 和 eval-driven upgrade。
 - 产出
-  - embeddings / vector recall
-  - 检索排序与 rerank
-  - agent benchmark / regression gate
-  - prompt/version 治理
-  - 更复杂 DAG 与 replan 质量提升
+  - coding unix exploration 主链切换
+  - requirement completeness gate
+  - approval processing center
+  - external integration contract
+  - spec-first / verify-first
+  - repo graph lite
+  - write scope overlap governance
+  - historical decision reuse
+  - eval-driven upgrade loop
 - 验收方式
   - 不破坏当前固定主链和真实 runtime / context / retrieval 基础设施
 - 当前状态
   - `PENDING`
+- 备注
+  - `2026-04-02` 已先完成分层向量 RAG 设计稿：
+    - `docs/runtime/06-layered-vector-rag-design.md`
+  - 设计约束：
+    - 保留 `FactRetriever -> RetrievalBundle -> ContextCompilationCenter` 主边界
+    - 保留 `base repo index + workflow overlay index` 的分层索引思路
+    - 文档已明确标注“设计完成、代码待实现”，当前运行真相仍然是 lexical / symbol baseline；该文档现已降级为归档对照，不再是 coding 主路径主线
+  - `2026-04-02` 已补 interview bank 与归档 skill：
+    - `docs/interview/README.md`
+    - `docs/interview/runtime-rag-and-agent-frameworks.md`
+    - `.codex/skills/agentx-interview-bank-curator/SKILL.md`
+  - `2026-04-04` 已补充 AgentX 端到端项目面试题口径：
+    - `docs/interview/agentx-end-to-end-project-interview.md`
+    - 重点补齐 SDD / TDD、模块级验证、前后端联调测试思路、老项目增量分析、repo graph lite 与图数据库边界、探索成本控制、verify agent 角色与 merge/verify 时序等问题
+  - `2026-04-07` 已继续补充 interview bank：
+    - `docs/interview/general-agent-system-design.md`
+    - 新增“Agent 学术组成、幻觉治理、工业化落地与 AgentX 映射”答法，统一了通用理论、工业工程化做法和项目内固定主链口径
+    - 新增“多 Agent / 异步任务防止上下文污染”“长短期记忆与结构化真相边界”“Agent 设计范式与 AgentX 选型”三组答法，统一了 context pack、状态机、中心派发与局部 ReAct-like 回路的面试表达
+    - 同日继续补充“记忆压缩方法”“长对话 / 上下文窗口不足处理策略”“AgentX 中 ReAct-like 回路详细实现”三组答法，统一了短期工作记忆、长期可复用知识、system of record 与受控工具回路的面试表达
+    - 同日继续补充“探索型 AI / Agent 岗位匹配度”“Agent 编排 / tool calling / RAG 的工程落地证明”“代码检索为何更偏 grep 而非向量数据库”“解题准确率提升的评测归因闭环与工具触发边界”四组答法，统一了项目经历、代码探索路线和 eval-driven optimization 的面试表达
+    - 同日新增 `docs/interview/evaluation-and-rag-quality.md`，集中归档“RAG 质量指标”“golden set 构建”“retrieval scenario pack”“检索失败归因”“regression 比较”“badcase review”“为何当前不优先 embedding”“局部检索变强但整体 workflow 不涨分”八组更底层的评测口径
+    - 同日继续补充“架构师 agent 的职责边界”“为什么 approval processing center 与 repo graph lite 都挂在 architect 旁边”两组答法，统一了规划层、资源边界和代码边界在主链中的位置表达
+  - 归档规则：
+    - 新问题优先插入现有主题文档
+    - 若无合适主题，再在 `docs/interview/` 下新建文档
+    - 每题不编号，只标 `重要程度`
+  - 当前主线设计索引：
+    - `docs/runtime/07-unix-exploration-coding-context-design.md`
+    - `docs/runtime/08-agent-capability-upgrade-design.md`
+    - `docs/runtime/09-repo-graph-lite-design.md`
+    - `docs/runtime/10-approval-processing-center-design.md`
+
+### P12.1 Coding Unix Exploration 主链切换
+
+- 目标
+  - 把 coding 阶段从“平台预注入 repo retrieval 片段”切到“结构化事实层 + Unix 类只读探索工具主动确认代码真相”。
+- 优先级
+  - `P0`
+- 当前状态
+  - `DONE`
+- 产出
+  - `TaskExecutionContract` 已增加：
+    - `runtimePlatform`
+    - `shellFamily`
+    - `workspaceRoot`
+    - `repoRoot`
+    - `explorationRoots`
+    - `workspaceReadPolicy`
+    - `explorationCommandCatalog`
+  - `CapabilityRuntimeAssembly / StackProfileManifest` 已支持独立的 `explorationCommands` 目录编译，不再和执行类 `allowedCommands` 混用
+  - `DeterministicTaskExecutionContractBuilder` 已固定输出 Linux-first / POSIX shell / broad read facts，并把 `explorationRoots` 写入 coding contract
+  - `DefaultScopedFactResolver` 已把新环境事实、`explorationCommandCatalog` 和扩展后的 `runtimeGuardrails` 暴露给 coding prompt
+  - `DefaultContextCompilationCenter` 已对 `ContextPackType.CODING` 一次性切掉 repo retrieval snippets；architect / verify retrieval 保持原样
+  - `ToolRegistry / ToolExecutor / ToolCallNormalizer` 已切换到新工具协议：
+    - 新 filesystem operation：
+      - `glob_files`
+      - `read_range`
+      - `head_file`
+      - `tail_file`
+      - `grep_text`
+    - `search_text` 只保留兼容 alias，进入执行链前会规范化为 `grep_text`
+    - `tool-shell` 已拆成：
+      - `run_command`
+      - `run_exploration_command`
+    - exploration command 已改为平台侧 `argvTemplate + allowedArgs` 展开，模型不再生成 raw shell string
+  - `CodingConversationAgent` prompt 已切到“先看结构化边界 -> 再做 Unix exploration -> 最后写”的主链，并显式展示：
+    - shell/runtime 环境事实
+    - workspace / repo root
+    - exploration roots
+    - workspace read policy
+    - write scopes
+    - exploration / execution commandIds
+  - stack profile 已补齐 exploration command catalog：
+    - `src/main/resources/stack-profiles/java-backend-maven.json`
+    - `src/main/resources/stack-profiles/ts-fullstack-pnpm-monorepo.json`
+- 验收结果
+  - 已新增/更新专项测试：
+    - `DeterministicTaskExecutionContractBuilderTests`
+    - `CapabilityRuntimeAssemblerTests`
+    - `ToolCallNormalizerTests`
+    - `ToolExecutorTests`
+    - `DefaultContextCompilationCenterTests`
+    - `CodingSessionServiceTests`
+    - `TaskDispatcherTests`
+    - `AgentKernelEvalBaselineTests`
+  - `2026-04-04` 已执行针对性验证：
+    - 命令：`cmd /c "mvnw.cmd -q -Dtest=DeterministicTaskExecutionContractBuilderTests,CapabilityRuntimeAssemblerTests,ToolCallNormalizerTests,ToolExecutorTests,CodingSessionServiceTests,TaskDispatcherTests,AgentKernelEvalBaselineTests,DefaultContextCompilationCenterTests test"`
+    - 结果：通过
+  - `2026-04-04` 已执行全量单测回归：
+    - 命令：`cmd /c "mvnw.cmd -q test"`
+    - 结果：通过
+  - `2026-04-04` 已完成一轮 P12.1 残留清理：
+    - 对外可见 tool catalog 与新测试口径已统一只保留 `grep_text`
+    - `search_text` 只保留在 `ToolCallNormalizer` 内部作为兼容 alias，不再作为主链公开 operation
+- 备注
+  - 这是当前 coding 方向与 interview 口径统一的第一优先级事项，现已完成首版代码切换。
+  - 本轮明确未做：
+    - PowerShell exploration 模板
+    - architect / verify retrieval 策略切换
+    - repo graph lite 运行时裁剪
+    - approval processing center
+- 设计位置
+  - 主设计：
+    - `docs/runtime/07-unix-exploration-coding-context-design.md`
+  - 能力升级蓝图汇总：
+    - `docs/runtime/08-agent-capability-upgrade-design.md`
+
+### P12.2 Requirement Completeness Gate
+
+- 目标
+  - 把 requirement 阶段从“模板补洞”升级为“完整度门禁”，减少 architect 阶段才暴露关键缺口。
+- 优先级
+  - `P1`
+- 计划产出
+  - completeness checklist：目标、范围、角色、主流程、异常流程、验收标准、非功能要求、外部依赖、权限与数据约束
+  - requirement 阶段 gate 规则：未满足门禁不放行 architect
+  - 缺口项进入正式 ticket / blocker，而不是留在自由对话里
+- 备注
+  - 对 production-grade 需求确认与 interview 表达都有直接帮助。
+- 设计位置
+  - `docs/runtime/08-agent-capability-upgrade-design.md`
+  - 相关主链图：
+    - `docs/architecture/02-fixed-coding-workflow.md`
+  - 相关状态机口径：
+    - `docs/architecture/04-state-machine-layers.md`
+
+### P12.3 Approval Processing Center（含 Resource Grant Ledger）
+
+- 目标
+  - 把“一次次重复审批”升级为审批处理中心，统一承接规范化资源请求、异步审批、grant 复用和结果分发。
+- 优先级
+  - `P1`
+- 计划产出
+  - 资源请求定义与入口：支持 architect 发起规范化资源请求
+  - 异步审批队列 / 审批流适配：支持请求异步流转
+  - 资源授权账本：沉淀可复用 grant、scope、批准人、有效期与环境绑定
+  - 唤起与批量分发：支持“审批回来立刻唤起 architect”或“下次统一补入”
+  - context compilation 回填最近有效 grant / pending request 摘要，避免同类问题反复打断用户
+- 备注
+  - 该能力应沿既有 ticket / context 主链扩展，不另造平行审批系统，也不替代 architect。
+  - `2026-04-04` 已补队列选型设计：
+    - 审批处理中心第一版消息队列口径改为 `RocketMQ`
+    - 审批请求、grant、integration contract 的真相仍然落 MySQL
+    - RocketMQ 负责审批请求投递、审批结果回流和 architect 唤起等异步消息流转
+- 设计位置
+  - 总入口：
+    - `docs/runtime/08-agent-capability-upgrade-design.md`
+  - 详细设计：
+    - `docs/runtime/10-approval-processing-center-design.md`
+  - 相关主链图：
+    - `docs/architecture/02-fixed-coding-workflow.md`
+  - 相关状态机口径：
+    - `docs/architecture/04-state-machine-layers.md`
+
+### P12.4 External Integration Contract
+
+- 目标
+  - 把第三方系统接入从“自由描述或临时 skill”升级为结构化 integration contract。
+- 优先级
+  - `P1`
+- 计划产出
+  - endpoint、method、auth、request/response schema、environment、owner、grant 绑定关系
+  - `TaskExecutionContract` / tool catalog 暴露 allowlisted endpoint，而不是让 agent 自由拼 HTTP 请求
+  - requirement / architect 阶段对外部依赖信息缺口走标准澄清票据
+- 备注
+  - 该项与 Approval Processing Center 协同设计，是其中的契约事实层。
+- 设计位置
+  - 总入口：
+    - `docs/runtime/08-agent-capability-upgrade-design.md`
+  - 详细设计：
+    - `docs/runtime/10-approval-processing-center-design.md`
+  - 相关主链图：
+    - `docs/architecture/02-fixed-coding-workflow.md`
+  - 当前已形成审批处理中心中的 contract 设计稿；后续落代码前可继续补 contract schema / auth model 细化稿。
+
+### P12.5 Spec-First / Verify-First 机制
+
+- 目标
+  - 把 SDD / TDD 的有效部分内化成 AgentX 主链机制，而不是停留在面试概念层。
+- 优先级
+  - `P2`
+- 计划产出
+  - architect 先产出 task spec、write scopes、verify expectations，再创建 coding task
+  - 对关键任务增加 verify-first 子任务，例如测试脚本、验收脚本、API smoke 先行
+  - coding 交付与 verify 裁决都回指同一份 spec / acceptance truth
+  - merge-gate 只负责把 task 交付并入模块集成候选，不再在每个 task merge 后立即启动 verify agent
+  - 当 `WorkModule` 达到可集成状态时，再由模块集成测试闸门执行确定性集成测试，并在证据产出后启动 verify agent
+- 备注
+  - 不单独引入重框架，优先复用现有 task template / verify contract 机制。
+  - `2026-04-04` 已完成设计调整与文档同步：
+    - verify agent 的职责边界后移到模块级集成测试之后
+    - architecture / runtime design / interview 口径已统一改为 `merge-gate -> integration-test-gate -> verify`
+  - 当前代码缺口：
+    - 现有 Runtime V1 代码仍然是 task `DELIVERED` 后直接进入 verify
+    - 尚未补模块集成候选聚合、模块集成 checkout、模块级 deterministic integration contract、module-scoped verify context
+    - 尚未把 `VERIFYING` 的触发条件从“单 task merge 成功”切到“模块达到可集成状态”
+- 设计位置
+  - `docs/runtime/08-agent-capability-upgrade-design.md`
+  - 相关主链图：
+    - `docs/architecture/02-fixed-coding-workflow.md`
+  - 相关状态机口径：
+    - `docs/architecture/04-state-machine-layers.md`
+
+### P12.6 Repo Graph Lite
+
+- 目标
+  - 为大仓库增量开发补一个轻量代码图视角，用于帮助 architect 理解模块结构、帮助 coding 缩小探索范围。
+- 优先级
+  - `P2`
+- 计划产出
+  - 基于 path / symbol / import / module relation 的轻量 repo graph
+  - 为 architect 提供 exploration roots 推荐，为 coding 提供搜索范围提示
+  - 保持“图是辅助视图，不替代真实 Unix 探索主路径”
+- 备注
+  - 第一版不急于引入图数据库，先验证图视角是否真正提升规划与探索效率。
+- 设计位置
+  - 总入口：
+    - `docs/runtime/08-agent-capability-upgrade-design.md`
+  - 详细设计：
+    - `docs/runtime/09-repo-graph-lite-design.md`
+  - interview 口径沉淀：
+    - `docs/interview/runtime-rag-and-agent-frameworks.md`
+    - `docs/interview/agentx-end-to-end-project-interview.md`
+
+### P12.7 Write Scope Overlap Governance
+
+- 目标
+  - 把并发冲突尽量前移到 architect / dispatcher，而不是等到 merge 阶段才发现。
+- 优先级
+  - `P2`
+- 计划产出
+  - task 下发前检查 write scope 是否重叠
+  - 对潜在冲突任务改为串行、拆分或 blocker 重规划
+  - merge-gate 冲突继续作为最终兜底，而不是唯一治理手段
+- 备注
+  - 该项比“增量代码向量冲突检测”更符合当前固定主链。
+- 设计位置
+  - coding 主线与并发处理：
+    - `docs/runtime/07-unix-exploration-coding-context-design.md`
+  - 能力升级蓝图汇总：
+    - `docs/runtime/08-agent-capability-upgrade-design.md`
+  - 相关主链图：
+    - `docs/architecture/02-fixed-coding-workflow.md`
+  - 相关状态机口径：
+    - `docs/architecture/04-state-machine-layers.md`
+
+### P12.8 Historical Decision Reuse
+
+- 目标
+  - 优先复用历史 task spec、blocker 答案、verify 脚本和失败原因摘要，而不是继续扩大代码 RAG 比例。
+- 优先级
+  - `P3`
+- 计划产出
+  - 结构化历史经验摘要
+  - architect / coding / verify pack 的任务级相似案例提示
+  - 历史 blocker / approval / verify evidence 的范围化复用
+- 备注
+  - 重点复用“决策和边界”，不是直接复用大段代码片段。
+- 设计位置
+  - 当前仅在 `progress.md` 中保留升级方向，尚未形成独立设计稿。
+  - 后续建议优先挂靠：
+    - `docs/runtime/08-agent-capability-upgrade-design.md`
+    - `docs/runtime/03-context-compilation-center.md`
+    - `docs/interview/agentx-end-to-end-project-interview.md`
+
+### P12.9 Eval-Driven Upgrade Loop
+
+- 目标
+  - 把后续所有效果升级都接入 Eval Center，而不是靠主观感受判断优化是否成立。
+- 优先级
+  - `P3`
+- 计划产出
+  - 为 Unix exploration、requirement gate、approval processing center、repo graph 等能力补 scenario pack
+  - 在 `DAG_QUALITY / TOOL_PROTOCOL / HUMAN_IN_LOOP / EFFICIENCY` 维度增加回归指标
+  - 报告中显式区分“方向正确但未落地”与“已落地但效果不佳”
+- 备注
+  - 该项是后续迭代质量控制的总抓手。
+- 设计位置
+  - 当前仅在 `progress.md` 中保留升级方向，评测底座真相见：
+    - `docs/evaluation/01-eval-center-overview.md`
+    - `docs/evaluation/02-dimension-catalog.md`
+    - `docs/evaluation/04-scenario-pack-and-regression.md`
+  - 后续建议补一份专门的 upgrade-to-eval mapping 设计稿。

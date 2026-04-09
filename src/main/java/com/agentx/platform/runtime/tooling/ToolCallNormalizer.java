@@ -29,6 +29,9 @@ public class ToolCallNormalizer {
 
         String normalizedToolId = rawToolCall.toolId().trim().toLowerCase(Locale.ROOT);
         String normalizedOperation = rawToolCall.operation().trim().toLowerCase(Locale.ROOT);
+        if (normalizedToolId.equals("tool-filesystem") && normalizedOperation.equals("search_text")) {
+            normalizedOperation = "grep_text";
+        }
         Map<String, Object> normalizedArguments = normalizeArguments(normalizedToolId, normalizedOperation, rawToolCall.arguments());
 
         if (normalizedToolId.equals("tool-filesystem") && normalizedOperation.equals("read_file")) {

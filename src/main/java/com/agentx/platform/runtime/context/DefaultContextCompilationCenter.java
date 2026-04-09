@@ -86,7 +86,7 @@ public class DefaultContextCompilationCenter implements ContextCompilationCenter
     }
 
     private RetrievalBundle retrievalBundle(ContextCompilationRequest request, FactBundle factBundle) {
-        if (request.packType() == ContextPackType.REQUIREMENT) {
+        if (request.packType() == ContextPackType.REQUIREMENT || request.packType() == ContextPackType.CODING) {
             return new RetrievalBundle(List.of());
         }
         RetrievalQuery query = retrievalQueryPlanner.plan(request, factBundle);

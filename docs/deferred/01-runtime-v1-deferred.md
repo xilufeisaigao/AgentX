@@ -75,13 +75,19 @@
 4. 更丰富的 verify contract 类型
 5. 更细的运行策略参数控制面
 
-## 8. 向量化与检索效果升级
+## 8. Coding 探索模型与权限隔离升级
 
-1. embeddings / vector store
-2. hybrid recall / rerank
-3. 更细粒度 chunk 策略
-4. requirement / ticket / logs 的语义召回
-5. docs / schema / code 的跨源排序优化
+1. coding 从“平台预注入代码 RAG”迁移到“Unix 类工具主动探索代码”
+2. `explorationRoots` 与 `writeScopes` 的显式分离
+3. 环境类型事实化，例如 Linux shell / PowerShell / runtime image / tool family
+4. 超出写域时的 blocker 升级与 architect 重规划链路
+5. eval 从“代码 RAG 质量”转向“探索效率 / 越权阻断 / 工具协议对齐”
+
+说明：
+
+1. 新目标方案已整理到 `docs/runtime/07-unix-exploration-coding-context-design.md`。
+2. `docs/runtime/06-layered-vector-rag-design.md` 已降级为历史归档，不再作为 coding 主路径目标。
+3. 当前代码真相仍然是 lexical / symbol baseline，直到 runtime/tooling 真正切换。
 
 ## 10. Eval Center 后续增强
 

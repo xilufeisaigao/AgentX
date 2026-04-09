@@ -228,8 +228,8 @@ class AgentKernelEvalBaselineTests {
                 "no prior turns"
         );
         CompiledToolCatalog catalog = new CompiledToolCatalog(List.of(
-                new ToolCatalogEntry("tool-filesystem", "Filesystem", "DIRECT", List.of("read_file", "list_directory", "search_text", "write_file", "delete_file"), "schema://tool-filesystem", ""),
-                new ToolCatalogEntry("tool-shell", "Shell", "DIRECT", List.of("run_command"), "schema://tool-shell", "")
+                new ToolCatalogEntry("tool-filesystem", "Filesystem", "DIRECT", List.of("read_file", "read_range", "head_file", "tail_file", "list_directory", "glob_files", "grep_text", "write_file", "delete_file"), "schema://tool-filesystem", ""),
+                new ToolCatalogEntry("tool-shell", "Shell", "DIRECT", List.of("run_command", "run_exploration_command"), "schema://tool-shell", "")
         ));
         toolRegistry.validate(catalog, result.value().toolCall());
         boolean passed = result.value().decisionType() == CodingDecisionType.TOOL_CALL
@@ -290,8 +290,22 @@ class AgentKernelEvalBaselineTests {
                 : ContextScope.workflow("workflow-eval-1", packType.name().toLowerCase());
         Map<String, Object> facts = Map.of(
                 "workflow", Map.of("workflowRunId", "workflow-eval-1", "title", "学生管理系统"),
+                "runtimePlatform", "LINUX_CONTAINER",
+                "shellFamily", "POSIX_SH",
+                "workspaceRoot", "/workspace",
+                "repoRoot", "/workspace",
+                "explorationRoots", List.of(".", "src/main/java"),
+                "workspaceReadPolicy", "BROAD_WORKSPACE",
                 "runtimeGuardrails", Map.of(
-                        "toolCatalog", List.of("tool-filesystem.list_directory", "tool-shell.run_command"),
+                        "runtimePlatform", "LINUX_CONTAINER",
+                        "shellFamily", "POSIX_SH",
+                        "workspaceRoot", "/workspace",
+                        "repoRoot", "/workspace",
+                        "explorationRoots", List.of(".", "src/main/java"),
+                        "workspaceReadPolicy", "BROAD_WORKSPACE",
+                        "toolCatalog", List.of("tool-filesystem.list_directory", "tool-filesystem.grep_text", "tool-shell.run_exploration_command", "tool-shell.run_command"),
+                        "allowedCommandCatalog", Map.of("maven-test", List.of("sh", "-lc", "mvn -q test")),
+                        "explorationCommandCatalog", Map.of("grep-text", Map.of("description", "Readonly recursive grep inside the workspace.")),
                         "writeScopes", List.of("src/main/java")
                 )
         );

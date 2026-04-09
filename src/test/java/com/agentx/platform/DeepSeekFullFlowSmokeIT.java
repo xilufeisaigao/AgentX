@@ -171,26 +171,7 @@ class DeepSeekFullFlowSmokeIT {
                 ContextScope.task("workflow-student-smoke-2", "task-student-impl", "run-student-1", "coding", null),
                 "SMOKE_CODING",
                 codingFacts(plannedTask, confirmedContent, writeScopes),
-                List.of(
-                        snippet(
-                                "code-1",
-                                "overlay-code",
-                                "src/main/java/com/example/student/StudentService.java",
-                                "StudentService",
-                                "public class StudentService { Student create(StudentCreateRequest request) { ... } }",
-                                0.95,
-                                List.of("StudentService", "create")
-                        ),
-                        snippet(
-                                "code-2",
-                                "repo-code",
-                                "src/test/java/com/example/student/StudentControllerTest.java",
-                                "StudentControllerTest",
-                                "@SpringBootTest class StudentControllerTest { ... }",
-                                0.82,
-                                List.of("StudentControllerTest", "shouldCreateStudent")
-                        )
-                )
+                List.of()
         );
 
         StructuredModelResult<CodingAgentDecision> codingFirstTurn = codingAgent.evaluate(
@@ -300,7 +281,7 @@ class DeepSeekFullFlowSmokeIT {
                                 assertThat(isWithinWriteScope(path, writeScopes)).isTrue();
                             }
                         }
-                        case "search_text" -> assertThat(String.valueOf(
+                        case "grep_text" -> assertThat(String.valueOf(
                                 decision.toolCall().arguments().getOrDefault("query", "")
                         )).isNotBlank();
                         default -> {
@@ -423,18 +404,33 @@ class DeepSeekFullFlowSmokeIT {
         ));
         facts.put("upstreamDeliveries", List.of());
         facts.put("openBlockers", List.of());
+        facts.put("runtimePlatform", "LINUX_CONTAINER");
+        facts.put("shellFamily", "POSIX_SH");
+        facts.put("workspaceRoot", "/workspace");
+        facts.put("repoRoot", "/workspace");
+        facts.put("explorationRoots", List.of(".", "src/main/java", "src/test/java"));
+        facts.put("workspaceReadPolicy", "BROAD_WORKSPACE");
         facts.put("runtimeGuardrails", Map.of(
+                "runtimePlatform", "LINUX_CONTAINER",
+                "shellFamily", "POSIX_SH",
+                "workspaceRoot", "/workspace",
+                "repoRoot", "/workspace",
+                "explorationRoots", List.of(".", "src/main/java", "src/test/java"),
+                "workspaceReadPolicy", "BROAD_WORKSPACE",
                 "toolCatalog", List.of(
-                        new ToolCatalogEntry("tool-filesystem", "Filesystem", "DIRECT", List.of("read_file", "list_directory", "search_text", "write_file", "delete_file"), "schema://tool-filesystem", ""),
-                        new ToolCatalogEntry("tool-shell", "Shell", "DIRECT", List.of("run_command"), "schema://tool-shell", ""),
+                        new ToolCatalogEntry("tool-filesystem", "Filesystem", "DIRECT", List.of("read_file", "read_range", "head_file", "tail_file", "list_directory", "glob_files", "grep_text", "write_file", "delete_file"), "schema://tool-filesystem", ""),
+                        new ToolCatalogEntry("tool-shell", "Shell", "DIRECT", List.of("run_command", "run_exploration_command"), "schema://tool-shell", ""),
                         new ToolCatalogEntry("tool-git", "Git", "DIRECT", List.of("git_status", "git_diff_stat", "git_head"), "schema://tool-git", "")
                 ),
                 "allowedCommandCatalog", Map.of(
                         "show-marker", List.of("sh", "-lc", "test -f \"$MARKER_FILE\" && cat \"$MARKER_FILE\" || true"),
                         "git-commit-delivery", List.of("sh", "-lc", "git add -A && git commit -m smoke")
                 ),
-                "writeScopes", writeScopes,
-                "repoRoot", "/workspace"
+                "explorationCommandCatalog", Map.of(
+                        "grep-text", Map.of("description", "Readonly recursive grep inside the workspace."),
+                        "read-range", Map.of("description", "Readonly line-range read for a file.")
+                ),
+                "writeScopes", writeScopes
         ));
         facts.put("latestRunFacts", Map.of(
                 "runId", "run-student-1",

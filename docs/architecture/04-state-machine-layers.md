@@ -68,7 +68,7 @@ flowchart TB
 
 1. `WorkflowRun = WAITING_ON_HUMAN` 的前提不是“有 ticket”，而是存在未解决的 `GLOBAL_BLOCKING` ticket 且当前没有合法自动下一步。
 2. `Ticket = ANSWERED` 不等于 `RESOLVED`。
-3. `RequirementDoc = CONFIRMED` 是进入 task graph 的前提，但后续仍可 reopen。
+3. requirement 在进入 architect 前，应先通过 completeness gate；`RequirementDoc = CONFIRMED` 仍然是进入 task graph 的前提，但后续仍可 reopen。
 4. 节点等待人工只是信号，L1 最终看的是 L3 真相。
 
 ## L4 `WorkTask` 设计
@@ -96,7 +96,8 @@ flowchart TB
 也就是说：
 
 1. 编码代理完成代码和证据上传，只能把任务推进到 `DELIVERED`
-2. 只有经过 `合并闸门 + 验证代理`，任务才算 `DONE`
+2. `merge-gate` 只负责把 task 改动并入模块集成候选，不直接让任务变成 `DONE`
+3. 只有当所属 `WorkModule` 达到可集成状态，经过 `模块集成测试闸门 + 验证代理`，任务才算 `DONE`
 
 ## L4 状态图
 
@@ -120,7 +121,7 @@ stateDiagram-v2
   BLOCKED --> READY: 阻塞解除
   BLOCKED --> CANCELED: 流程取消
 
-  DELIVERED --> DONE: 合并闸门和验证通过
+  DELIVERED --> DONE: 模块集成测试和验证通过
   DELIVERED --> READY: 需要返工但无新阻塞
   DELIVERED --> BLOCKED: 需要补充事实或等待任务级回复
 
@@ -133,12 +134,38 @@ stateDiagram-v2
 | --- | --- | --- | --- | --- |
 | `PLANNED` | `openTaskForDispatch` | DAG 依赖满足，且不存在 task blocker | `READY` | 标记可派发 |
 | `READY` | `dispatchTask` | agent instance、上下文快照、写域齐备 | `IN_PROGRESS` | 创建 `task_runs` |
-| `READY/IN_PROGRESS` | `blockTask` | 出现 `TASK_BLOCKING` ticket、环境缺失或依赖回退 | `BLOCKED` | 记录阻塞原因 |
+| `READY/IN_PROGRESS` | `blockTask` | 出现 `TASK_BLOCKING` ticket、环境缺失、写域升级需求、grant 缺失、资源审批处理中、integration contract 缺失/校验失败或依赖回退 | `BLOCKED` | 记录阻塞原因 |
 | `BLOCKED` | `unblockTask` | blocker 清除 | `READY` | 允许重新派发 |
 | `IN_PROGRESS` | `deliverTask` | task run 产出交付候选 | `DELIVERED` | 记录交付证据 |
-| `DELIVERED` | `acceptDelivery` | 合并闸门通过且验证通过 | `DONE` | 任务真正完成 |
-| `DELIVERED` | `requestRework` | 验证失败但仍在原任务范围内 | `READY` | 回到可返工状态 |
+| `DELIVERED` | `acceptDelivery` | 所属模块集成候选成立，且模块集成测试和验证代理通过 | `DONE` | 任务真正完成 |
+| `DELIVERED` | `requestRework` | 模块集成测试失败或验证失败但仍在原任务范围内 | `READY` | 回到可返工状态 |
+| `DELIVERED` | `blockTask` | merge 冲突、workspace drift、跨 task 语义冲突、模块集成失败且超出原任务范围、需要扩写域或补授权 | `BLOCKED` | 回 architect 重规划 |
 | `IN_PROGRESS/DELIVERED` | `failTask` | 不可恢复失败 | `FAILED` | 记录失败 |
+
+## 任务阻塞原因应该怎么理解
+
+随着后续升级，`BLOCKED` 不只意味着“等人回答一个问题”，还包括几类固定原因：
+
+1. `TASK_BLOCKING`
+   - 任务级澄清或决策未完成
+2. `WRITE_SCOPE_ESCALATION_REQUIRED`
+   - 当前实现需要改写写域外文件
+3. `RESOURCE_GRANT_REQUIRED`
+   - 当前任务需要新的资源授权，且没有可复用 grant
+4. `RESOURCE_APPROVAL_PENDING`
+   - 资源申请已进入审批处理中心，等待审批结果或结果回填
+5. `INTEGRATION_CONTRACT_REQUIRED`
+   - 第三方系统接入信息不完整、契约校验失败或需要重提
+6. `WORKSPACE_DRIFT`
+   - 当前 workspace base 过旧，已不适合继续局部实现
+7. `MERGE_CONFLICT`
+   - merge-gate 暴露文本级冲突
+
+也就是说：
+
+`BLOCKED` 仍然是统一业务状态；具体为什么被阻塞，由 blocker 原因和 ticket 细分。
+
+其中 `RESOURCE_* / INTEGRATION_*` 类 blocker 的解除，后续统一由审批处理中心结果回流驱动，不要求 worker 直接找人。
 
 ## L4 和其他层怎么交互
 
@@ -148,8 +175,9 @@ stateDiagram-v2
 | `Ticket` | `TASK_BLOCKING` 且未解决时，把任务投影为 `BLOCKED` |
 | `工作代理管理器` | 把 `READY` 派发为 `IN_PROGRESS` |
 | `编码代理池` | 让任务从 `IN_PROGRESS` 变成 `DELIVERED / BLOCKED / FAILED` |
-| `合并闸门 + 验证代理` | 让任务从 `DELIVERED` 变成 `DONE / READY / BLOCKED` |
-| `WorkflowRun` | 读取任务聚合结果，决定是否留在 `EXECUTING_TASKS` 或进入 `VERIFYING` |
+| `合并闸门` | 为 `DELIVERED` task 物化模块集成候选与 merge 证据，不直接改成 `DONE` |
+| `模块集成测试闸门 + 验证代理` | 当模块达到可集成状态时，让相关任务从 `DELIVERED` 变成 `DONE / READY / BLOCKED` |
+| `WorkflowRun` | 读取任务与模块聚合结果，决定是否留在 `EXECUTING_TASKS` 或进入 `VERIFYING` |
 
 ## L5 `Execution` 设计
 

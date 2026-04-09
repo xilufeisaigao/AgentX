@@ -1,6 +1,6 @@
 # Context Compilation Center
 
-本文只描述当前已经落地的上下文编译中心，不写未来向量化或更复杂上下文工程。
+本文只描述当前已经落地的上下文编译中心，不写未来实现细节。
 
 ## 1. 目标
 
@@ -127,9 +127,11 @@ L5 真相继续承载在 `task_context_snapshots`：
 
 后续如果接：
 
-1. embeddings / vector recall
+1. coding 的 Unix 探索工具上下文
 2. prompt 压缩
 3. repo 级缓存
 4. 外部知识源
 
-都应该继续沿 `ContextCompilationCenter -> FactRetriever -> RetrievalBundle` 这条边界扩展，而不是把上下文组装重新散落回各个 agent。
+都应该继续沿统一上下文入口扩展，而不是把上下文组装重新散落回各个 agent。
+
+其中新的 coding 目标方案已经单独写入 `docs/runtime/07-unix-exploration-coding-context-design.md`。

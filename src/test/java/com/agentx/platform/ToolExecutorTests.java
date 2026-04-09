@@ -16,6 +16,7 @@ import com.agentx.platform.domain.shared.model.JsonPayload;
 import com.agentx.platform.domain.shared.model.WriteScope;
 import com.agentx.platform.runtime.agentruntime.AgentRuntime;
 import com.agentx.platform.runtime.agentruntime.EphemeralExecutionResult;
+import com.agentx.platform.runtime.tooling.ExplorationCommandSpec;
 import com.agentx.platform.runtime.application.workflow.TaskExecutionContract;
 import com.agentx.platform.runtime.support.ProcessCommandRunner;
 import com.agentx.platform.runtime.tooling.CompiledToolCatalog;
@@ -35,6 +36,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -266,13 +268,20 @@ class ToolExecutorTests {
                 List.of("sh", "-lc", "sleep 1"),
                 Map.of("TASK_ID", "task-test"),
                 20,
+                "LINUX_CONTAINER",
+                "POSIX_SH",
+                "/workspace",
+                "/workspace",
+                List.of(".", "src/test/java"),
+                "BROAD_WORKSPACE",
                 new CompiledToolCatalog(List.of(
-                        new ToolCatalogEntry("tool-filesystem", "Filesystem", "DIRECT", List.of("read_file", "list_directory", "search_text", "write_file", "delete_file"), "schema://tool-filesystem", ""),
-                        new ToolCatalogEntry("tool-shell", "Shell", "DIRECT", List.of("run_command"), "schema://tool-shell", "")
+                        new ToolCatalogEntry("tool-filesystem", "Filesystem", "DIRECT", filesystemOperations(), "schema://tool-filesystem", ""),
+                        new ToolCatalogEntry("tool-shell", "Shell", "DIRECT", List.of("run_command", "run_exploration_command"), "schema://tool-shell", "")
                 )),
                 List.of("rt-java-21", "rt-git"),
                 Map.of("MARKER_FILE", "src/test/java/.agentx-task-test.txt", "ATTEMPT_NUMBER", "1"),
                 Map.of("git-commit-delivery", List.of("sh", "-lc", "git add -A && git commit -m test")),
+                explorationCommands(),
                 Map.of(),
                 List.of(new ToolCall("tool-shell", "run_command", Map.of("commandId", "git-commit-delivery"), "commit task changes")),
                 List.of(),
@@ -328,6 +337,112 @@ class ToolExecutorTests {
         assertThat(outcome.payload().json()).contains("src/main/java");
     }
 
+    @Test
+    void shouldReadStructuredLineRange() throws IOException {
+        AgentRuntime agentRuntime = mock(AgentRuntime.class);
+        ObjectMapper objectMapper = new ObjectMapper();
+        ToolExecutor toolExecutor = new ToolExecutor(
+                agentRuntime,
+                new ProcessCommandRunner(),
+                new ToolRegistry(),
+                new ToolCallNormalizer(objectMapper),
+                objectMapper
+        );
+        Path workspaceRoot = Files.createTempDirectory("tool-executor-read-range");
+        Files.createDirectories(workspaceRoot.resolve("src/main/java"));
+        Files.writeString(
+                workspaceRoot.resolve("src/main/java/App.java"),
+                "line1%nline2%nline3%nline4".formatted()
+        );
+
+        ToolExecutor.ToolExecutionOutcome outcome = toolExecutor.executeForRun(
+                task(),
+                run(),
+                agentInstance(),
+                workspace(workspaceRoot),
+                contract(Map.of(), Map.of()),
+                new ToolCall(
+                        "tool-filesystem",
+                        "read_range",
+                        Map.of("path", "src/main/java/App.java", "startLine", 2, "endLine", 3),
+                        "read range"
+                )
+        );
+
+        assertThat(outcome.succeeded()).isTrue();
+        assertThat(outcome.payload().json()).contains("2: line2");
+        assertThat(outcome.payload().json()).contains("3: line3");
+    }
+
+    @Test
+    void shouldRunExplorationCommandUsingStructuredArguments() throws IOException {
+        AgentRuntime agentRuntime = mock(AgentRuntime.class);
+        when(agentRuntime.executeInRunningContainer(any(), any())).thenReturn(new EphemeralExecutionResult(
+                0,
+                "src/main/java/App.java:1 class App {}",
+                "",
+                false,
+                Duration.ofSeconds(1)
+        ));
+        ObjectMapper objectMapper = new ObjectMapper();
+        ToolExecutor toolExecutor = new ToolExecutor(
+                agentRuntime,
+                new ProcessCommandRunner(),
+                new ToolRegistry(),
+                new ToolCallNormalizer(objectMapper),
+                objectMapper
+        );
+        Path workspaceRoot = Files.createTempDirectory("tool-executor-explore-ok");
+
+        ToolExecutor.ToolExecutionOutcome outcome = toolExecutor.executeForRun(
+                task(),
+                run(),
+                agentInstance(),
+                workspace(workspaceRoot),
+                contract(Map.of("python-version", List.of("sh", "-lc", "python --version")), Map.of()),
+                new ToolCall(
+                        "tool-shell",
+                        "run_exploration_command",
+                        Map.of("commandId", "grep-text", "query", "App", "path", "src/main/java"),
+                        "grep app"
+                )
+        );
+
+        assertThat(outcome.succeeded()).isTrue();
+        assertThat(outcome.payload().json()).contains("\"commandId\":\"grep-text\"");
+        assertThat(outcome.payload().json()).contains("\"argv\"");
+    }
+
+    @Test
+    void shouldRejectExplorationCommandWithUnknownArgument() throws IOException {
+        AgentRuntime agentRuntime = mock(AgentRuntime.class);
+        ObjectMapper objectMapper = new ObjectMapper();
+        ToolExecutor toolExecutor = new ToolExecutor(
+                agentRuntime,
+                new ProcessCommandRunner(),
+                new ToolRegistry(),
+                new ToolCallNormalizer(objectMapper),
+                objectMapper
+        );
+        Path workspaceRoot = Files.createTempDirectory("tool-executor-explore-invalid");
+
+        assertThatThrownBy(() -> toolExecutor.executeForRun(
+                task(),
+                run(),
+                agentInstance(),
+                workspace(workspaceRoot),
+                contract(Map.of(), Map.of()),
+                new ToolCall(
+                        "tool-shell",
+                        "run_exploration_command",
+                        Map.of("commandId", "grep-text", "query", "App", "path", "src/main/java", "shell", "rm -rf /"),
+                        "invalid grep app"
+                )
+        )).isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("not allowed for exploration command");
+        verifyNoInteractions(agentRuntime);
+    }
+
     private TaskExecutionContract contract(
             Map<String, List<String>> allowedCommands,
             Map<String, HttpEndpointSpec> endpoints
@@ -338,21 +453,71 @@ class ToolExecutorTests {
                 List.of("sh", "-lc", "sleep 1"),
                 Map.of("TASK_ID", "task-1"),
                 20,
+                "LINUX_CONTAINER",
+                "POSIX_SH",
+                "/workspace",
+                "/workspace",
+                List.of(".", "src/main/java"),
+                "BROAD_WORKSPACE",
                 new CompiledToolCatalog(List.of(
-                        new ToolCatalogEntry("tool-filesystem", "Filesystem", "DIRECT", List.of("read_file", "list_directory", "search_text", "write_file", "delete_file"), "schema://tool-filesystem", ""),
-                        new ToolCatalogEntry("tool-shell", "Shell", "DIRECT", List.of("run_command"), "schema://tool-shell", ""),
+                        new ToolCatalogEntry("tool-filesystem", "Filesystem", "DIRECT", filesystemOperations(), "schema://tool-filesystem", ""),
+                        new ToolCatalogEntry("tool-shell", "Shell", "DIRECT", List.of("run_command", "run_exploration_command"), "schema://tool-shell", ""),
                         new ToolCatalogEntry("tool-git", "Git", "DIRECT", List.of("git_status", "git_diff_stat", "git_head"), "schema://tool-git", ""),
                         new ToolCatalogEntry("tool-http-client", "HTTP Client", "DIRECT", List.of("http_request"), "schema://tool-http-client", "")
                 )),
                 List.of("rt-java-21", "rt-git"),
                 Map.of("MARKER_FILE", "src/main/java/.agentx-task-1.txt", "ATTEMPT_NUMBER", "1"),
                 allowedCommands,
+                explorationCommands(),
                 endpoints,
                 List.of(),
                 List.of(),
                 List.of("src/main/java"),
                 "src/main/java/.agentx-task-1.txt"
         );
+    }
+
+    private List<String> filesystemOperations() {
+        return List.of(
+                "read_file",
+                "read_range",
+                "head_file",
+                "tail_file",
+                "list_directory",
+                "glob_files",
+                "grep_text",
+                "write_file",
+                "delete_file"
+        );
+    }
+
+    private Map<String, ExplorationCommandSpec> explorationCommands() {
+        Map<String, ExplorationCommandSpec> commands = new LinkedHashMap<>();
+        commands.put("grep-text", new ExplorationCommandSpec(
+                "grep-text",
+                List.of("grep", "-R", "-n", "--binary-files=without-match", "--color=never", "${query}", "${path}"),
+                List.of("query", "path"),
+                "Readonly recursive grep inside the workspace."
+        ));
+        commands.put("read-range", new ExplorationCommandSpec(
+                "read-range",
+                List.of("sed", "-n", "${startLine},${endLine}p", "${path}"),
+                List.of("startLine", "endLine", "path"),
+                "Readonly line-range read for a file."
+        ));
+        commands.put("head-file", new ExplorationCommandSpec(
+                "head-file",
+                List.of("head", "-n", "${lineCount}", "${path}"),
+                List.of("lineCount", "path"),
+                "Readonly head read for a file."
+        ));
+        commands.put("tail-file", new ExplorationCommandSpec(
+                "tail-file",
+                List.of("tail", "-n", "${lineCount}", "${path}"),
+                List.of("lineCount", "path"),
+                "Readonly tail read for a file."
+        ));
+        return Map.copyOf(commands);
     }
 
     private WorkTask task() {

@@ -60,6 +60,19 @@ class ToolCallNormalizerTests {
     }
 
     @Test
+    void shouldNormalizeSearchTextAliasToGrepText() {
+        ToolCall normalized = normalizer.normalize("run-1", new ToolCall(
+                "tool-filesystem",
+                "search_text",
+                Map.of("query", "StudentService"),
+                "search student service"
+        ));
+
+        assertThat(normalized.operation()).isEqualTo("grep_text");
+        assertThat(normalized.arguments()).containsEntry("query", "StudentService");
+    }
+
+    @Test
     void shouldFailFastOnMissingRunId() {
         assertThatThrownBy(() -> normalizer.normalize(null, new ToolCall(
                 "tool-git",

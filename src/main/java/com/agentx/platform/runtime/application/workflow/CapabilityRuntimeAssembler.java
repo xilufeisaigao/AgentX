@@ -8,6 +8,7 @@ import com.agentx.platform.domain.planning.model.TaskCapabilityRequirement;
 import com.agentx.platform.runtime.application.workflow.profile.ActiveStackProfileSnapshot;
 import com.agentx.platform.runtime.application.workflow.profile.StackProfileManifest;
 import com.agentx.platform.runtime.tooling.CompiledToolCatalog;
+import com.agentx.platform.runtime.tooling.ExplorationCommandSpec;
 import com.agentx.platform.runtime.tooling.HttpEndpointSpec;
 import org.springframework.stereotype.Component;
 
@@ -78,6 +79,7 @@ public class CapabilityRuntimeAssembler {
                 toolCatalog,
                 baseToolEnvironment(capabilityPackIds, runtimePackIds, toolCatalog, runtimeSpecs),
                 allowedCommandCatalog(runtimeSpecs, toolCatalog),
+                explorationCommandCatalog(runtimeSpecs, toolCatalog),
                 httpEndpointCatalog(runtimeSpecs, toolCatalog),
                 primaryRuntime.postDeliveryCommandIds(),
                 primaryRuntime.verifyCommandIds(),
@@ -117,6 +119,19 @@ public class CapabilityRuntimeAssembler {
         }
         runtimeSpecs.values().forEach(runtime -> runtime.allowedCommands().forEach(commands::putIfAbsent));
         return commands;
+    }
+
+    private Map<String, ExplorationCommandSpec> explorationCommandCatalog(
+            Map<String, StackProfileManifest.CapabilityRuntimeSpec> runtimeSpecs,
+            CompiledToolCatalog toolCatalog
+    ) {
+        if (toolCatalog.find("tool-shell").isEmpty()) {
+            return Map.of();
+        }
+        Map<String, ExplorationCommandSpec> commands = new LinkedHashMap<>();
+        runtimeSpecs.values().forEach(runtime -> runtime.explorationCommands().forEach(command ->
+                commands.putIfAbsent(command.commandId(), command)));
+        return Map.copyOf(commands);
     }
 
     private Map<String, HttpEndpointSpec> httpEndpointCatalog(

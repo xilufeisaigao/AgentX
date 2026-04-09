@@ -45,6 +45,7 @@ class CapabilityRuntimeAssemblerTests {
                 .extracting(entry -> entry.toolId())
                 .containsExactlyInAnyOrder("tool-filesystem", "tool-git", "tool-shell", "tool-http-client");
         assertThat(assembly.allowedCommandCatalog()).containsKeys("git-commit-delivery", "maven-test", "python-version");
+        assertThat(assembly.explorationCommandCatalog()).containsKeys("grep-text", "read-range", "head-file", "tail-file");
         assertThat(assembly.httpEndpointCatalog()).containsKey("local-http");
         assertThat(assembly.toolEnvironment())
                 .containsEntry("AGENTX_CAPABILITY_PACKS", "cap-java-backend-coding,cap-api-test")

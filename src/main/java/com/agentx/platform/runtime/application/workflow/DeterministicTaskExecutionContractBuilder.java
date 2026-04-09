@@ -11,6 +11,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Component;
 
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Pattern;
@@ -19,6 +20,10 @@ import java.util.regex.Pattern;
 public class DeterministicTaskExecutionContractBuilder implements TaskExecutionContractBuilder {
 
     private static final Pattern NON_PORTABLE_SEGMENT = Pattern.compile("[^a-zA-Z0-9._/-]");
+    private static final String LINUX_CONTAINER = "LINUX_CONTAINER";
+    private static final String POSIX_SH = "POSIX_SH";
+    private static final String WORKSPACE_ROOT = "/workspace";
+    private static final String BROAD_WORKSPACE = "BROAD_WORKSPACE";
 
     private final WorkflowScenarioResolver workflowScenarioResolver;
     private final CapabilityRuntimeAssembler capabilityRuntimeAssembler;
@@ -58,17 +63,24 @@ public class DeterministicTaskExecutionContractBuilder implements TaskExecutionC
         environment.put("REQUIRES_HUMAN_CLARIFICATION", Boolean.toString(scenario.requireHumanClarification()));
         Map<String, String> toolEnvironment = new LinkedHashMap<>(assembly.toolEnvironment());
         toolEnvironment.putAll(environment);
-        toolEnvironment.put("WORKSPACE_ROOT", "/workspace");
+        toolEnvironment.put("WORKSPACE_ROOT", WORKSPACE_ROOT);
         return new TaskExecutionContract(
                 assembly.image(),
-                "/workspace",
+                WORKSPACE_ROOT,
                 List.of("sh", "-lc", "trap exit TERM INT; while true; do sleep 1; done"),
                 environment,
                 50,
+                LINUX_CONTAINER,
+                POSIX_SH,
+                WORKSPACE_ROOT,
+                WORKSPACE_ROOT,
+                explorationRoots(task),
+                BROAD_WORKSPACE,
                 assembly.toolCatalog(),
                 assembly.runtimePacks(),
                 toolEnvironment,
                 assembly.allowedCommandCatalog(),
+                assembly.explorationCommandCatalog(),
                 assembly.httpEndpointCatalog(),
                 postDeliveryToolCalls(assembly),
                 verifyToolCalls(assembly),
@@ -128,6 +140,16 @@ public class DeterministicTaskExecutionContractBuilder implements TaskExecutionC
             ));
         }
         return List.copyOf(toolCalls);
+    }
+
+    private List<String> explorationRoots(WorkTask task) {
+        LinkedHashSet<String> roots = new LinkedHashSet<>();
+        roots.add(".");
+        task.writeScopes().stream()
+                .map(WriteScope::path)
+                .map(path -> path.replace('\\', '/'))
+                .forEach(roots::add);
+        return List.copyOf(roots);
     }
 
     private String sanitizeSegment(String rawValue) {

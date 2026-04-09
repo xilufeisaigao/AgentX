@@ -13,17 +13,27 @@ public class ToolRegistry {
             new ToolRegistration(
                     "tool-filesystem",
                     "Filesystem",
-                    List.of("read_file", "list_directory", "search_text", "write_file", "delete_file"),
+                    List.of(
+                            "read_file",
+                            "read_range",
+                            "head_file",
+                            "tail_file",
+                            "list_directory",
+                            "glob_files",
+                            "grep_text",
+                            "write_file",
+                            "delete_file"
+                    ),
                     "schema://tool-filesystem",
-                    "Read and modify files inside the assigned workspace and write scopes."
+                    "Read broadly inside the assigned workspace, explore with structured Unix-style primitives, and only write inside task write scopes."
             ),
             "tool-shell",
             new ToolRegistration(
                     "tool-shell",
                     "Shell",
-                    List.of("run_command"),
+                    List.of("run_command", "run_exploration_command"),
                     "schema://tool-shell",
-                    "Run only allowlisted commandIds from the execution contract."
+                    "Run either execution commandIds or readonly exploration commandIds from the execution contract."
             ),
             "tool-git",
             new ToolRegistration(

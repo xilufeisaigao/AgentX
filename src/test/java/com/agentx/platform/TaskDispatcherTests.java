@@ -39,6 +39,7 @@ import com.agentx.platform.runtime.context.FactBundle;
 import com.agentx.platform.runtime.context.RetrievalBundle;
 import com.agentx.platform.runtime.support.RuntimeInfrastructureProperties;
 import com.agentx.platform.runtime.tooling.CompiledToolCatalog;
+import com.agentx.platform.runtime.tooling.ExplorationCommandSpec;
 import com.agentx.platform.runtime.tooling.ToolCall;
 import com.agentx.platform.runtime.tooling.ToolCatalogEntry;
 import com.agentx.platform.runtime.workspace.WorkspaceProvisioner;
@@ -52,6 +53,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -110,13 +112,20 @@ class TaskDispatcherTests {
                 List.of("sh", "-lc", "trap exit TERM INT; while true; do sleep 1; done"),
                 Map.of("TASK_ID", task.taskId()),
                 30,
+                "LINUX_CONTAINER",
+                "POSIX_SH",
+                "/workspace",
+                "/workspace",
+                List.of(".", "src/main/java"),
+                "BROAD_WORKSPACE",
                 new CompiledToolCatalog(List.of(
-                        new ToolCatalogEntry("tool-filesystem", "Filesystem", "DIRECT", List.of("read_file", "list_directory", "write_file"), "schema://tool-filesystem", ""),
-                        new ToolCatalogEntry("tool-shell", "Shell", "DIRECT", List.of("run_command"), "schema://tool-shell", "")
+                        new ToolCatalogEntry("tool-filesystem", "Filesystem", "DIRECT", filesystemOperations(), "schema://tool-filesystem", ""),
+                        new ToolCatalogEntry("tool-shell", "Shell", "DIRECT", List.of("run_command", "run_exploration_command"), "schema://tool-shell", "")
                 )),
                 List.of("rt-java-21", "rt-maven-3", "rt-git"),
                 Map.of("TASK_ID", task.taskId()),
                 Map.of("git-commit-delivery", List.of("sh", "-lc", "git add -A && git commit -m test")),
+                explorationCommands(),
                 Map.of(),
                 List.of(new ToolCall("tool-shell", "run_command", Map.of("commandId", "git-commit-delivery"), "commit task changes")),
                 List.of(new ToolCall("tool-shell", "run_command", Map.of("commandId", "git-commit-delivery"), "commit task changes")),
@@ -424,13 +433,20 @@ class TaskDispatcherTests {
                 List.of("sh", "-lc", "trap exit TERM INT; while true; do sleep 1; done"),
                 Map.of("TASK_ID", task.taskId()),
                 30,
+                "LINUX_CONTAINER",
+                "POSIX_SH",
+                "/workspace",
+                "/workspace",
+                List.of(".", "src/main/java"),
+                "BROAD_WORKSPACE",
                 new CompiledToolCatalog(List.of(
-                        new ToolCatalogEntry("tool-filesystem", "Filesystem", "DIRECT", List.of("read_file", "list_directory", "write_file"), "schema://tool-filesystem", ""),
-                        new ToolCatalogEntry("tool-shell", "Shell", "DIRECT", List.of("run_command"), "schema://tool-shell", "")
+                        new ToolCatalogEntry("tool-filesystem", "Filesystem", "DIRECT", filesystemOperations(), "schema://tool-filesystem", ""),
+                        new ToolCatalogEntry("tool-shell", "Shell", "DIRECT", List.of("run_command", "run_exploration_command"), "schema://tool-shell", "")
                 )),
                 List.of("rt-java-21", "rt-maven-3", "rt-git"),
                 Map.of("TASK_ID", task.taskId()),
                 Map.of("git-commit-delivery", List.of("sh", "-lc", "git add -A && git commit -m test")),
+                explorationCommands(),
                 Map.of(),
                 List.of(new ToolCall("tool-shell", "run_command", Map.of("commandId", "git-commit-delivery"), "commit task changes")),
                 List.of(new ToolCall("tool-shell", "run_command", Map.of("commandId", "git-commit-delivery"), "commit task changes")),
@@ -565,13 +581,20 @@ class TaskDispatcherTests {
                 List.of("sh", "-lc", "trap exit TERM INT; while true; do sleep 1; done"),
                 Map.of("TASK_ID", task.taskId()),
                 30,
+                "LINUX_CONTAINER",
+                "POSIX_SH",
+                "/workspace",
+                "/workspace",
+                List.of(".", "src/test/java"),
+                "BROAD_WORKSPACE",
                 new CompiledToolCatalog(List.of(
-                        new ToolCatalogEntry("tool-filesystem", "Filesystem", "DIRECT", List.of("read_file", "list_directory", "write_file"), "schema://tool-filesystem", ""),
-                        new ToolCatalogEntry("tool-shell", "Shell", "DIRECT", List.of("run_command"), "schema://tool-shell", "")
+                        new ToolCatalogEntry("tool-filesystem", "Filesystem", "DIRECT", filesystemOperations(), "schema://tool-filesystem", ""),
+                        new ToolCatalogEntry("tool-shell", "Shell", "DIRECT", List.of("run_command", "run_exploration_command"), "schema://tool-shell", "")
                 )),
                 List.of("rt-java-21", "rt-maven-3", "rt-git"),
                 Map.of("TASK_ID", task.taskId()),
                 Map.of("git-commit-delivery", List.of("sh", "-lc", "git add -A && git commit -m test")),
+                explorationCommands(),
                 Map.of(),
                 List.of(new ToolCall("tool-shell", "run_command", Map.of("commandId", "git-commit-delivery"), "commit task changes")),
                 List.of(new ToolCall("tool-shell", "run_command", Map.of("commandId", "git-commit-delivery"), "commit task changes")),
@@ -670,5 +693,20 @@ class TaskDispatcherTests {
         } catch (IOException exception) {
             throw new IllegalStateException("failed to create git worktree fixture", exception);
         }
+    }
+
+    private List<String> filesystemOperations() {
+        return List.of("read_file", "read_range", "head_file", "tail_file", "list_directory", "glob_files", "grep_text", "write_file", "delete_file");
+    }
+
+    private Map<String, ExplorationCommandSpec> explorationCommands() {
+        Map<String, ExplorationCommandSpec> commands = new LinkedHashMap<>();
+        commands.put("grep-text", new ExplorationCommandSpec(
+                "grep-text",
+                List.of("grep", "-R", "-n", "--binary-files=without-match", "--color=never", "${query}", "${path}"),
+                List.of("query", "path"),
+                "Readonly recursive grep inside the workspace."
+        ));
+        return Map.copyOf(commands);
     }
 }

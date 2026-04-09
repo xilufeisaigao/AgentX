@@ -713,7 +713,7 @@ class DeepSeekRealWorkflowRuntimeIT {
                         return NodeSelection.useReal(realDecision, "real coding turn chose a safe directory listing");
                     }
                 }
-                if ("search_text".equals(toolCall.operation())) {
+                if ("grep_text".equals(toolCall.operation())) {
                     String query = String.valueOf(toolCall.arguments().getOrDefault("query", ""));
                     if (!query.isBlank()) {
                         return NodeSelection.useReal(realDecision, "real coding turn chose a safe search step");
@@ -836,18 +836,33 @@ class DeepSeekRealWorkflowRuntimeIT {
         facts.put("requirementSlice", Map.of("summary", requirementContent));
         facts.put("upstreamDeliveries", List.of());
         facts.put("openBlockers", List.of());
+        facts.put("runtimePlatform", "LINUX_CONTAINER");
+        facts.put("shellFamily", "POSIX_SH");
+        facts.put("workspaceRoot", "/workspace");
+        facts.put("repoRoot", "/workspace");
+        facts.put("explorationRoots", List.of(".", "src/main/java", "src/test/java"));
+        facts.put("workspaceReadPolicy", "BROAD_WORKSPACE");
         facts.put("runtimeGuardrails", Map.ofEntries(
+                Map.entry("runtimePlatform", "LINUX_CONTAINER"),
+                Map.entry("shellFamily", "POSIX_SH"),
+                Map.entry("workspaceRoot", "/workspace"),
+                Map.entry("repoRoot", "/workspace"),
+                Map.entry("explorationRoots", List.of(".", "src/main/java", "src/test/java")),
+                Map.entry("workspaceReadPolicy", "BROAD_WORKSPACE"),
                 Map.entry("toolCatalog", List.of(
-                        new ToolCatalogEntry("tool-filesystem", "Filesystem", "DIRECT", List.of("read_file", "list_directory", "search_text", "write_file", "delete_file"), "schema://tool-filesystem", ""),
-                        new ToolCatalogEntry("tool-shell", "Shell", "DIRECT", List.of("run_command"), "schema://tool-shell", ""),
+                        new ToolCatalogEntry("tool-filesystem", "Filesystem", "DIRECT", List.of("read_file", "read_range", "head_file", "tail_file", "list_directory", "glob_files", "grep_text", "write_file", "delete_file"), "schema://tool-filesystem", ""),
+                        new ToolCatalogEntry("tool-shell", "Shell", "DIRECT", List.of("run_command", "run_exploration_command"), "schema://tool-shell", ""),
                         new ToolCatalogEntry("tool-git", "Git", "DIRECT", List.of("git_status", "git_diff_stat", "git_head"), "schema://tool-git", "")
                 )),
                 Map.entry("allowedCommandCatalog", Map.ofEntries(
                         Map.entry("show-marker", List.of("sh", "-lc", "test -f \"$MARKER_FILE\" && cat \"$MARKER_FILE\" || true")),
                         Map.entry("git-commit-delivery", List.of("sh", "-lc", "git add -A && git commit -m smoke"))
                 )),
-                Map.entry("writeScopes", writeScopes),
-                Map.entry("repoRoot", "/workspace")
+                Map.entry("explorationCommandCatalog", Map.ofEntries(
+                        Map.entry("grep-text", Map.of("description", "Readonly recursive grep inside the workspace.")),
+                        Map.entry("read-range", Map.of("description", "Readonly line-range read for a file."))
+                )),
+                Map.entry("writeScopes", writeScopes)
         ));
         facts.put("latestRunFacts", Map.ofEntries(
                 Map.entry("runId", "run-" + taskId),
@@ -859,26 +874,7 @@ class DeepSeekRealWorkflowRuntimeIT {
                 ContextScope.task("workflow-real-smoke-1", taskId, "run-" + taskId, "coding", null),
                 "REAL_SMOKE_CODING",
                 facts,
-                List.of(
-                        snippet(
-                                "code-1",
-                                "repo-code",
-                                "src/main/java/com/example/student/Student.java",
-                                "student record placeholder",
-                                "Student.java should define the basic student shape and validation entry point.",
-                                0.91,
-                                List.of("Student", "validate")
-                        ),
-                        snippet(
-                                "code-2",
-                                "repo-code",
-                                "src/test/java/com/example/student/StudentServiceTest.java",
-                                "student tests placeholder",
-                                "Regression tests should cover create, update, delete and invalid email.",
-                                0.84,
-                                List.of("StudentServiceTest", "shouldRejectInvalidEmail")
-                        )
-                )
+                List.of()
         );
     }
 

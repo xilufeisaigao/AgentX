@@ -35,6 +35,12 @@
 
 LangGraph 仍然只推进顶层 reconciliation，不承载底层运行真相。
 
+说明：
+
+1. 这是当前代码实现链路。
+2. 目标设计已经调整为在 `merge-gate` 和 `verify` 之间补一个模块集成测试闸门，verify agent 只在模块级集成测试之后启动。
+3. 因为该调整尚未落代码，所以本评估仍按当前实现判断 runtime 底座是否稳定。
+
 ### 2.3 L1-L5 真相
 
 当前没有新增主表，也没有让运行时绕开真相层：
@@ -79,8 +85,8 @@ LangGraph 仍然只推进顶层 reconciliation，不承载底层运行真相。
 
 这些内容现在仍然重要，但已经从“主链必须补齐”转成“效果升级项”：
 
-1. embeddings / vector recall
-2. rerank 与更细粒度 chunk 策略
+1. coding 阶段从代码 RAG 迁移到 Unix 探索式代码阅读
+2. 读宽写窄的权限隔离与越权 blocker 升级链路
 3. judge-based / benchmark / online eval
 4. prompt 管理与版本治理
 5. architect 更高质量 DAG 与 replan
