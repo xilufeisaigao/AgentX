@@ -32,3 +32,42 @@ build/
 
 ### VS Code ###
 .vscode/
+__pycache__/
+*.pyc
+
+# local docker runtime artifacts
+.env.docker
+.env.docker.*
+!.env.docker.example
+runtime-projects/
+runtime-data/
+agentx-repo/
+frontend-demo/node_modules/
+frontend-demo/dist/
+frontend-demo/.vite/
+.uv-cache/
+
+# local runtime and agent artifacts
+/.agentx/
+.codex-*.log
+.codex-*.out
+.codex-*.err
+
+# local env files (keep template/examples tracked)
+.env
+.env.local
+.env.*.local
+.envrc
+.direnv/
+
+# root-level personal/binary files
+/*.pdf
+.omx/
+.codex/*
+!.codex/agents/
+!.codex/agents/**
+!.codex/skills/
+!.codex/skills/**
+.codex/skills/.system/**
+!.codex/prompts/
+!.codex/prompts/**
